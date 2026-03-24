@@ -436,9 +436,23 @@ function colLetter(col) {
 }
 
 function getCellText(cell) {
-  if (!cell) return "";
-  const v = cell.text || (cell.value && typeof cell.value === "object" ? cell.value.result || "" : cell.value);
-  return typeof v === "string" ? v.trim() : v ? String(v).trim() : "";
+  if (!cell || cell.value === null || cell.value === undefined) return "";
+  try {
+    // richText format (styled text)
+    if (cell.value && cell.value.richText) {
+      return cell.value.richText.map(r => r.text || "").join("").trim();
+    }
+    // formula result
+    if (cell.value && typeof cell.value === "object" && cell.value.result !== undefined) {
+      return cell.value.result != null ? String(cell.value.result).trim() : "";
+    }
+    // text property (most common)
+    if (cell.text) return String(cell.text).trim();
+    // direct value
+    return cell.value != null ? String(cell.value).trim() : "";
+  } catch {
+    return "";
+  }
 }
 
 function encName(s) {
