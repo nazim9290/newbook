@@ -59,25 +59,30 @@ router.post("/upload-template", upload.single("file"), async (req, res) => {
     await workbook.xlsx.readFile(req.file.path);
 
     const placeholders = []; // শুধু {{...}} আছে এমন cells
+    const seen = new Set();  // duplicate detect (merged cells একই data repeat করে)
     workbook.eachSheet((sheet) => {
       sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
         row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
           const value = getCellText(cell);
-          // {{...}} pattern খুঁজো — একটি cell-এ একাধিক {{}} থাকতে পারে
           const matches = value.match(/\{\{([^}]+)\}\}/g);
           if (matches) {
             matches.forEach(match => {
               const key = match.replace(/\{\{|\}\}/g, "").trim();
+              // Merged cell duplicate skip: sheet+row+key combination একবারই রাখো
+              const uniqueKey = `${sheet.name}::${rowNumber}::${key}`;
+              if (seen.has(uniqueKey)) return;
+              seen.add(uniqueKey);
+
               placeholders.push({
                 sheet: sheet.name,
                 cell: `${colLetter(colNumber)}${rowNumber}`,
                 row: rowNumber,
                 col: colNumber,
-                placeholder: match,     // {{name_en}}
-                key,                     // name_en
-                label: key,              // mapping UI-তে দেখাবে
-                field: key,              // auto-map: key নিজেই field name
-                fullCellValue: value,    // পুরো cell content (অন্য text-ও থাকতে পারে)
+                placeholder: match,
+                key,
+                label: key,
+                field: key,
+                fullCellValue: value,
               });
             });
           }
