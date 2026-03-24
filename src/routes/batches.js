@@ -33,9 +33,15 @@ router.get("/:id", async (req, res) => {
   res.json({ ...batch, enrollments: enrollments || [] });
 });
 
-// POST /api/batches
+// POST /api/batches — নতুন ব্যাচ তৈরি
+// agency_id JWT থেকে auto-set, branch frontend থেকে আসে
 router.post("/", async (req, res) => {
-  const { data, error } = await supabase.from("batches").insert(req.body).select().single();
+  const record = {
+    ...req.body,
+    agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001",
+    branch: req.body.branch || req.user.branch || "Main",
+  };
+  const { data, error } = await supabase.from("batches").insert(record).select().single();
   if (error) return res.status(400).json({ error: error.message });
   res.status(201).json(data);
 });
