@@ -185,17 +185,14 @@ router.post("/generate", async (req, res) => {
       .in("id", student_ids);
     if (sErr) return res.status(500).json({ error: sErr.message });
 
-    const templatePath = tmpl.template_url;
-
-    // No physical template → CSV fallback
-    if (!templatePath || !fs.existsSync(templatePath)) {
+    // Template file: Supabase storage থেকে download
+    const templateBuffer = await getTemplateBuffer(tmpl.template_url);
+    if (!templateBuffer) {
       return generateCSV(res, tmpl, students);
     }
 
     if (students.length === 1) {
-      // Single student: read template → fill ALL sheets → send
-      // This preserves the EXACT original format with all sheets intact
-      const buffer = await fillSingleStudent(templatePath, tmpl.mappings, students[0]);
+      const buffer = await fillSingleStudentFromBuffer(templateBuffer, tmpl.mappings, students[0]);
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.setHeader("Content-Disposition", `attachment; filename="${encName(tmpl.school_name)}_${encName(students[0].name_en || students[0].id)}.xlsx"`);
       res.send(buffer);
@@ -204,7 +201,7 @@ router.post("/generate", async (req, res) => {
       // Output: one .xlsx per student, but we pack them as separate files
       // For simplicity: generate first student as primary download
       // Better approach: generate each separately with fillSingleStudent
-      const buffer = await fillSingleStudent(templatePath, tmpl.mappings, students[0]);
+      const buffer = await fillSingleStudentFromBuffer(templateBuffer, tmpl.mappings, students[0]);
 
       // For bulk: return a zip or let frontend call one-by-one
       // Here we return first student + metadata for others
@@ -239,11 +236,13 @@ router.post("/generate-single", async (req, res) => {
       .single();
     if (!student) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
 
-    if (!tmpl.template_url || !fs.existsSync(tmpl.template_url)) {
+    // Template file: Supabase storage থেকে download, অথবা local path
+    const templateBuffer = await getTemplateBuffer(tmpl.template_url);
+    if (!templateBuffer) {
       return generateCSV(res, tmpl, [student]);
     }
 
-    const buffer = await fillSingleStudent(tmpl.template_url, tmpl.mappings, student);
+    const buffer = await fillSingleStudentFromBuffer(templateBuffer, tmpl.mappings, student);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="${encName(tmpl.school_name)}_${encName(student.name_en || student.id)}.xlsx"`);
     res.send(buffer);
@@ -263,12 +262,13 @@ router.post("/re-parse/:id", async (req, res) => {
       .eq("id", req.params.id)
       .single();
     if (error) return res.status(404).json({ error: "Template পাওয়া যায়নি" });
-    if (!tmpl.template_url || !fs.existsSync(tmpl.template_url)) {
+    const templateBuffer = await getTemplateBuffer(tmpl.template_url);
+    if (!templateBuffer) {
       return res.status(400).json({ error: "Template ফাইল পাওয়া যায়নি" });
     }
 
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(tmpl.template_url);
+    await workbook.xlsx.load(templateBuffer);
 
     const allCells = [];
     workbook.eachSheet((sheet) => {
@@ -313,6 +313,97 @@ router.get("/system-fields", (req, res) => res.json(SYSTEM_FIELDS));
 // ================================================================
 // HELPERS
 // ================================================================
+
+// Template file আনো — Supabase storage থেকে download অথবা local path থেকে read
+async function getTemplateBuffer(templateUrl) {
+  if (!templateUrl) return null;
+
+  // Local file path হলে সরাসরি read
+  if (fs.existsSync(templateUrl)) {
+    return fs.readFileSync(templateUrl);
+  }
+
+  // Supabase Storage path হলে download
+  try {
+    const { data, error } = await supabase.storage.from("templates").download(templateUrl);
+    if (error || !data) { console.error("Storage download error:", error?.message); return null; }
+    // data is a Blob → convert to Buffer
+    const arrayBuffer = await data.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  } catch (err) {
+    console.error("Template download failed:", err.message);
+    return null;
+  }
+}
+
+// Buffer থেকে template পড়ে student data fill করে return
+async function fillSingleStudentFromBuffer(templateBuffer, mappings, student) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(templateBuffer);
+
+  // Flatten student data for mapping
+  const flat = flattenStudent(student);
+
+  // প্রতিটি mapping-এ data বসাও
+  for (const m of mappings) {
+    if (!m.field || !m.cell) continue;
+    const value = flat[m.field] || "";
+    const targetCell = m.targetCell || m.cell;
+
+    // Sheet name থাকলে সেই sheet-এ বসাও, না হলে সব sheet-এ try
+    if (m.sheet) {
+      const sheet = workbook.getWorksheet(m.sheet);
+      if (sheet) sheet.getCell(targetCell).value = value;
+    } else {
+      // প্রথম sheet-এ বসাও
+      const sheet = workbook.worksheets[0];
+      if (sheet) sheet.getCell(targetCell).value = value;
+    }
+  }
+
+  return await workbook.xlsx.writeBuffer();
+}
+
+// Student object-কে flat key-value-তে convert (nested education, sponsor etc.)
+function flattenStudent(student) {
+  const flat = { ...student };
+
+  // Education: SSC, HSC, Honours
+  const edu = student.student_education || student.education || [];
+  const ssc = edu.find(e => (e.level || "").toLowerCase().includes("ssc")) || {};
+  const hsc = edu.find(e => (e.level || "").toLowerCase().includes("hsc")) || {};
+  const honours = edu.find(e => (e.level || "").toLowerCase().includes("hon") || (e.level || "").toLowerCase().includes("bach")) || {};
+  flat.edu_ssc_school = ssc.school_name || ""; flat.edu_ssc_year = ssc.year || ""; flat.edu_ssc_board = ssc.board || ""; flat.edu_ssc_gpa = ssc.gpa || ""; flat.edu_ssc_subject = ssc.subject_group || "";
+  flat.edu_hsc_school = hsc.school_name || ""; flat.edu_hsc_year = hsc.year || ""; flat.edu_hsc_board = hsc.board || ""; flat.edu_hsc_gpa = hsc.gpa || ""; flat.edu_hsc_subject = hsc.subject_group || "";
+  flat.edu_honours_school = honours.school_name || ""; flat.edu_honours_year = honours.year || ""; flat.edu_honours_gpa = honours.gpa || ""; flat.edu_honours_subject = honours.subject_group || "";
+
+  // JP Exams
+  const jp = (student.student_jp_exams || [])[0] || {};
+  flat.jp_exam_type = jp.exam_type || ""; flat.jp_level = jp.level || ""; flat.jp_score = jp.score || ""; flat.jp_result = jp.result || ""; flat.jp_exam_date = jp.exam_date || "";
+
+  // Sponsor
+  const sp = (student.sponsors || [])[0] || student.sponsor || {};
+  flat.sponsor_name = sp.name || ""; flat.sponsor_name_en = sp.name_en || sp.name || "";
+  flat.sponsor_relationship = sp.relationship || ""; flat.sponsor_phone = sp.phone || "";
+  flat.sponsor_address = sp.address || ""; flat.sponsor_company = sp.company_name || "";
+  flat.sponsor_income_y1 = sp.annual_income_y1 || ""; flat.sponsor_income_y2 = sp.annual_income_y2 || ""; flat.sponsor_income_y3 = sp.annual_income_y3 || "";
+  flat.sponsor_tax_y1 = sp.tax_y1 || ""; flat.sponsor_tax_y2 = sp.tax_y2 || ""; flat.sponsor_tax_y3 = sp.tax_y3 || "";
+
+  // Family
+  const fam = student.student_family || [];
+  const father = fam.find(f => f.relation === "father") || {};
+  const mother = fam.find(f => f.relation === "mother") || {};
+  flat.father_dob = father.dob || ""; flat.father_occupation = father.occupation || "";
+  flat.mother_dob = mother.dob || ""; flat.mother_occupation = mother.occupation || "";
+
+  // Age from DOB
+  if (flat.dob) {
+    const age = Math.floor((Date.now() - new Date(flat.dob)) / (365.25 * 24 * 60 * 60 * 1000));
+    flat.age = String(age);
+  }
+
+  return flat;
+}
 
 function colLetter(col) {
   let s = "";
