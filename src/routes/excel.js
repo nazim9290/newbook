@@ -54,29 +54,36 @@ router.post("/upload-template", upload.single("file"), async (req, res) => {
       console.log("Uploaded to storage:", storagePath);
     }
 
-    // 2. Parse Excel to detect cells
+    // 2. Parse Excel — শুধু {{placeholder}} cells detect করো
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(req.file.path);
 
-    const allCells = [];
+    const placeholders = []; // শুধু {{...}} আছে এমন cells
     workbook.eachSheet((sheet) => {
       sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
         row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
           const value = getCellText(cell);
-          if (value) {
-            allCells.push({
-              sheet: sheet.name,
-              cell: `${colLetter(colNumber)}${rowNumber}`,
-              row: rowNumber,
-              col: colNumber,
-              label: value,
+          // {{...}} pattern খুঁজো — একটি cell-এ একাধিক {{}} থাকতে পারে
+          const matches = value.match(/\{\{([^}]+)\}\}/g);
+          if (matches) {
+            matches.forEach(match => {
+              const key = match.replace(/\{\{|\}\}/g, "").trim();
+              placeholders.push({
+                sheet: sheet.name,
+                cell: `${colLetter(colNumber)}${rowNumber}`,
+                row: rowNumber,
+                col: colNumber,
+                placeholder: match,     // {{name_en}}
+                key,                     // name_en
+                label: key,              // mapping UI-তে দেখাবে
+                field: key,              // auto-map: key নিজেই field name
+                fullCellValue: value,    // পুরো cell content (অন্য text-ও থাকতে পারে)
+              });
             });
           }
         });
       });
     });
-
-    const mappingSuggestions = detectMappings(allCells, workbook);
 
     // 3. Save template record to DB
     const { data: tmpl, error } = await supabase
@@ -85,17 +92,17 @@ router.post("/upload-template", upload.single("file"), async (req, res) => {
         agency_id: agencyId,
         school_name,
         file_name: req.file.originalname,
-        template_url: uploadError ? req.file.path : storagePath, // storage path or local fallback
-        mappings: [],
-        total_fields: mappingSuggestions.length,
-        mapped_fields: 0,
+        template_url: uploadError ? req.file.path : storagePath,
+        mappings: placeholders, // {{}} mappings auto-save
+        total_fields: placeholders.length,
+        mapped_fields: placeholders.filter(p => p.field).length,
       })
       .select()
       .single();
 
     if (error) return res.status(400).json({ error: error.message });
 
-    // 4. Clean up local file if uploaded to storage
+    // 4. Clean up local file
     if (!uploadError) {
       try { fs.unlinkSync(req.file.path); } catch {}
     }
@@ -103,8 +110,8 @@ router.post("/upload-template", upload.single("file"), async (req, res) => {
     res.json({
       template: tmpl,
       sheets: workbook.worksheets.map((s) => s.name),
-      allCells,
-      mappingSuggestions,
+      placeholders,
+      totalPlaceholders: placeholders.length,
       storage: uploadError ? "local" : "supabase",
     });
   } catch (err) {
@@ -368,22 +375,25 @@ async function fillSingleStudentFromBuffer(templateBuffer, mappings, student) {
   // Flatten student data for mapping
   const flat = flattenStudent(student);
 
-  // প্রতিটি mapping-এ data বসাও
-  for (const m of mappings) {
-    if (!m.field || !m.cell) continue;
-    const value = flat[m.field] || "";
-    const targetCell = m.targetCell || m.cell;
-
-    // Sheet name থাকলে সেই sheet-এ বসাও, না হলে সব sheet-এ try
-    if (m.sheet) {
-      const sheet = workbook.getWorksheet(m.sheet);
-      if (sheet) sheet.getCell(targetCell).value = value;
-    } else {
-      // প্রথম sheet-এ বসাও
-      const sheet = workbook.worksheets[0];
-      if (sheet) sheet.getCell(targetCell).value = value;
-    }
-  }
+  // সব sheet-এর সব cell scan করো — {{...}} থাকলে replace করো
+  workbook.eachSheet((sheet) => {
+    sheet.eachRow({ includeEmpty: false }, (row) => {
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        const text = getCellText(cell);
+        if (text && text.includes("{{")) {
+          // সব {{key}} replace করো student data দিয়ে
+          const replaced = text.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
+            const k = key.trim();
+            // mapping-এ custom field mapped থাকলে সেটা ব্যবহার করো
+            const mapping = mappings.find(m => m.key === k || m.placeholder === match);
+            const fieldKey = mapping?.field || k;
+            return flat[fieldKey] ?? "";
+          });
+          cell.value = replaced;
+        }
+      });
+    });
+  });
 
   return await workbook.xlsx.writeBuffer();
 }
