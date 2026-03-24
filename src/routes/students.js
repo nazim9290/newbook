@@ -11,7 +11,8 @@ router.get("/", async (req, res) => {
   const { search, status, country, batch, school, branch, page = 1, limit = 50 } = req.query;
   const offset = (page - 1) * limit;
 
-  let query = supabase.from("students").select("*", { count: "exact" });
+  // batch ও school এর নাম সহ fetch করো (join)
+  let query = supabase.from("students").select("*, batches(name), schools(name_en)", { count: "exact" });
 
   if (search) {
     query = query.or(`name_en.ilike.%${search}%,phone.ilike.%${search}%,id.ilike.%${search}%`);
@@ -27,8 +28,18 @@ router.get("/", async (req, res) => {
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
-  // Decrypt sensitive fields before sending to frontend
-  res.json({ data: decryptMany(data), total: count, page: +page, limit: +limit });
+  // DB fields → frontend field mapping
+  const mapped = (data || []).map(s => ({
+    ...s,
+    batch: s.batches?.name || s.batch || "",      // frontend batch (name) চায়
+    school: s.schools?.name_en || s.school || "",  // frontend school (name) চায়
+    passport: s.passport_number || "",              // frontend passport চায়
+    father: s.father_name || "",
+    mother: s.mother_name || "",
+    created: s.created_at?.slice(0, 10) || "",
+  }));
+
+  res.json({ data: decryptMany(mapped), total: count, page: +page, limit: +limit });
 });
 
 // GET /api/students/:id — single student with related data

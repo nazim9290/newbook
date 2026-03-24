@@ -35,10 +35,29 @@ router.post("/upload-template", upload.single("file"), async (req, res) => {
     const { school_name } = req.body;
     if (!school_name) return res.status(400).json({ error: "স্কুলের নাম দিন" });
 
+    const agencyId = req.user.agency_id || "a0000000-0000-0000-0000-000000000001";
+
+    // 1. Upload file to Supabase Storage (templates bucket)
+    const fileBuffer = fs.readFileSync(req.file.path);
+    const storagePath = `${agencyId}/${Date.now()}_${req.file.originalname}`;
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from("templates")
+      .upload(storagePath, fileBuffer, {
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        upsert: false,
+      });
+
+    if (uploadError) {
+      console.error("Storage upload error:", uploadError.message);
+      // Continue with local file as fallback
+    } else {
+      console.log("Uploaded to storage:", storagePath);
+    }
+
+    // 2. Parse Excel to detect cells
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(req.file.path);
 
-    // Extract ALL cells that have text — each one is a potential mapping target
     const allCells = [];
     workbook.eachSheet((sheet) => {
       sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
@@ -57,20 +76,16 @@ router.post("/upload-template", upload.single("file"), async (req, res) => {
       });
     });
 
-    // Smart detection: find paired cells (label + value)
-    // Pattern 1: Same text appears in adjacent columns (A3: 名前, B3: 名前) → B3 is where data goes
-    // Pattern 2: Label in A, empty B → B is where data goes
-    // Pattern 3: Single label → the cell itself will be replaced
     const mappingSuggestions = detectMappings(allCells, workbook);
 
-    // Save template record
+    // 3. Save template record to DB
     const { data: tmpl, error } = await supabase
       .from("excel_templates")
       .insert({
-        agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001",
+        agency_id: agencyId,
         school_name,
         file_name: req.file.originalname,
-        template_url: req.file.path,
+        template_url: uploadError ? req.file.path : storagePath, // storage path or local fallback
         mappings: [],
         total_fields: mappingSuggestions.length,
         mapped_fields: 0,
@@ -80,11 +95,17 @@ router.post("/upload-template", upload.single("file"), async (req, res) => {
 
     if (error) return res.status(400).json({ error: error.message });
 
+    // 4. Clean up local file if uploaded to storage
+    if (!uploadError) {
+      try { fs.unlinkSync(req.file.path); } catch {}
+    }
+
     res.json({
       template: tmpl,
       sheets: workbook.worksheets.map((s) => s.name),
       allCells,
       mappingSuggestions,
+      storage: uploadError ? "local" : "supabase",
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -273,7 +294,12 @@ router.post("/re-parse/:id", async (req, res) => {
 // ================================================================
 router.delete("/templates/:id", async (req, res) => {
   const { data: tmpl } = await supabase.from("excel_templates").select("template_url").eq("id", req.params.id).single();
-  if (tmpl && tmpl.template_url && fs.existsSync(tmpl.template_url)) fs.unlinkSync(tmpl.template_url);
+  if (tmpl && tmpl.template_url) {
+    // Delete from local
+    if (fs.existsSync(tmpl.template_url)) fs.unlinkSync(tmpl.template_url);
+    // Delete from Supabase Storage
+    await supabase.storage.from("templates").remove([tmpl.template_url]);
+  }
   const { error } = await supabase.from("excel_templates").delete().eq("id", req.params.id);
   if (error) return res.status(400).json({ error: error.message });
   res.json({ success: true });
@@ -474,10 +500,32 @@ function autoDetect(label) {
   return "";
 }
 
+// Resolve template file — download from Supabase Storage if needed
+async function resolveTemplatePath(templateUrl) {
+  // If it's a local file path that exists, use it
+  if (fs.existsSync(templateUrl)) return templateUrl;
+
+  // Otherwise download from Supabase Storage
+  const { data, error } = await supabase.storage.from("templates").download(templateUrl);
+  if (error) throw new Error("Template ফাইল ডাউনলোড ব্যর্থ: " + error.message);
+
+  // Save to temp file
+  const tempPath = path.join(__dirname, "../../uploads", `temp_${Date.now()}.xlsx`);
+  const buffer = Buffer.from(await data.arrayBuffer());
+  fs.writeFileSync(tempPath, buffer);
+  return tempPath;
+}
+
 // Fill a single student into a fresh copy of the template — ALL sheets
-async function fillSingleStudent(templatePath, mappings, student) {
+async function fillSingleStudent(templateUrl, mappings, student) {
+  const templatePath = await resolveTemplatePath(templateUrl);
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(templatePath);
+
+  // Clean up temp file if it was downloaded
+  if (templatePath.includes("temp_")) {
+    setTimeout(() => { try { fs.unlinkSync(templatePath); } catch {} }, 5000);
+  }
 
   // Group mappings by sheet name
   const bySheet = {};

@@ -14,7 +14,7 @@ router.get("/", async (req, res) => {
   let query = supabase.from("visitors").select("*", { count: "exact" });
 
   if (search) {
-    query = query.or(`name_en.ilike.%${search}%,phone.ilike.%${search}%`);
+    query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
   }
   if (status && status !== "All") query = query.eq("status", status);
   if (branch && branch !== "All") query = query.eq("branch", branch);
@@ -23,7 +23,18 @@ router.get("/", async (req, res) => {
 
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ data: decryptMany(data), total: count });
+
+  // DB columns → frontend field names mapping
+  const mapped = (data || []).map(v => ({
+    ...v,
+    name_en: v.name_en || v.name,        // frontend name_en চায়
+    date: v.visit_date || v.date,          // frontend date চায়
+    lastFollowUp: v.last_follow_up,        // frontend lastFollowUp চায়
+    interested_countries: v.interested_countries || [],
+    interested_intake: v.interested_intake || "",
+  }));
+
+  res.json({ data: decryptMany(mapped), total: count });
 });
 
 // POST /api/visitors
