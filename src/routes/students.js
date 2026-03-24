@@ -69,10 +69,33 @@ router.get("/:id", async (req, res) => {
   res.json(decrypted);
 });
 
-// POST /api/students — create
+// POST /api/students — নতুন student তৈরি
+// students table-এ শুধু valid columns পাঠাও, বাকি সব ignore
+const STUDENT_COLUMNS = [
+  "id", "name_en", "name_bn", "name_katakana", "phone", "whatsapp", "email",
+  "dob", "gender", "marital_status", "nationality", "blood_group", "nid",
+  "passport_number", "passport_issue", "passport_expiry",
+  "permanent_address", "current_address", "father_name", "father_name_en",
+  "mother_name", "mother_name_en", "status", "country", "school_id", "batch_id",
+  "intake", "visa_type", "source", "agent_id", "referral_info", "student_type",
+  "counselor", "branch", "gdrive_folder_url", "photo_url", "internal_notes",
+];
+
 router.post("/", async (req, res) => {
-  // Encrypt sensitive fields before saving
-  const encrypted = encryptSensitiveFields(req.body);
+  const body = req.body;
+
+  // শুধু valid DB columns রাখো, বাকি সব ফেলে দাও
+  const record = { agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001" };
+  for (const col of STUDENT_COLUMNS) {
+    if (body[col] !== undefined && body[col] !== "") record[col] = body[col];
+  }
+
+  // Frontend field → DB column mapping
+  if (!record.passport_number && body.passport) record.passport_number = body.passport;
+  if (!record.father_name && body.father) record.father_name = body.father;
+  if (!record.mother_name && body.mother) record.mother_name = body.mother;
+
+  const encrypted = encryptSensitiveFields(record);
 
   const { data, error } = await supabase
     .from("students")
@@ -84,10 +107,20 @@ router.post("/", async (req, res) => {
   res.status(201).json(decryptSensitiveFields(data));
 });
 
-// PATCH /api/students/:id — update
+// PATCH /api/students/:id — student update
 router.patch("/:id", async (req, res) => {
-  // Encrypt sensitive fields before saving
-  const encrypted = encryptSensitiveFields({ ...req.body, updated_at: new Date().toISOString() });
+  const body = req.body;
+
+  // শুধু valid DB columns রাখো
+  const updates = {};
+  for (const col of STUDENT_COLUMNS) {
+    if (body[col] !== undefined) updates[col] = body[col];
+  }
+  if (body.passport) updates.passport_number = body.passport;
+  if (body.father) updates.father_name = body.father;
+  if (body.mother) updates.mother_name = body.mother;
+
+  const encrypted = encryptSensitiveFields(updates);
 
   const { data, error } = await supabase
     .from("students")

@@ -37,11 +37,47 @@ router.get("/", async (req, res) => {
   res.json({ data: decryptMany(mapped), total: count });
 });
 
-// POST /api/visitors
+// POST /api/visitors — নতুন visitor তৈরি
 router.post("/", async (req, res) => {
-  const { data, error } = await supabase.from("visitors").insert(encryptSensitiveFields(req.body)).select().single();
+  const body = req.body;
+
+  // Frontend field → DB column mapping
+  const record = {
+    agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001",
+    name: body.name || body.name_en || "",
+    name_bn: body.name_bn || body.name || "",
+    phone: body.phone || "",
+    guardian_phone: body.guardian_phone || null,
+    email: body.email || null,
+    dob: body.dob || null,
+    gender: body.gender || null,
+    address: body.address || null,
+    education: body.education ? JSON.stringify(body.education) : "[]",
+    has_jp_cert: body.has_jp_cert || false,
+    jp_exam_type: body.jp_exam_type || null,
+    jp_level: body.jp_level || null,
+    jp_score: body.jp_score || null,
+    visa_type: body.visa_type || null,
+    interested_countries: body.interested_countries || ["Japan"],
+    interested_intake: body.interested_intake || null,
+    budget_concern: body.budget_concern || false,
+    source: body.source || "Walk-in",
+    referral_info: body.referral_info || null,
+    agent_id: body.agent_id || null,
+    counselor: body.counselor || null,
+    branch: body.branch || "Main",
+    status: body.status || "Interested",
+    notes: body.notes || null,
+    next_follow_up: body.next_follow_up || null,
+    visit_date: body.date || body.visit_date || new Date().toISOString().slice(0, 10),
+  };
+
+  const { data, error } = await supabase.from("visitors").insert(encryptSensitiveFields(record)).select().single();
   if (error) return res.status(400).json({ error: error.message });
-  res.status(201).json(data);
+
+  // Response-এ frontend format-এ field mapping
+  const mapped = { ...data, name_en: data.name, date: data.visit_date, lastFollowUp: data.last_follow_up };
+  res.status(201).json(mapped);
 });
 
 // PATCH /api/visitors/:id
