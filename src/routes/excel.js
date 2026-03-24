@@ -243,6 +243,10 @@ router.post("/generate-single", async (req, res) => {
     }
 
     const buffer = await fillSingleStudentFromBuffer(templateBuffer, tmpl.mappings, student);
+    if (!buffer) {
+      // .xls format বা corrupted — CSV fallback
+      return generateCSV(res, tmpl, [student]);
+    }
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="${encName(tmpl.school_name)}_${encName(student.name_en || student.id)}.xlsx"`);
     res.send(buffer);
@@ -268,7 +272,14 @@ router.post("/re-parse/:id", async (req, res) => {
     }
 
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(templateBuffer);
+    try {
+      await workbook.xlsx.load(templateBuffer);
+    } catch {
+      const tmpPath = path.join(__dirname, "../../uploads", `tmp_reparse_${Date.now()}.xls`);
+      fs.writeFileSync(tmpPath, templateBuffer);
+      await workbook.xlsx.readFile(tmpPath);
+      try { fs.unlinkSync(tmpPath); } catch {}
+    }
 
     const allCells = [];
     workbook.eachSheet((sheet) => {
@@ -339,7 +350,20 @@ async function getTemplateBuffer(templateUrl) {
 // Buffer থেকে template পড়ে student data fill করে return
 async function fillSingleStudentFromBuffer(templateBuffer, mappings, student) {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(templateBuffer);
+  // .xlsx.load(buffer) try করো, fail হলে temp file-এ write করে readFile ব্যবহার
+  try {
+    await workbook.xlsx.load(templateBuffer);
+  } catch {
+    try {
+      // .xls format — temp file-এ write করে readFile দিয়ে পড়ো
+      const tmpPath = path.join(__dirname, "../../uploads", `tmp_${Date.now()}.xls`);
+      fs.writeFileSync(tmpPath, templateBuffer);
+      await workbook.xlsx.readFile(tmpPath);
+      try { fs.unlinkSync(tmpPath); } catch {}
+    } catch {
+      return null; // পড়া যায়নি — CSV fallback
+    }
+  }
 
   // Flatten student data for mapping
   const flat = flattenStudent(student);
