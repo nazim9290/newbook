@@ -18,7 +18,8 @@ router.get("/income", async (req, res) => {
 
 // POST /api/accounts/income
 router.post("/income", async (req, res) => {
-  const { data, error } = await supabase.from("income").insert(req.body).select().single();
+  const record = { ...req.body, agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001" };
+  const { data, error } = await supabase.from("income").insert(record).select().single();
   if (error) return res.status(400).json({ error: error.message });
   res.status(201).json(data);
 });
@@ -36,7 +37,8 @@ router.get("/expenses", async (req, res) => {
 
 // POST /api/accounts/expenses
 router.post("/expenses", async (req, res) => {
-  const { data, error } = await supabase.from("expenses").insert(req.body).select().single();
+  const record = { ...req.body, agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001" };
+  const { data, error } = await supabase.from("expenses").insert(record).select().single();
   if (error) return res.status(400).json({ error: error.message });
   res.status(201).json(data);
 });
@@ -53,7 +55,8 @@ router.get("/payments", async (req, res) => {
 
 // POST /api/accounts/payments
 router.post("/payments", async (req, res) => {
-  const { data, error } = await supabase.from("payments").insert(req.body).select().single();
+  const record = { ...req.body, agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001" };
+  const { data, error } = await supabase.from("payments").insert(record).select().single();
   if (error) return res.status(400).json({ error: error.message });
   res.status(201).json(data);
 });

@@ -19,7 +19,8 @@ router.get("/employees", async (req, res) => {
 
 // POST /api/hr/employees
 router.post("/employees", async (req, res) => {
-  const { data, error } = await supabase.from("employees").insert(encryptSensitiveFields(req.body)).select().single();
+  const record = { ...req.body, agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001" };
+  const { data, error } = await supabase.from("employees").insert(encryptSensitiveFields(record)).select().single();
   if (error) return res.status(400).json({ error: error.message });
   res.status(201).json(decryptSensitiveFields(data));
 });
