@@ -125,7 +125,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 // ================================================================
 router.post("/generate", async (req, res) => {
   try {
-    const { template_id, student_id, format = "docx" } = req.body;
+    const { template_id, student_id, format = "docx", doc_data = {} } = req.body;
     if (!template_id || !student_id) return res.status(400).json({ error: "template_id ও student_id দিন" });
 
     // Get template
@@ -144,8 +144,9 @@ router.post("/generate", async (req, res) => {
     const { decryptSensitiveFields } = require("../lib/crypto");
     const decrypted = decryptSensitiveFields(student);
 
-    // Flatten student data
-    const flat = flattenForDoc(decrypted);
+    // Flatten student data + document-specific data merge
+    // doc_data (user input) priority, তারপর student profile
+    const flat = { ...flattenForDoc(decrypted), ...doc_data };
 
     // Get template file buffer
     let templateBuffer;
