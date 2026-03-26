@@ -57,18 +57,48 @@ router.post("/upload", upload.single("file"), async (req, res) => {
       .from("templates")
       .upload(storagePath, fileBuffer, { contentType: req.file.mimetype, upsert: false });
 
-    // Parse .docx to find {{placeholders}}
+    // Parse .docx (ZIP of XML files) to find {{placeholders}}
+    const AdmZip = require("adm-zip");
     const placeholders = [];
-    const content = fileBuffer.toString("utf8");
-    const matches = content.match(/\{\{([^}]+)\}\}/g) || [];
     const seen = new Set();
-    matches.forEach(m => {
-      const key = m.replace(/\{\{|\}\}/g, "").trim();
-      if (!seen.has(key)) {
-        seen.add(key);
-        placeholders.push({ placeholder: m, key, field: key });
-      }
-    });
+
+    try {
+      const zip = new AdmZip(fileBuffer);
+      const entries = zip.getEntries();
+
+      entries.forEach(entry => {
+        // .docx-এর মূল content: word/document.xml, word/header*.xml, word/footer*.xml
+        if (entry.entryName.endsWith(".xml")) {
+          let xmlContent = entry.getData().toString("utf8");
+
+          // Step 1: সরাসরি {{key}} search (XML tag ছাড়া)
+          const directMatches = xmlContent.match(/\{\{([^}]+)\}\}/g) || [];
+          directMatches.forEach(m => {
+            const key = m.replace(/\{\{|\}\}/g, "").trim();
+            if (!seen.has(key)) { seen.add(key); placeholders.push({ placeholder: `{{${key}}}`, key, field: key }); }
+          });
+
+          // Step 2: Word XML-এ {{key}} split হয়ে থাকতে পারে — <w:r> tags-এর মধ্যে
+          // যেমন: <w:r><w:t>{</w:t></w:r><w:r><w:t>{Name}</w:t></w:r><w:r><w:t>}</w:t></w:r>
+          // XML tags সরিয়ে plain text বানাও, তারপর search করো
+          const plainText = xmlContent.replace(/<[^>]+>/g, "");
+          const splitMatches = plainText.match(/\{\{([^}]+)\}\}/g) || [];
+          splitMatches.forEach(m => {
+            const key = m.replace(/\{\{|\}\}/g, "").trim();
+            if (!seen.has(key)) { seen.add(key); placeholders.push({ placeholder: `{{${key}}}`, key, field: key }); }
+          });
+        }
+      });
+    } catch (parseErr) {
+      console.error("docx parse error:", parseErr.message);
+      // Fallback: raw binary search
+      const rawContent = fileBuffer.toString("binary");
+      const rawMatches = rawContent.match(/\{\{([^}]+)\}\}/g) || [];
+      rawMatches.forEach(m => {
+        const key = m.replace(/\{\{|\}\}/g, "").trim();
+        if (!seen.has(key)) { seen.add(key); placeholders.push({ placeholder: `{{${key}}}`, key, field: key }); }
+      });
+    }
 
     // Save to DB
     const { data: tmpl, error: dbErr } = await supabase
