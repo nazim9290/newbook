@@ -33,6 +33,13 @@ router.patch("/:id", async (req, res) => {
   res.json(data);
 });
 
+// DELETE /api/schools/:id
+router.delete("/:id", async (req, res) => {
+  const { error } = await supabase.from("schools").delete().eq("id", req.params.id);
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ success: true });
+});
+
 // GET /api/schools/:id/submissions
 router.get("/:id/submissions", async (req, res) => {
   const { data, error } = await supabase
