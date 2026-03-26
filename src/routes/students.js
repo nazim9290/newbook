@@ -152,4 +152,221 @@ router.post("/:id/payments", async (req, res) => {
   res.status(201).json(data);
 });
 
+// ================================================================
+// POST /api/students/import — Excel থেকে bulk student import
+// Body: { students: [{ name_en, phone, dob, ... }, ...] }
+// Frontend Excel parse করে mapped data পাঠায়
+// ================================================================
+router.post("/import", async (req, res) => {
+  const { students: rows } = req.body;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return res.status(400).json({ error: "কোনো student data পাওয়া যায়নি" });
+  }
+
+  const agencyId = req.user.agency_id || "a0000000-0000-0000-0000-000000000001";
+  const results = { success: 0, failed: 0, errors: [] };
+
+  // প্রতিটি row-কে valid student record-এ convert
+  const records = rows.map((row, idx) => {
+    const record = { agency_id: agencyId };
+    for (const col of STUDENT_COLUMNS) {
+      if (row[col] !== undefined && row[col] !== null && row[col] !== "") {
+        record[col] = row[col];
+      }
+    }
+    // Frontend field → DB column mapping
+    if (!record.passport_number && row.passport) record.passport_number = row.passport;
+    if (!record.father_name && row.father) record.father_name = row.father;
+    if (!record.mother_name && row.mother) record.mother_name = row.mother;
+    if (!record.name_en) record.name_en = row.name || row.full_name || row.student_name || `Student ${idx + 1}`;
+    if (!record.status) record.status = "ENROLLED";
+    return encryptSensitiveFields(record);
+  });
+
+  // Batch insert — Supabase supports bulk insert
+  const { data, error } = await supabase
+    .from("students")
+    .insert(records)
+    .select();
+
+  if (error) {
+    // Bulk fail → try one by one
+    for (let i = 0; i < records.length; i++) {
+      const { error: sErr } = await supabase.from("students").insert(records[i]).select();
+      if (sErr) {
+        results.failed++;
+        results.errors.push({ row: i + 1, name: rows[i].name_en || rows[i].name || `Row ${i + 1}`, error: sErr.message });
+      } else {
+        results.success++;
+      }
+    }
+  } else {
+    results.success = data.length;
+  }
+
+  res.json({
+    message: `${results.success} জন import সফল, ${results.failed} জন ব্যর্থ`,
+    ...results,
+    total: rows.length,
+  });
+});
+
+// ================================================================
+// POST /api/students/import/parse — Excel file parse করে columns return
+// ================================================================
+const multer = require("multer");
+const ExcelJS = require("exceljs");
+const importUpload = multer({ dest: require("path").join(__dirname, "../../uploads"), limits: { fileSize: 10 * 1024 * 1024 } });
+
+router.post("/import/parse", importUpload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "Excel ফাইল দিন" });
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(req.file.path);
+
+    const sheet = workbook.worksheets[0];
+    if (!sheet) return res.status(400).json({ error: "কোনো sheet পাওয়া যায়নি" });
+
+    // প্রথম row = headers
+    const headers = [];
+    const headerRow = sheet.getRow(1);
+    headerRow.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+      const val = cell.text || (cell.value != null ? String(cell.value) : "");
+      headers.push({ col: colNumber, name: val.trim() });
+    });
+
+    // Data rows (max 5 for preview)
+    const preview = [];
+    for (let r = 2; r <= Math.min(sheet.rowCount, 6); r++) {
+      const row = sheet.getRow(r);
+      const obj = {};
+      headers.forEach(h => {
+        const cell = row.getCell(h.col);
+        obj[h.name] = cell.text || (cell.value != null ? String(cell.value) : "");
+      });
+      preview.push(obj);
+    }
+
+    // Auto-suggest mappings
+    const suggestions = {};
+    const autoMap = {
+      "name": "name_en", "নাম": "name_en", "full name": "name_en", "student name": "name_en",
+      "phone": "phone", "ফোন": "phone", "mobile": "phone", "contact": "phone",
+      "email": "email", "ইমেইল": "email",
+      "dob": "dob", "date of birth": "dob", "জন্ম তারিখ": "dob", "birth date": "dob",
+      "gender": "gender", "লিঙ্গ": "gender", "sex": "gender",
+      "passport": "passport_number", "পাসপোর্ট": "passport_number",
+      "nid": "nid", "national id": "nid",
+      "father": "father_name", "পিতা": "father_name", "father name": "father_name",
+      "mother": "mother_name", "মাতা": "mother_name", "mother name": "mother_name",
+      "address": "permanent_address", "ঠিকানা": "permanent_address",
+      "country": "country", "দেশ": "country",
+      "school": "school", "স্কুল": "school",
+      "batch": "batch", "ব্যাচ": "batch",
+      "status": "status", "source": "source",
+      "branch": "branch", "ব্রাঞ্চ": "branch",
+    };
+    headers.forEach(h => {
+      const lower = h.name.toLowerCase();
+      for (const [key, field] of Object.entries(autoMap)) {
+        if (lower.includes(key)) { suggestions[h.name] = field; break; }
+      }
+    });
+
+    // Cleanup temp file
+    const fs = require("fs");
+    try { fs.unlinkSync(req.file.path); } catch {}
+
+    res.json({
+      headers: headers.map(h => h.name),
+      totalRows: sheet.rowCount - 1,
+      preview,
+      suggestions,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================================================================
+// POST /api/students/import/mapped — Excel + mapping → bulk import
+// FormData: file + mapping JSON
+// ================================================================
+router.post("/import/mapped", importUpload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "Excel ফাইল দিন" });
+    const mapping = JSON.parse(req.body.mapping || "{}");
+    if (Object.keys(mapping).length === 0) return res.status(400).json({ error: "Mapping দিন" });
+
+    const agencyId = req.user.agency_id || "a0000000-0000-0000-0000-000000000001";
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(req.file.path);
+    const sheet = workbook.worksheets[0];
+
+    // Headers from row 1
+    const headers = [];
+    sheet.getRow(1).eachCell({ includeEmpty: false }, (cell, col) => {
+      const val = cell.text || (cell.value != null ? String(cell.value) : "");
+      headers.push({ col, name: val.trim() });
+    });
+
+    // Build student records from all data rows
+    const records = [];
+    for (let r = 2; r <= sheet.rowCount; r++) {
+      const row = sheet.getRow(r);
+      const student = { agency_id: agencyId, status: "ENROLLED" };
+      let hasData = false;
+
+      headers.forEach(h => {
+        const systemField = mapping[h.name];
+        if (!systemField) return;
+        const cell = row.getCell(h.col);
+        const val = cell.text || (cell.value != null ? String(cell.value).trim() : "");
+        if (val) {
+          student[systemField] = val;
+          hasData = true;
+        }
+      });
+
+      if (hasData && student.name_en) {
+        // Valid columns only
+        const clean = { agency_id: agencyId };
+        for (const col of STUDENT_COLUMNS) {
+          if (student[col] !== undefined && student[col] !== "") clean[col] = student[col];
+        }
+        if (!clean.status) clean.status = "ENROLLED";
+        records.push(encryptSensitiveFields(clean));
+      }
+    }
+
+    if (records.length === 0) {
+      return res.status(400).json({ error: "কোনো valid student data পাওয়া যায়নি — name_en column ম্যাপ করুন" });
+    }
+
+    // Bulk insert
+    const results = { success: 0, failed: 0, errors: [] };
+    const { data, error } = await supabase.from("students").insert(records).select();
+
+    if (error) {
+      // Bulk fail → one by one
+      for (let i = 0; i < records.length; i++) {
+        const { error: sErr } = await supabase.from("students").insert(records[i]);
+        if (sErr) { results.failed++; results.errors.push({ row: i + 2, name: records[i].name_en || `Row ${i + 2}`, error: sErr.message }); }
+        else { results.success++; }
+      }
+    } else {
+      results.success = data.length;
+    }
+
+    // Cleanup
+    const fs = require("fs");
+    try { fs.unlinkSync(req.file.path); } catch {}
+
+    res.json({ message: `${results.success} জন student import সফল, ${results.failed} জন ব্যর্থ`, ...results, total: records.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
