@@ -208,6 +208,24 @@ router.post("/generate", async (req, res) => {
 });
 
 // ================================================================
+// POST /api/docgen/templates/:id/mapping — placeholder → field mapping save
+// ================================================================
+router.post("/templates/:id/mapping", async (req, res) => {
+  const { placeholders } = req.body;
+  if (!Array.isArray(placeholders)) return res.status(400).json({ error: "placeholders array দিন" });
+
+  const { data, error } = await supabase
+    .from("doc_templates")
+    .update({ placeholders, total_fields: placeholders.length })
+    .eq("id", req.params.id)
+    .select()
+    .single();
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+});
+
+// ================================================================
 // DELETE /api/docgen/templates/:id
 // ================================================================
 router.delete("/templates/:id", async (req, res) => {
