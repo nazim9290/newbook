@@ -153,6 +153,97 @@ router.post("/:id/payments", async (req, res) => {
 });
 
 // ================================================================
+// GET /api/students/import/template — Import template (.xlsx) download
+// Phone, NID, WhatsApp column Text format — leading zero রক্ষা
+// ================================================================
+router.get("/import/template", async (req, res) => {
+  const ExcelJS = require("exceljs");
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Students");
+
+  // Column config — text format columns চিহ্নিত
+  const cols = [
+    { header: "Name *", key: "name", width: 25 },
+    { header: "Name (বাংলা)", key: "name_bn", width: 25 },
+    { header: "Phone *", key: "phone", width: 18 },
+    { header: "Email", key: "email", width: 22 },
+    { header: "Date of Birth", key: "dob", width: 15 },
+    { header: "Gender", key: "gender", width: 10 },
+    { header: "Passport No", key: "passport", width: 15 },
+    { header: "NID", key: "nid", width: 20 },
+    { header: "Father Name", key: "father", width: 20 },
+    { header: "Mother Name", key: "mother", width: 20 },
+    { header: "Address", key: "address", width: 30 },
+    { header: "Country", key: "country", width: 12 },
+    { header: "Branch", key: "branch", width: 12 },
+    { header: "Source", key: "source", width: 12 },
+    { header: "Blood Group", key: "blood", width: 10 },
+    { header: "WhatsApp", key: "whatsapp", width: 18 },
+    { header: "Nationality", key: "nationality", width: 12 },
+    { header: "Visa Type", key: "visa_type", width: 18 },
+  ];
+  ws.columns = cols;
+
+  // Header row style — cyan background, white bold text
+  const headerRow = ws.getRow(1);
+  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+  headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF06B6D4" } };
+  headerRow.alignment = { horizontal: "center" };
+
+  // Required columns (* চিহ্নিত) red background
+  [1, 3].forEach(col => {
+    const cell = headerRow.getCell(col);
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF43F5E" } };
+  });
+
+  // Row 2 = নির্দেশনা (হালকা হলুদ)
+  const guideRow = ws.addRow([
+    "বাধ্যতামূলক — English-এ পুরো নাম",
+    "ঐচ্ছিক — বাংলায় নাম",
+    "বাধ্যতামূলক — 01XXXXXXXXX",
+    "ঐচ্ছিক",
+    "YYYY-MM-DD format",
+    "Male / Female / Other",
+    "পাসপোর্ট নম্বর",
+    "জাতীয় পরিচয়পত্র নম্বর",
+    "পিতার নাম",
+    "মাতার নাম",
+    "স্থায়ী ঠিকানা",
+    "Japan / Germany / Korea",
+    "Main / Chattogram / Sylhet",
+    "Facebook / Walk-in / Agent / Referral",
+    "A+ / B+ / O+ / AB+ ইত্যাদি",
+    "আলাদা হলে WhatsApp নম্বর",
+    "Bangladeshi",
+    "Language Student / SSW / TITP",
+  ]);
+  guideRow.font = { italic: true, size: 9, color: { argb: "FF666666" } };
+  guideRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFDE7" } };
+
+  // Row 3 = Sample data
+  ws.addRow([
+    "Mohammad Rahim", "মোহাম্মদ রহিম", "01811111111", "rahim@gmail.com",
+    "1998-03-12", "Male", "BK1234567", "1998123456789",
+    "Abdul Karim", "Fatema Begum", "Comilla, Bangladesh",
+    "Japan", "Main", "Facebook", "B+", "01811111111", "Bangladeshi", "Language Student",
+  ]);
+
+  // Phone, NID, WhatsApp columns → Text format (leading zero রক্ষা)
+  const textCols = [3, 8, 16]; // Phone, NID, WhatsApp
+  for (let r = 1; r <= 100; r++) {
+    textCols.forEach(c => {
+      ws.getCell(r, c).numFmt = "@"; // @ = Text format
+    });
+  }
+
+  // Send as .xlsx
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", 'attachment; filename="AgencyBook_Student_Import_Template.xlsx"');
+  await wb.xlsx.write(res);
+  res.end();
+});
+
+// ================================================================
 // POST /api/students/import — Excel থেকে bulk student import
 // Body: { students: [{ name_en, phone, dob, ... }, ...] }
 // Frontend Excel parse করে mapped data পাঠায়
