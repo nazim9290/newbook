@@ -386,13 +386,12 @@ async function fillSingleStudentFromBuffer(templateBuffer, mappings, student) {
       row.eachCell({ includeEmpty: false }, (cell) => {
         const text = getCellText(cell);
         if (text && text.includes("{{")) {
-          // সব {{key}} replace করো student data দিয়ে
+          // সব {{key}} replace করো — sub-field support (:year, :month, :day, :first, :last)
           const replaced = text.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
             const k = key.trim();
-            // mapping-এ custom field mapped থাকলে সেটা ব্যবহার করো
             const mapping = mappings.find(m => m.key === k || m.placeholder === match);
             const fieldKey = mapping?.field || k;
-            return flat[fieldKey] ?? "";
+            return resolveFieldValue(flat, fieldKey);
           });
           cell.value = replaced;
         }
@@ -442,6 +441,61 @@ function flattenStudent(student) {
   }
 
   return flat;
+}
+
+/**
+ * resolveFieldValue — sub-field support
+ * key format: "field_name" বা "field_name:modifier"
+ *
+ * Date modifiers: :year, :month, :day
+ *   dob:year → "1998", dob:month → "03", dob:day → "12"
+ *
+ * Name modifiers: :first, :last
+ *   name_en:first → "Mohammad", name_en:last → "Rahim"
+ *   "Mohammad Rahim" → first="Mohammad", last="Rahim"
+ */
+function resolveFieldValue(flat, fieldKey) {
+  if (!fieldKey) return "";
+
+  // Sub-field check: "dob:year", "name_en:first", etc.
+  if (fieldKey.includes(":")) {
+    const [baseKey, modifier] = fieldKey.split(":");
+    const rawValue = flat[baseKey] ?? "";
+    if (!rawValue) return "";
+
+    // Date modifiers
+    if (["year", "month", "day"].includes(modifier)) {
+      // Date format: "1998-03-12" বা "03/12/1998" বা "1998/03/12"
+      const dateStr = String(rawValue);
+      let y = "", m = "", d = "";
+
+      if (dateStr.includes("-")) {
+        // ISO format: 1998-03-12
+        const parts = dateStr.split("-");
+        y = parts[0] || ""; m = parts[1] || ""; d = parts[2]?.slice(0, 2) || "";
+      } else if (dateStr.includes("/")) {
+        const parts = dateStr.split("/");
+        if (parts[0].length === 4) { y = parts[0]; m = parts[1]; d = parts[2]; } // 1998/03/12
+        else { m = parts[0]; d = parts[1]; y = parts[2]; } // 03/12/1998
+      }
+
+      if (modifier === "year") return y;
+      if (modifier === "month") return m;
+      if (modifier === "day") return d;
+    }
+
+    // Name modifiers
+    if (["first", "last"].includes(modifier)) {
+      const nameParts = String(rawValue).trim().split(/\s+/);
+      if (modifier === "first") return nameParts[0] || "";
+      if (modifier === "last") return nameParts.slice(1).join(" ") || nameParts[0] || "";
+    }
+
+    return rawValue; // unknown modifier → full value
+  }
+
+  // No modifier → direct value
+  return flat[fieldKey] ?? "";
 }
 
 function colLetter(col) {
