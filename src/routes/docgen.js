@@ -67,24 +67,17 @@ router.post("/upload", upload.single("file"), async (req, res) => {
       const entries = zip.getEntries();
 
       entries.forEach(entry => {
-        // .docx-এর মূল content: word/document.xml, word/header*.xml, word/footer*.xml
+        // .docx-এর content XML files: word/document.xml, header, footer
         if (entry.entryName.endsWith(".xml")) {
-          let xmlContent = entry.getData().toString("utf8");
-
-          // Step 1: সরাসরি {{key}} search (XML tag ছাড়া)
-          const directMatches = xmlContent.match(/\{\{([^}]+)\}\}/g) || [];
-          directMatches.forEach(m => {
-            const key = m.replace(/\{\{|\}\}/g, "").trim();
-            if (!seen.has(key)) { seen.add(key); placeholders.push({ placeholder: `{{${key}}}`, key, field: key }); }
-          });
-
-          // Step 2: Word XML-এ {{key}} split হয়ে থাকতে পারে — <w:r> tags-এর মধ্যে
-          // যেমন: <w:r><w:t>{</w:t></w:r><w:r><w:t>{Name}</w:t></w:r><w:r><w:t>}</w:t></w:r>
-          // XML tags সরিয়ে plain text বানাও, তারপর search করো
+          const xmlContent = entry.getData().toString("utf8");
+          // XML tags সরিয়ে plain text বানাও — তারপর {{key}} search
+          // এতে split placeholder ({{ across multiple <w:r> tags) ও ধরা পড়বে
           const plainText = xmlContent.replace(/<[^>]+>/g, "");
-          const splitMatches = plainText.match(/\{\{([^}]+)\}\}/g) || [];
-          splitMatches.forEach(m => {
+          const matches = plainText.match(/\{\{([^}]+)\}\}/g) || [];
+          matches.forEach(m => {
             const key = m.replace(/\{\{|\}\}/g, "").trim();
+            // XML tag বা invalid char থাকলে skip
+            if (key.includes("<") || key.includes(">") || key.includes("/") || key.length > 50) return;
             if (!seen.has(key)) { seen.add(key); placeholders.push({ placeholder: `{{${key}}}`, key, field: key }); }
           });
         }
