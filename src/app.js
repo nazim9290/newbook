@@ -55,6 +55,7 @@ app.use("/api/communications", require("./routes/communications")); // যোগ
 app.use("/api/inventory", require("./routes/inventory"));       // সম্পদ ও মালামাল
 app.use("/api/submissions", require("./routes/submissions"));   // স্কুলে submission
 app.use("/api/docgen", require("./routes/docgen"));             // Document Generator (Translation)
+app.use("/api/docdata", require("./routes/docdata"));           // Document Types ও Student Document Data
 
 // ── 404 Handler — route না পেলে error ──
 app.use((req, res) => {
