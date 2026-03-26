@@ -403,8 +403,11 @@ async function fillSingleStudentFromBuffer(templateBuffer, mappings, student) {
 }
 
 // Student object-কে flat key-value-তে convert (nested education, sponsor etc.)
+// Encrypted fields auto-decrypt হয়
 function flattenStudent(student) {
-  const flat = { ...student };
+  const { decryptSensitiveFields } = require("../lib/crypto");
+  const decrypted = decryptSensitiveFields(student);
+  const flat = { ...decrypted };
 
   // Education: SSC, HSC, Honours
   const edu = student.student_education || student.education || [];
@@ -420,7 +423,8 @@ function flattenStudent(student) {
   flat.jp_exam_type = jp.exam_type || ""; flat.jp_level = jp.level || ""; flat.jp_score = jp.score || ""; flat.jp_result = jp.result || ""; flat.jp_exam_date = jp.exam_date || "";
 
   // Sponsor
-  const sp = (student.sponsors || [])[0] || student.sponsor || {};
+  const spRaw = (student.sponsors || [])[0] || student.sponsor || {};
+  const sp = decryptSensitiveFields(spRaw);
   flat.sponsor_name = sp.name || ""; flat.sponsor_name_en = sp.name_en || sp.name || "";
   flat.sponsor_relationship = sp.relationship || ""; flat.sponsor_phone = sp.phone || "";
   flat.sponsor_address = sp.address || ""; flat.sponsor_company = sp.company_name || "";
