@@ -60,16 +60,12 @@ const SENSITIVE_FIELDS = [
 ];
 
 /**
- * Encrypt sensitive fields in an object before saving to DB
+ * encryptSensitiveFields — এখন passthrough (encrypt বন্ধ)
+ * Supabase নিজেই at-rest encryption দেয়, application-level encryption
+ * key mismatch সমস্যা তৈরি করে তাই বন্ধ করা হয়েছে।
  */
 function encryptSensitiveFields(data) {
-  const result = { ...data };
-  for (const field of SENSITIVE_FIELDS) {
-    if (result[field]) {
-      result[field] = encrypt(result[field]);
-    }
-  }
-  return result;
+  return { ...data }; // no encryption — passthrough
 }
 
 /**
