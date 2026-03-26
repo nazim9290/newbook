@@ -168,13 +168,15 @@ router.post("/import", async (req, res) => {
 
   // প্রতিটি row-কে valid student record-এ convert
   const records = rows.map((row, idx) => {
-    const record = { agency_id: agencyId };
+    const year = new Date().getFullYear();
+    const seq = String(idx + 1).padStart(3, "0");
+    const record = { agency_id: agencyId, id: row.id || `S-${year}-IMP${seq}` };
     for (const col of STUDENT_COLUMNS) {
+      if (col === "id") continue;
       if (row[col] !== undefined && row[col] !== null && row[col] !== "") {
         record[col] = row[col];
       }
     }
-    // Frontend field → DB column mapping
     if (!record.passport_number && row.passport) record.passport_number = row.passport;
     if (!record.father_name && row.father) record.father_name = row.father;
     if (!record.mother_name && row.mother) record.mother_name = row.mother;
@@ -330,9 +332,12 @@ router.post("/import/mapped", importUpload.single("file"), async (req, res) => {
       });
 
       if (hasData && student.name_en) {
-        // Valid columns only
-        const clean = { agency_id: agencyId };
+        // Valid columns only + auto-generate ID
+        const year = new Date().getFullYear();
+        const seq = String(r - 1).padStart(3, "0");
+        const clean = { agency_id: agencyId, id: student.id || `S-${year}-IMP${seq}` };
         for (const col of STUDENT_COLUMNS) {
+          if (col === "id") continue; // already set
           if (student[col] !== undefined && student[col] !== "") clean[col] = student[col];
         }
         if (!clean.status) clean.status = "ENROLLED";
