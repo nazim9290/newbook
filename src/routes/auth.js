@@ -50,6 +50,37 @@ router.post("/login", loginLimiter, asyncHandler(async (req, res) => {
   });
 }));
 
+// POST /api/auth/student-login — Student Portal Login (staff login থেকে আলাদা)
+router.post("/student-login", loginLimiter, asyncHandler(async (req, res) => {
+  const { phone, password } = req.body;
+  if (!phone || !password) return res.status(400).json({ error: "ফোন ও পাসওয়ার্ড দিন" });
+
+  // ফোন নম্বর দিয়ে student খুঁজো — portal access enabled কিনা চেক
+  const { data: student, error } = await supabase.from("students")
+    .select("id, name_en, name_bn, phone, email, status, country, school, batch, branch, portal_password_hash, portal_access, portal_sections, agency_id")
+    .eq("phone", phone).single();
+
+  if (error || !student) return res.status(401).json({ error: "ফোন নম্বর পাওয়া যায়নি" });
+  if (!student.portal_access) return res.status(403).json({ error: "পোর্টাল অ্যাক্সেস বন্ধ আছে — এজেন্সিতে যোগাযোগ করুন" });
+  if (!student.portal_password_hash) return res.status(403).json({ error: "পোর্টাল পাসওয়ার্ড সেট করা হয়নি — এজেন্সিতে যোগাযোগ করুন" });
+
+  const valid = await bcrypt.compare(password, student.portal_password_hash);
+  if (!valid) return res.status(401).json({ error: "পাসওয়ার্ড ভুল হয়েছে" });
+
+  // সর্বশেষ login সময় আপডেট
+  await supabase.from("students").update({ last_portal_login: new Date().toISOString() }).eq("id", student.id);
+
+  const token = jwt.sign(
+    { type: "student", student_id: student.id, name: student.name_en, agency_id: student.agency_id },
+    process.env.JWT_SECRET, { expiresIn: "7d" }
+  );
+
+  res.json({
+    token,
+    user: { id: student.id, name: student.name_en, name_bn: student.name_bn, type: "student", phone: student.phone, status: student.status, country: student.country, school: student.school, batch: student.batch }
+  });
+}));
+
 // POST /api/auth/register (admin only — create new staff account)
 router.post("/register", loginLimiter, asyncHandler(async (req, res) => {
   const { name, email, password, role, branch } = req.body;

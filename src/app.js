@@ -71,6 +71,7 @@ app.use("/api/inventory", require("./routes/inventory"));       // সম্প�
 app.use("/api/submissions", require("./routes/submissions"));   // স্কুলে submission
 app.use("/api/docgen", require("./routes/docgen"));             // Document Generator (Translation)
 app.use("/api/docdata", require("./routes/docdata"));           // Document Types ও Student Document Data
+app.use("/api/student-portal", require("./routes/student-portal")); // স্টুডেন্ট পোর্টাল (self-service)
 
 // ── 404 Handler — route না পেলে error ──
 app.use((req, res) => {

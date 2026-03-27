@@ -2,6 +2,7 @@ const express = require("express");
 const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
+const bcrypt = require("bcryptjs");
 const { encryptSensitiveFields, decryptSensitiveFields, decryptMany } = require("../lib/crypto");
 
 const router = express.Router();
@@ -466,6 +467,23 @@ router.post("/import/mapped", importUpload.single("file"), asyncHandler(async (r
     console.error("Import mapped error:", err);
     res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   }
+}));
+
+// ================================================================
+// POST /api/students/:id/portal-access — Admin portal access on/off + password set
+// ================================================================
+router.post("/:id/portal-access", asyncHandler(async (req, res) => {
+  const { enabled, password } = req.body;
+  const updates = { portal_access: !!enabled };
+
+  // Enable করলে এবং password দিলে hash করে সেট করো
+  if (enabled && password) {
+    updates.portal_password_hash = await bcrypt.hash(password, 10);
+  }
+
+  const { data, error } = await supabase.from("students").update(updates).eq("id", req.params.id).select("id, name_en, portal_access").single();
+  if (error) return res.status(500).json({ error: "আপডেট ব্যর্থ" });
+  res.json(data);
 }));
 
 module.exports = router;
