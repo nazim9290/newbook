@@ -14,6 +14,9 @@ const cors = require("cors");
 
 const app = express();
 
+// Nginx proxy-র পিছনে আছে — trust proxy enable
+app.set("trust proxy", 1);
+
 // ── Middleware ──
 
 // Security headers — XSS, clickjacking, MIME sniffing protection

@@ -39,7 +39,7 @@ router.get("/", checkPermission("students", "read"), asyncHandler(async (req, re
     passport: s.passport_number || "",              // frontend passport চায়
     father: s.father_name || "",
     mother: s.mother_name || "",
-    created: s.created_at?.slice(0, 10) || "",
+    created: s.created_at ? String(s.created_at).slice(0, 10) : "",
   }));
 
   res.json({ data: decryptMany(mapped), total: count, page: +page, limit: +limit });
