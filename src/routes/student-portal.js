@@ -91,7 +91,7 @@ router.get("/timeline", asyncHandler(async (req, res) => {
 router.post("/change-password", asyncHandler(async (req, res) => {
   const { current_password, new_password } = req.body;
   if (!current_password || !new_password) return res.status(400).json({ error: "পুরানো ও নতুন পাসওয়ার্ড দিন" });
-  if (new_password.length < 6) return res.status(400).json({ error: "পাসওয়ার্ড কমপক্ষে ৬ অক্ষর" });
+  if (new_password.length < 8) return res.status(400).json({ error: "পাসওয়ার্ড কমপক্ষে ৮ অক্ষর" });
 
   const { data: student } = await supabase.from("students")
     .select("portal_password_hash").eq("id", req.student.student_id).single();

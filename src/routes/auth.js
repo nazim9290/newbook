@@ -91,7 +91,7 @@ router.post("/register", loginLimiter, asyncHandler(async (req, res) => {
   if (!name || !name.trim()) return res.status(400).json({ error: "নাম দিন" });
   if (!email) return res.status(400).json({ error: "Email দিন" });
   if (!isValidEmail(email)) return res.status(400).json({ error: "সঠিক email দিন" });
-  if (!password || password.length < 6) return res.status(400).json({ error: "Password কমপক্ষে ৬ অক্ষর হতে হবে" });
+  if (!password || password.length < 8) return res.status(400).json({ error: "Password কমপক্ষে ৮ অক্ষর হতে হবে" });
 
   const hash = await bcrypt.hash(password, 10);
 

@@ -11,8 +11,10 @@ router.use(auth);
 
 // GET /api/students — list with search + filters
 router.get("/", checkPermission("students", "read"), asyncHandler(async (req, res) => {
-  const { search, status, country, batch, school, branch, page = 1, limit = 50 } = req.query;
-  const offset = (page - 1) * limit;
+  const { search, status, country, batch, school, branch, page = 1, limit: rawLimit = 50 } = req.query;
+  const limit = Math.min(Math.max(parseInt(rawLimit) || 50, 1), 100); // সর্বোচ্চ ১০০
+  const safePage = Math.max(parseInt(page) || 1, 1);
+  const offset = (safePage - 1) * limit;
 
   // batch ও school এর নাম সহ fetch করো (join)
   let query = supabase.from("students").select("*, batches(name), schools(name_en)", { count: "exact" });

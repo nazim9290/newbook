@@ -23,6 +23,7 @@ const pool = new Pool({
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
+  statement_timeout: 30000,  // ৩০ সেকেন্ডের বেশি query বন্ধ হবে
 });
 
 pool.on("error", (err) => {
