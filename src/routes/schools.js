@@ -2,12 +2,13 @@ const express = require("express");
 const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
+const { checkPermission } = require("../middleware/checkPermission");
 
 const router = express.Router();
 router.use(auth);
 
 // GET /api/schools
-router.get("/", asyncHandler(async (req, res) => {
+router.get("/", checkPermission("schools", "read"), asyncHandler(async (req, res) => {
   const { country } = req.query;
   let query = supabase.from("schools").select("*").order("name_en");
   if (country && country !== "All") query = query.eq("country", country);
@@ -17,7 +18,7 @@ router.get("/", asyncHandler(async (req, res) => {
 }));
 
 // POST /api/schools — নতুন স্কুল তৈরি
-router.post("/", asyncHandler(async (req, res) => {
+router.post("/", checkPermission("schools", "write"), asyncHandler(async (req, res) => {
   const record = {
     ...req.body,
     agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001",
@@ -28,21 +29,21 @@ router.post("/", asyncHandler(async (req, res) => {
 }));
 
 // PATCH /api/schools/:id
-router.patch("/:id", asyncHandler(async (req, res) => {
+router.patch("/:id", checkPermission("schools", "write"), asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("schools").update(req.body).eq("id", req.params.id).select().single();
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
 }));
 
 // DELETE /api/schools/:id
-router.delete("/:id", asyncHandler(async (req, res) => {
+router.delete("/:id", checkPermission("schools", "delete"), asyncHandler(async (req, res) => {
   const { error } = await supabase.from("schools").delete().eq("id", req.params.id);
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json({ success: true });
 }));
 
 // GET /api/schools/:id/submissions
-router.get("/:id/submissions", asyncHandler(async (req, res) => {
+router.get("/:id/submissions", checkPermission("schools", "read"), asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("submissions")
     .select("*, students(name_en)")
@@ -53,7 +54,7 @@ router.get("/:id/submissions", asyncHandler(async (req, res) => {
 }));
 
 // POST /api/schools/:id/submissions
-router.post("/:id/submissions", asyncHandler(async (req, res) => {
+router.post("/:id/submissions", checkPermission("schools", "write"), asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("submissions")
     .insert({ ...req.body, school_id: req.params.id })
@@ -64,7 +65,7 @@ router.post("/:id/submissions", asyncHandler(async (req, res) => {
 }));
 
 // PATCH /api/schools/submissions/:subId
-router.patch("/submissions/:subId", asyncHandler(async (req, res) => {
+router.patch("/submissions/:subId", checkPermission("schools", "write"), asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("submissions").update(req.body).eq("id", req.params.subId).select().single();
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
@@ -75,7 +76,7 @@ router.patch("/submissions/:subId", asyncHandler(async (req, res) => {
 // Body: { student_ids: [...], format: "row" | "column", agency_name }
 // Returns: .xlsx file — school interview student list
 // ================================================================
-router.post("/:id/interview-list", asyncHandler(async (req, res) => {
+router.post("/:id/interview-list", checkPermission("schools", "write"), asyncHandler(async (req, res) => {
   try {
     const { student_ids, format = "row", agency_name = "", staff_name = "", columns = [] } = req.body;
     if (!student_ids || !student_ids.length) return res.status(400).json({ error: "student_ids দিন" });

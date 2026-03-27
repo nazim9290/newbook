@@ -2,10 +2,11 @@ const express = require("express");
 const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
+const { checkPermission } = require("../middleware/checkPermission");
 const router = express.Router();
 router.use(auth);
 
-router.get("/", asyncHandler(async (req, res) => {
+router.get("/", checkPermission("calendar", "read"), asyncHandler(async (req, res) => {
   const { month, type } = req.query;
   let q = supabase.from("calendar_events").select("*, students(name_en)").order("date");
   if (month) q = q.gte("date", month + "-01").lte("date", month + "-31");
@@ -15,19 +16,19 @@ router.get("/", asyncHandler(async (req, res) => {
   res.json(data);
 }));
 
-router.post("/", asyncHandler(async (req, res) => {
+router.post("/", checkPermission("calendar", "write"), asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("calendar_events").insert({ ...req.body, agency_id: req.user.agency_id }).select().single();
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.status(201).json(data);
 }));
 
-router.patch("/:id", asyncHandler(async (req, res) => {
+router.patch("/:id", checkPermission("calendar", "write"), asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("calendar_events").update(req.body).eq("id", req.params.id).select().single();
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
 }));
 
-router.delete("/:id", asyncHandler(async (req, res) => {
+router.delete("/:id", checkPermission("calendar", "delete"), asyncHandler(async (req, res) => {
   const { error } = await supabase.from("calendar_events").delete().eq("id", req.params.id);
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json({ success: true });

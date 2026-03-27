@@ -3,12 +3,13 @@ const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { encrypt, decrypt } = require("../lib/crypto");
+const { checkPermission } = require("../middleware/checkPermission");
 
 const router = express.Router();
 router.use(auth);
 
 // GET /api/documents?student_id=xxx
-router.get("/", asyncHandler(async (req, res) => {
+router.get("/", checkPermission("documents", "read"), asyncHandler(async (req, res) => {
   const { student_id, status } = req.query;
   let query = supabase.from("documents").select("*, students(name_en)").order("updated_at", { ascending: false });
   if (student_id) query = query.eq("student_id", student_id);
@@ -19,7 +20,7 @@ router.get("/", asyncHandler(async (req, res) => {
 }));
 
 // POST /api/documents
-router.post("/", asyncHandler(async (req, res) => {
+router.post("/", checkPermission("documents", "write"), asyncHandler(async (req, res) => {
   const record = { ...req.body, agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001" };
   const { data, error } = await supabase.from("documents").insert(record).select().single();
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
@@ -27,7 +28,7 @@ router.post("/", asyncHandler(async (req, res) => {
 }));
 
 // PATCH /api/documents/:id
-router.patch("/:id", asyncHandler(async (req, res) => {
+router.patch("/:id", checkPermission("documents", "write"), asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("documents")
     .update({ ...req.body, updated_at: new Date().toISOString() })
@@ -39,7 +40,7 @@ router.patch("/:id", asyncHandler(async (req, res) => {
 }));
 
 // GET /api/documents/:id/fields — get document extracted fields for cross-validation
-router.get("/:id/fields", asyncHandler(async (req, res) => {
+router.get("/:id/fields", checkPermission("documents", "read"), asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("document_fields")
     .select("*")
@@ -57,7 +58,7 @@ router.get("/:id/fields", asyncHandler(async (req, res) => {
 const SENSITIVE_DOC_FIELDS = ["nid", "passport_number", "father_en", "mother_en", "permanent_address", "bank_account", "account_number"];
 
 // POST /api/documents/:id/fields — save extracted fields
-router.post("/:id/fields", asyncHandler(async (req, res) => {
+router.post("/:id/fields", checkPermission("documents", "write"), asyncHandler(async (req, res) => {
   const { fields } = req.body; // [{ field_name, field_value }]
   const rows = fields.map((f) => ({
     document_id: req.params.id,
@@ -75,7 +76,7 @@ router.post("/:id/fields", asyncHandler(async (req, res) => {
 }));
 
 // GET /api/documents/cross-validate/:studentId — compare fields across docs
-router.get("/cross-validate/:studentId", asyncHandler(async (req, res) => {
+router.get("/cross-validate/:studentId", checkPermission("documents", "read"), asyncHandler(async (req, res) => {
   const { data: docs, error } = await supabase
     .from("documents")
     .select("id, doc_type, document_fields(field_name, field_value)")

@@ -3,12 +3,13 @@ const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { encryptSensitiveFields, decryptMany } = require("../lib/crypto");
+const { checkPermission } = require("../middleware/checkPermission");
 
 const router = express.Router();
 router.use(auth);
 
 // GET /api/visitors
-router.get("/", asyncHandler(async (req, res) => {
+router.get("/", checkPermission("visitors", "read"), asyncHandler(async (req, res) => {
   const { search, status, branch, page = 1, limit = 50 } = req.query;
   const offset = (page - 1) * limit;
 
@@ -39,7 +40,7 @@ router.get("/", asyncHandler(async (req, res) => {
 }));
 
 // POST /api/visitors — নতুন visitor তৈরি
-router.post("/", asyncHandler(async (req, res) => {
+router.post("/", checkPermission("visitors", "write"), asyncHandler(async (req, res) => {
   const body = req.body;
 
   // Frontend field → DB column mapping
@@ -82,7 +83,7 @@ router.post("/", asyncHandler(async (req, res) => {
 }));
 
 // PATCH /api/visitors/:id
-router.patch("/:id", asyncHandler(async (req, res) => {
+router.patch("/:id", checkPermission("visitors", "write"), asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("visitors")
     .update(req.body)
@@ -94,7 +95,7 @@ router.patch("/:id", asyncHandler(async (req, res) => {
 }));
 
 // POST /api/visitors/:id/convert — convert visitor to student
-router.post("/:id/convert", asyncHandler(async (req, res) => {
+router.post("/:id/convert", checkPermission("visitors", "write"), asyncHandler(async (req, res) => {
   const { data: visitor, error: vErr } = await supabase
     .from("visitors")
     .select("*")

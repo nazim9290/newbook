@@ -4,12 +4,13 @@ const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const bcrypt = require("bcryptjs");
 const { encryptSensitiveFields, decryptSensitiveFields, decryptMany } = require("../lib/crypto");
+const { checkPermission } = require("../middleware/checkPermission");
 
 const router = express.Router();
 router.use(auth);
 
 // GET /api/students — list with search + filters
-router.get("/", asyncHandler(async (req, res) => {
+router.get("/", checkPermission("students", "read"), asyncHandler(async (req, res) => {
   const { search, status, country, batch, school, branch, page = 1, limit = 50 } = req.query;
   const offset = (page - 1) * limit;
 
@@ -45,7 +46,7 @@ router.get("/", asyncHandler(async (req, res) => {
 }));
 
 // GET /api/students/:id — single student with related data
-router.get("/:id", asyncHandler(async (req, res) => {
+router.get("/:id", checkPermission("students", "read"), asyncHandler(async (req, res) => {
   const { data: student, error } = await supabase
     .from("students")
     .select(`
@@ -83,7 +84,7 @@ const STUDENT_COLUMNS = [
   "counselor", "branch", "gdrive_folder_url", "photo_url", "internal_notes",
 ];
 
-router.post("/", asyncHandler(async (req, res) => {
+router.post("/", checkPermission("students", "write"), asyncHandler(async (req, res) => {
   const body = req.body;
 
   // শুধু valid DB columns রাখো, বাকি সব ফেলে দাও
@@ -110,7 +111,7 @@ router.post("/", asyncHandler(async (req, res) => {
 }));
 
 // PATCH /api/students/:id — student update
-router.patch("/:id", asyncHandler(async (req, res) => {
+router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (req, res) => {
   const body = req.body;
 
   // শুধু valid DB columns রাখো
@@ -136,14 +137,14 @@ router.patch("/:id", asyncHandler(async (req, res) => {
 }));
 
 // DELETE /api/students/:id
-router.delete("/:id", asyncHandler(async (req, res) => {
+router.delete("/:id", checkPermission("students", "delete"), asyncHandler(async (req, res) => {
   const { error } = await supabase.from("students").delete().eq("id", req.params.id);
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json({ success: true });
 }));
 
 // POST /api/students/:id/payments — add payment
-router.post("/:id/payments", asyncHandler(async (req, res) => {
+router.post("/:id/payments", checkPermission("students", "write"), asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("payments")
     .insert({ ...req.body, student_id: req.params.id })
@@ -158,7 +159,7 @@ router.post("/:id/payments", asyncHandler(async (req, res) => {
 // GET /api/students/import/template — Import template (.xlsx) download
 // Phone, NID, WhatsApp column Text format — leading zero রক্ষা
 // ================================================================
-router.get("/import/template", asyncHandler(async (req, res) => {
+router.get("/import/template", checkPermission("students", "read"), asyncHandler(async (req, res) => {
   const ExcelJS = require("exceljs");
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Students");
@@ -250,7 +251,7 @@ router.get("/import/template", asyncHandler(async (req, res) => {
 // Body: { students: [{ name_en, phone, dob, ... }, ...] }
 // Frontend Excel parse করে mapped data পাঠায়
 // ================================================================
-router.post("/import", asyncHandler(async (req, res) => {
+router.post("/import", checkPermission("students", "write"), asyncHandler(async (req, res) => {
   const { students: rows } = req.body;
   if (!Array.isArray(rows) || rows.length === 0) {
     return res.status(400).json({ error: "কোনো student data পাওয়া যায়নি" });
@@ -313,7 +314,7 @@ const multer = require("multer");
 const ExcelJS = require("exceljs");
 const importUpload = multer({ dest: require("path").join(__dirname, "../../uploads"), limits: { fileSize: 10 * 1024 * 1024 } });
 
-router.post("/import/parse", importUpload.single("file"), asyncHandler(async (req, res) => {
+router.post("/import/parse", checkPermission("students", "write"), importUpload.single("file"), asyncHandler(async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Excel ফাইল দিন" });
 
@@ -389,7 +390,7 @@ router.post("/import/parse", importUpload.single("file"), asyncHandler(async (re
 // POST /api/students/import/mapped — Excel + mapping → bulk import
 // FormData: file + mapping JSON
 // ================================================================
-router.post("/import/mapped", importUpload.single("file"), asyncHandler(async (req, res) => {
+router.post("/import/mapped", checkPermission("students", "write"), importUpload.single("file"), asyncHandler(async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Excel ফাইল দিন" });
     const mapping = JSON.parse(req.body.mapping || "{}");
@@ -472,7 +473,7 @@ router.post("/import/mapped", importUpload.single("file"), asyncHandler(async (r
 // ================================================================
 // POST /api/students/:id/portal-access — Admin portal access on/off + password set
 // ================================================================
-router.post("/:id/portal-access", asyncHandler(async (req, res) => {
+router.post("/:id/portal-access", checkPermission("students", "write"), asyncHandler(async (req, res) => {
   const { enabled, password } = req.body;
   const updates = { portal_access: !!enabled };
 

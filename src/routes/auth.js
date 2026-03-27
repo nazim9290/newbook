@@ -4,6 +4,8 @@ const jwt = require("jsonwebtoken");
 const supabase = require("../lib/supabase");
 const asyncHandler = require("../lib/asyncHandler");
 const rateLimit = require("express-rate-limit");
+const auth = require("../middleware/auth");
+const { getPermissionsForRole } = require("../middleware/checkPermission");
 
 const router = express.Router();
 
@@ -101,6 +103,12 @@ router.post("/register", loginLimiter, asyncHandler(async (req, res) => {
 
   if (error) return res.status(400).json({ error: "রেজিস্ট্রেশন ব্যর্থ — email ইতিমধ্যে ব্যবহৃত হতে পারে" });
   res.status(201).json(data);
+}));
+
+// GET /api/auth/permissions — logged-in user-এর permissions return করে
+router.get("/permissions", auth, asyncHandler(async (req, res) => {
+  const permissions = getPermissionsForRole(req.user.role);
+  res.json({ role: req.user.role, permissions });
 }));
 
 module.exports = router;
