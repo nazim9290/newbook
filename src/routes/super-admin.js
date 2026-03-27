@@ -10,6 +10,7 @@ const supabase = require("../lib/supabase");
 const asyncHandler = require("../lib/asyncHandler");
 const auth = require("../middleware/auth");
 const bcrypt = require("bcryptjs");
+const { generatePrefix, ensureUniquePrefix } = require("../lib/idGenerator");
 const router = express.Router();
 
 // Super Admin guard — শুধু super_admin role access পাবে
@@ -82,11 +83,16 @@ router.post("/agencies", asyncHandler(async (req, res) => {
   const trialEndsAt = new Date();
   trialEndsAt.setDate(trialEndsAt.getDate() + trialDays);
 
-  // Agency তৈরি
+  // ── Agency prefix auto-generate — নামের আদ্যক্ষর থেকে ──
+  const basePrefix = generatePrefix(name);
+  const prefix = await ensureUniquePrefix(basePrefix);
+
+  // Agency তৈরি (prefix সহ)
   const settings = { dedicated: !!dedicated };
   const { data: agency, error: agencyErr } = await supabase.from("agencies")
     .insert({
-      name, name_bn, subdomain, phone, email, address,
+      name, name_bn, subdomain, phone, email, address, prefix,
+      id_counters: { student: 0, visitor: 0, payment: 0, invoice: 0, submission: 0 },
       plan: dedicated ? "dedicated" : "standard",
       settings, status: "active",
       trial_ends_at: trialEndsAt.toISOString(),

@@ -7,10 +7,16 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TABLE IF NOT EXISTS agencies (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   subdomain TEXT UNIQUE NOT NULL, name TEXT NOT NULL, name_bn TEXT,
+  prefix TEXT UNIQUE,  -- Agency ID prefix (SEC, DLA, ABI etc.) — সব entity ID-তে ব্যবহার হবে
+  id_counters JSONB DEFAULT '{"student":0,"visitor":0,"payment":0,"invoice":0,"submission":0}',
   phone TEXT, email TEXT, trade_license TEXT, tin TEXT, logo_url TEXT, address TEXT,
   settings JSONB DEFAULT '{}', status TEXT DEFAULT 'active', plan TEXT DEFAULT 'free',
   created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Existing agencies-এ prefix column যোগ (safe — already exists হলে skip)
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS prefix TEXT UNIQUE;
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS id_counters JSONB DEFAULT '{"student":0,"visitor":0,"payment":0,"invoice":0,"submission":0}';
 
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -34,6 +40,7 @@ CREATE TABLE IF NOT EXISTS agents (
 CREATE TABLE IF NOT EXISTS visitors (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   agency_id UUID REFERENCES agencies(id) ON DELETE CASCADE,
+  display_id TEXT,  -- Agency prefix visitor ID (SEC-V-2026-001)
   name TEXT, name_en TEXT, name_bn TEXT, phone TEXT NOT NULL, guardian_phone TEXT,
   email TEXT, dob DATE, gender TEXT, blood_group TEXT, address TEXT,
   education JSONB DEFAULT '[]',

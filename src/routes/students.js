@@ -6,6 +6,7 @@ const bcrypt = require("bcryptjs");
 const { encryptSensitiveFields, decryptSensitiveFields, decryptMany } = require("../lib/crypto");
 const { checkPermission } = require("../middleware/checkPermission");
 const { logActivity } = require("../lib/activityLog");
+const { generateId } = require("../lib/idGenerator");
 
 const router = express.Router();
 router.use(auth);
@@ -89,10 +90,15 @@ const STUDENT_COLUMNS = [
 
 router.post("/", checkPermission("students", "write"), asyncHandler(async (req, res) => {
   const body = req.body;
+  const agencyId = req.user.agency_id || "a0000000-0000-0000-0000-000000000001";
+
+  // ── Agency prefix দিয়ে Student ID auto-generate ──
+  const studentId = body.id || await generateId(agencyId, "student");
 
   // শুধু valid DB columns রাখো, বাকি সব ফেলে দাও
-  const record = { agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001" };
+  const record = { id: studentId, agency_id: agencyId };
   for (const col of STUDENT_COLUMNS) {
+    if (col === "id") continue; // id উপরে set হয়েছে
     if (body[col] !== undefined && body[col] !== "") record[col] = body[col];
   }
 

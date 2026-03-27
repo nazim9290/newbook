@@ -4,6 +4,7 @@ const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { encryptSensitiveFields, decryptMany } = require("../lib/crypto");
 const { checkPermission } = require("../middleware/checkPermission");
+const { generateId } = require("../lib/idGenerator");
 
 const router = express.Router();
 router.use(auth);
@@ -41,13 +42,18 @@ router.get("/", checkPermission("visitors", "read"), asyncHandler(async (req, re
   res.json({ data: decryptMany(mapped), total: count });
 }));
 
-// POST /api/visitors — নতুন visitor তৈরি
+// POST /api/visitors — নতুন visitor তৈরি (agency prefix ID সহ)
 router.post("/", checkPermission("visitors", "write"), asyncHandler(async (req, res) => {
   const body = req.body;
+  const agencyId = req.user.agency_id || "a0000000-0000-0000-0000-000000000001";
+
+  // ── Agency prefix দিয়ে Visitor display ID generate ──
+  const displayId = await generateId(agencyId, "visitor");
 
   // Frontend field → DB column mapping
   const record = {
-    agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001",
+    agency_id: agencyId,
+    display_id: displayId,
     name: body.name || body.name_en || "",
     name_bn: body.name_bn || body.name || "",
     phone: body.phone || "",
