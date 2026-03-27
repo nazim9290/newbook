@@ -73,10 +73,25 @@ router.post("/agencies", asyncHandler(async (req, res) => {
   const { data: existing } = await supabase.from("agencies").select("id").eq("subdomain", subdomain).single();
   if (existing) return res.status(400).json({ error: "এই subdomain ইতিমধ্যে ব্যবহৃত" });
 
+  // Platform pricing config থেকে defaults নাও
+  const { data: pricingConfig } = await supabase.from("platform_settings").select("value").eq("key", "pricing").single();
+  const defaultFee = pricingConfig?.value?.per_student_fee || 3000;
+  const trialDays = pricingConfig?.value?.trial_days || 14;
+
+  // Trial end date calculate
+  const trialEndsAt = new Date();
+  trialEndsAt.setDate(trialEndsAt.getDate() + trialDays);
+
   // Agency তৈরি
   const settings = { dedicated: !!dedicated };
   const { data: agency, error: agencyErr } = await supabase.from("agencies")
-    .insert({ name, name_bn, subdomain, phone, email, address, plan: plan || "free", settings, status: "active" })
+    .insert({
+      name, name_bn, subdomain, phone, email, address,
+      plan: dedicated ? "dedicated" : "standard",
+      settings, status: "active",
+      trial_ends_at: trialEndsAt.toISOString(),
+      per_student_fee: dedicated ? 0 : defaultFee,
+    })
     .select().single();
 
   if (agencyErr) return res.status(500).json({ error: "Agency তৈরি ব্যর্থ" });
@@ -155,6 +170,53 @@ router.get("/stats", asyncHandler(async (req, res) => {
       enterprise: (agencies || []).filter(a => a.plan === "enterprise").length,
     }
   });
+}));
+
+// ══════════════════════════════════════
+// Platform Pricing Settings
+// ══════════════════════════════════════
+
+// GET /pricing — বর্তমান pricing config
+router.get("/pricing", asyncHandler(async (req, res) => {
+  const { data } = await supabase.from("platform_settings").select("*").eq("key", "pricing").single();
+  res.json(data?.value || { per_student_fee: 3000, trial_days: 14, currency: "BDT" });
+}));
+
+// PATCH /pricing — pricing config আপডেট
+router.patch("/pricing", asyncHandler(async (req, res) => {
+  const { per_student_fee, trial_days } = req.body;
+  const value = { per_student_fee: Number(per_student_fee) || 3000, trial_days: Number(trial_days) || 14, currency: "BDT" };
+  await supabase.from("platform_settings").upsert({ key: "pricing", value, updated_at: new Date().toISOString() }, { onConflict: "key" });
+  res.json({ success: true, pricing: value });
+}));
+
+// GET /billing — সব agency-র billing summary
+router.get("/billing", asyncHandler(async (req, res) => {
+  const { data: agencies } = await supabase.from("agencies").select("id, name, subdomain, plan, per_student_fee, total_billed, total_paid, trial_ends_at, status, settings");
+  const { data: records } = await supabase.from("billing_records").select("*").order("created_at", { ascending: false });
+
+  const summary = (agencies || []).map(a => {
+    const agencyRecords = (records || []).filter(r => r.agency_id === a.id);
+    const isDedicated = a.settings?.dedicated;
+    const trialActive = a.trial_ends_at && new Date(a.trial_ends_at) > new Date();
+    return {
+      ...a, isDedicated, trialActive,
+      billedCount: agencyRecords.length,
+      pendingAmount: agencyRecords.filter(r => r.status === "pending").reduce((s, r) => s + (r.amount || 0), 0),
+    };
+  });
+
+  res.json(summary);
+}));
+
+// PATCH /agencies/:id/fee — agency-র per student fee পরিবর্তন
+router.patch("/agencies/:id/fee", asyncHandler(async (req, res) => {
+  const { per_student_fee } = req.body;
+  const { data, error } = await supabase.from("agencies")
+    .update({ per_student_fee: Number(per_student_fee) || 3000 })
+    .eq("id", req.params.id).select().single();
+  if (error) return res.status(500).json({ error: "আপডেট ব্যর্থ" });
+  res.json(data);
 }));
 
 module.exports = router;

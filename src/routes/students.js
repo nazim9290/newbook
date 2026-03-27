@@ -133,6 +133,35 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
     .single();
 
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+
+  // ── Billing: student ENROLLED হলে charge তৈরি ──
+  if (body.status === "ENROLLED" && data) {
+    try {
+      const agencyId = data.agency_id || req.user?.agency_id;
+      if (agencyId) {
+        // Agency-র per_student_fee নাও
+        const { data: agency } = await supabase.from("agencies").select("per_student_fee, trial_ends_at, settings").eq("id", agencyId).single();
+        const isDedicated = agency?.settings?.dedicated;
+        const trialActive = agency?.trial_ends_at && new Date(agency.trial_ends_at) > new Date();
+
+        // Dedicated না হলে এবং trial শেষ হলে billing record তৈরি
+        if (!isDedicated && !trialActive && agency?.per_student_fee > 0) {
+          await supabase.from("billing_records").insert({
+            agency_id: agencyId, student_id: data.id,
+            event: "student_enrolled", amount: agency.per_student_fee, status: "pending",
+          });
+          // Agency total billed update
+          await supabase.from("agencies").update({
+            total_billed: (agency.total_billed || 0) + agency.per_student_fee
+          }).eq("id", agencyId);
+        }
+      }
+    } catch (billingErr) {
+      console.error("[Billing] Error:", billingErr.message);
+      // Billing error হলেও student update সফল — billing পরে ঠিক করা যাবে
+    }
+  }
+
   res.json(decryptSensitiveFields(data));
 }));
 
