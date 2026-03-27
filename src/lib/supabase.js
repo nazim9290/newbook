@@ -440,4 +440,10 @@ module.exports = {
   from: function(table) { return new QueryBuilder(table); },
   storage: storage,
   pool: pool,
+  // Helper: agency-scoped query — agencyId দিলে সেই agency-র data ফিল্টার করে
+  forAgency: function(table, agencyId) {
+    var q = new QueryBuilder(table);
+    if (agencyId) q.eq("agency_id", agencyId);
+    return q;
+  },
 };

@@ -29,9 +29,9 @@ function normalizeRole(role) {
 // Permission check middleware
 function checkPermission(module, action) {
   return (req, res, next) => {
-    // owner সবসময় access পায়
+    // super_admin ও owner সবসময় সব access পায়
     const role = normalizeRole(req.user?.role);
-    if (role === "owner") return next();
+    if (role === "super_admin" || role === "owner") return next();
 
     const perms = DEFAULT_PERMISSIONS[role];
     if (!perms) return res.status(403).json({ error: "আপনার এই কাজের অনুমতি নেই" });
@@ -50,7 +50,8 @@ function checkPermission(module, action) {
 // Frontend-এর জন্য role-এর permissions object return করে
 function getPermissionsForRole(role) {
   const normalized = normalizeRole(role);
-  const perms = DEFAULT_PERMISSIONS[normalized] || DEFAULT_PERMISSIONS["counselor"];
+  // super_admin-এর permissions owner-এর মতোই (সব module-এ full access)
+  const perms = DEFAULT_PERMISSIONS[normalized] || (normalized === "super_admin" ? DEFAULT_PERMISSIONS["owner"] : DEFAULT_PERMISSIONS["counselor"]);
   const result = {};
   for (const [mod, p] of Object.entries(perms)) {
     result[mod] = { read: p.includes("r"), write: p.includes("w"), delete: p.includes("d") };

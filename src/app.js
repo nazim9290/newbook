@@ -53,6 +53,7 @@ app.get("/api/health", (req, res) => {
 // ═══════════════════════════════════════════════════════
 // API Routes — প্রতিটি module আলাদা route file-এ
 // ═══════════════════════════════════════════════════════
+app.use("/api/super-admin", require("./routes/super-admin"));   // Super Admin — agency management
 app.use("/api/auth", require("./routes/auth"));                 // লগইন ও রেজিস্ট্রেশন
 app.use("/api/students", require("./routes/students"));         // স্টুডেন্ট CRUD
 app.use("/api/visitors", require("./routes/visitors"));         // ভিজিটর/লিড CRUD
