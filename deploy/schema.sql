@@ -125,6 +125,40 @@ CREATE TABLE IF NOT EXISTS doc_types (id UUID PRIMARY KEY DEFAULT uuid_generate_
 CREATE TABLE IF NOT EXISTS document_data (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), agency_id UUID REFERENCES agencies(id), student_id TEXT REFERENCES students(id) ON DELETE CASCADE, doc_type_id UUID REFERENCES doc_types(id) ON DELETE CASCADE, field_data JSONB DEFAULT '{}', status TEXT DEFAULT 'incomplete', created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now(), UNIQUE(student_id, doc_type_id));
 CREATE TABLE IF NOT EXISTS activity_log (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), agency_id UUID REFERENCES agencies(id), user_id UUID, action TEXT, module TEXT, record_id TEXT, description TEXT, old_value JSONB, new_value JSONB, ip_address TEXT, created_at TIMESTAMPTZ DEFAULT now());
 
+-- Partner Agencies (B2B) — অন্য এজেন্সি থেকে আসা student tracking
+CREATE TABLE IF NOT EXISTS partner_agencies (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  agency_id UUID REFERENCES agencies(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, contact_person TEXT, phone TEXT, email TEXT, address TEXT,
+  services TEXT[] DEFAULT '{}', commission_rate NUMERIC DEFAULT 0,
+  status TEXT DEFAULT 'active', notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS partner_students (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  partner_id UUID REFERENCES partner_agencies(id) ON DELETE CASCADE,
+  student_id TEXT REFERENCES students(id) ON DELETE SET NULL,
+  student_name TEXT, fee NUMERIC DEFAULT 0, paid NUMERIC DEFAULT 0,
+  status TEXT DEFAULT 'active', notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Pre-Departure tracking — COE থেকে arrival পর্যন্ত checklist
+CREATE TABLE IF NOT EXISTS pre_departure (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  agency_id UUID REFERENCES agencies(id) ON DELETE CASCADE,
+  student_id TEXT REFERENCES students(id) ON DELETE CASCADE,
+  coe_number TEXT, coe_date DATE,
+  health_status TEXT DEFAULT 'pending', health_date DATE, health_notes TEXT,
+  tuition_amount NUMERIC DEFAULT 0, tuition_remitted BOOLEAN DEFAULT false, tuition_date DATE,
+  vfs_appointment_date DATE, vfs_docs_submitted BOOLEAN DEFAULT false,
+  visa_status TEXT DEFAULT 'pending', visa_date DATE, visa_expiry DATE,
+  flight_date DATE, flight_number TEXT, arrival_confirmed BOOLEAN DEFAULT false,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(student_id)
+);
+
 -- Seed default agency + admin
 INSERT INTO agencies (id, subdomain, name, name_bn, plan, status) VALUES ('a0000000-0000-0000-0000-000000000001', 'demo', 'AgencyBook Demo', 'AgencyBook ডেমো', 'pro', 'active') ON CONFLICT (id) DO NOTHING;
 INSERT INTO users (id, agency_id, name, email, password_hash, role, branch) VALUES ('u0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'Admin', 'admin@agencybook.net', '$2a$10$XQxBj0JM6x/HxmHLkZPfCOK5bCGPGMlbSIlWMvfzNCwEd.JWjKF5i', 'owner', 'Main') ON CONFLICT DO NOTHING;

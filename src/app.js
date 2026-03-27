@@ -27,8 +27,12 @@ app.use((req, res, next) => {
   next();
 });
 
-// CORS: শুধু অনুমোদিত origin allow (CORS_ORIGIN env var + localhost)
-const allowedOrigins = (process.env.CORS_ORIGIN || "").split(",").map(s => s.trim()).filter(Boolean);
+// CORS: অনুমোদিত origin allow (agencybook.net + CORS_ORIGIN env var + localhost)
+const allowedOrigins = [
+  "agencybook.net",           // Production domain
+  "agencybook.netlify.app",   // Netlify deploy preview
+  ...(process.env.CORS_ORIGIN || "").split(",").map(s => s.trim()).filter(Boolean),
+];
 app.use(cors({
   origin: function (origin, callback) {
     // Postman/curl — no origin header
@@ -37,7 +41,7 @@ app.use(cors({
     if (origin.includes("localhost") || origin.includes("127.0.0.1")) {
       return callback(null, true);
     }
-    // CORS_ORIGIN env var-এ থাকা origin গুলো allow
+    // অনুমোদিত origin গুলো allow (agencybook.net, netlify, env var)
     if (allowedOrigins.some(o => origin.includes(o))) {
       return callback(null, true);
     }
@@ -56,6 +60,7 @@ app.get("/api/health", (req, res) => {
 // ═══════════════════════════════════════════════════════
 // API Routes — প্রতিটি module আলাদা route file-এ
 // ═══════════════════════════════════════════════════════
+app.use("/api/dashboard", require("./routes/dashboard"));       // Dashboard stats
 app.use("/api/super-admin", require("./routes/super-admin"));   // Super Admin — agency management
 app.use("/api/auth", require("./routes/auth"));                 // লগইন ও রেজিস্ট্রেশন
 app.use("/api/students", require("./routes/students"));         // স্টুডেন্ট CRUD
@@ -75,7 +80,11 @@ app.use("/api/inventory", require("./routes/inventory"));       // সম্প�
 app.use("/api/submissions", require("./routes/submissions"));   // স্কুলে submission
 app.use("/api/docgen", require("./routes/docgen"));             // Document Generator (Translation)
 app.use("/api/docdata", require("./routes/docdata"));           // Document Types ও Student Document Data
+app.use("/api/users", require("./routes/users"));                   // ইউজার ও Branch ম্যানেজমেন্ট
 app.use("/api/student-portal", require("./routes/student-portal")); // স্টুডেন্ট পোর্টাল (self-service)
+app.use("/api/reports", require("./routes/reports"));               // রিপোর্ট ও Analytics
+app.use("/api/partners", require("./routes/partners"));             // পার্টনার এজেন্সি (B2B)
+app.use("/api/pre-departure", require("./routes/pre-departure"));   // প্রি-ডিপার্চার ও VFS
 
 // ── 404 Handler — route না পেলে error ──
 app.use((req, res) => {
