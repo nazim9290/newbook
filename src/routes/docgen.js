@@ -11,21 +11,43 @@ const path = require("path");
 const fs = require("fs");
 const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
+const asyncHandler = require("../lib/asyncHandler");
 
 const router = express.Router();
 router.use(auth);
 
-// File upload
+// Filename sanitization — path traversal ও special char সরাও
+const sanitize = (name) => name.replace(/[^a-zA-Z0-9._-]/g, "_");
+
+// Allowed MIME types for docx upload
+const ALLOWED_MIMES = [
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/msword",
+  "application/octet-stream",
+];
+
+// File upload — sanitized filename + MIME validation
 const storage = multer.diskStorage({
   destination: path.join(__dirname, "../../uploads"),
-  filename: (req, file, cb) => cb(null, `doctemplate_${Date.now()}_${file.originalname}`),
+  filename: (req, file, cb) => cb(null, `doctemplate_${Date.now()}_${sanitize(file.originalname)}`),
 });
-const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    // MIME type validation — শুধু .docx / .doc allow
+    if (ALLOWED_MIMES.includes(file.mimetype) || file.originalname.match(/\.(docx?|DOCX?)$/)) {
+      cb(null, true);
+    } else {
+      cb(new Error("শুধু .docx বা .doc ফাইল আপলোড করুন"));
+    }
+  },
+});
 
 // ================================================================
 // GET /api/docgen/templates — সব document template
 // ================================================================
-router.get("/templates", async (req, res) => {
+router.get("/templates", asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("doc_templates")
     .select("*")
@@ -33,16 +55,16 @@ router.get("/templates", async (req, res) => {
 
   if (error) {
     // Table না থাকলে empty return
-    if (error.message.includes("does not exist")) return res.json([]);
-    return res.status(500).json({ error: error.message });
+    if (error.message && error.message.includes("does not exist")) return res.json([]);
+    return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   }
   res.json(data || []);
-});
+}));
 
 // ================================================================
 // POST /api/docgen/upload — .docx template upload + {{}} detect
 // ================================================================
-router.post("/upload", upload.single("file"), async (req, res) => {
+router.post("/upload", upload.single("file"), asyncHandler(async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "ফাইল দিন" });
     const { template_name, category } = req.body;
@@ -108,22 +130,23 @@ router.post("/upload", upload.single("file"), async (req, res) => {
       .select()
       .single();
 
-    if (dbErr) return res.status(400).json({ error: dbErr.message });
+    if (dbErr) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
     // Cleanup local
     if (!upErr) try { fs.unlinkSync(req.file.path); } catch {}
 
     res.json({ template: tmpl, placeholders });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Upload error:", err);
+    res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   }
-});
+}));
 
 // ================================================================
 // POST /api/docgen/generate — template + student → .docx download
 // Body: { template_id, student_id, format: "docx" | "pdf" }
 // ================================================================
-router.post("/generate", async (req, res) => {
+router.post("/generate", asyncHandler(async (req, res) => {
   try {
     const { template_id, student_id, format = "docx", doc_data = {} } = req.body;
     if (!template_id || !student_id) return res.status(400).json({ error: "template_id ও student_id দিন" });
@@ -227,14 +250,15 @@ router.post("/generate", async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${templateName}_${studentName}.docx"`);
     res.send(outputBuffer);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Generate error:", err);
+    res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   }
-});
+}));
 
 // ================================================================
 // POST /api/docgen/templates/:id/mapping — placeholder → field mapping save
 // ================================================================
-router.post("/templates/:id/mapping", async (req, res) => {
+router.post("/templates/:id/mapping", asyncHandler(async (req, res) => {
   const { placeholders } = req.body;
   if (!Array.isArray(placeholders)) return res.status(400).json({ error: "placeholders array দিন" });
 
@@ -245,23 +269,23 @@ router.post("/templates/:id/mapping", async (req, res) => {
     .select()
     .single();
 
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
-});
+}));
 
 // ================================================================
 // DELETE /api/docgen/templates/:id
 // ================================================================
-router.delete("/templates/:id", async (req, res) => {
+router.delete("/templates/:id", asyncHandler(async (req, res) => {
   const { data: tmpl } = await supabase.from("doc_templates").select("file_url").eq("id", req.params.id).single();
   if (tmpl?.file_url) {
     if (fs.existsSync(tmpl.file_url)) try { fs.unlinkSync(tmpl.file_url); } catch {}
     await supabase.storage.from("templates").remove([tmpl.file_url]);
   }
   const { error } = await supabase.from("doc_templates").delete().eq("id", req.params.id);
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json({ success: true });
-});
+}));
 
 // ================================================================
 // HELPERS

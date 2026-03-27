@@ -5,14 +5,18 @@ const path = require("path");
 const fs = require("fs");
 const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
+const asyncHandler = require("../lib/asyncHandler");
 
 const router = express.Router();
 router.use(auth);
 
-// File upload config
+// Filename sanitization — path traversal ও special char সরাও
+const sanitize = (name) => name.replace(/[^a-zA-Z0-9._-]/g, "_");
+
+// File upload config — sanitized filename
 const storage = multer.diskStorage({
   destination: path.join(__dirname, "../../uploads"),
-  filename: (req, file, cb) => cb(null, `template_${Date.now()}_${file.originalname}`),
+  filename: (req, file, cb) => cb(null, `template_${Date.now()}_${sanitize(file.originalname)}`),
 });
 const upload = multer({
   storage,
@@ -28,7 +32,7 @@ const upload = multer({
 // POST /api/excel/upload-template
 // Upload .xlsx → parse ALL cells → return for mapping
 // ================================================================
-router.post("/upload-template", upload.single("file"), async (req, res) => {
+router.post("/upload-template", upload.single("file"), asyncHandler(async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "ফাইল আপলোড করুন" });
 
@@ -105,7 +109,7 @@ router.post("/upload-template", upload.single("file"), async (req, res) => {
       .select()
       .single();
 
-    if (error) return res.status(400).json({ error: error.message });
+    if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
     // 4. Clean up local file
     if (!uploadError) {
@@ -120,26 +124,27 @@ router.post("/upload-template", upload.single("file"), async (req, res) => {
       storage: uploadError ? "local" : "supabase",
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Upload template error:", err);
+    res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   }
-});
+}));
 
 // ================================================================
 // GET /api/excel/templates
 // ================================================================
-router.get("/templates", async (req, res) => {
+router.get("/templates", asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("excel_templates")
     .select("*")
     .order("created_at", { ascending: false });
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
-});
+}));
 
 // ================================================================
 // GET /api/excel/templates/:id
 // ================================================================
-router.get("/templates/:id", async (req, res) => {
+router.get("/templates/:id", asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("excel_templates")
     .select("*")
@@ -147,13 +152,13 @@ router.get("/templates/:id", async (req, res) => {
     .single();
   if (error) return res.status(404).json({ error: "Template পাওয়া যায়নি" });
   res.json(data);
-});
+}));
 
 // ================================================================
 // POST /api/excel/templates/:id/mapping
 // Body: { mappings: [{ cell: "B3", label: "名前", field: "name_en", targetCell: "B3" }, ...] }
 // ================================================================
-router.post("/templates/:id/mapping", async (req, res) => {
+router.post("/templates/:id/mapping", asyncHandler(async (req, res) => {
   const { mappings } = req.body;
   if (!Array.isArray(mappings)) return res.status(400).json({ error: "mappings array দিন" });
 
@@ -166,16 +171,16 @@ router.post("/templates/:id/mapping", async (req, res) => {
     .select()
     .single();
 
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
-});
+}));
 
 // ================================================================
 // POST /api/excel/generate
 // Body: { template_id, student_ids: ["S-001", ...] }
 // Returns: .xlsx file (exact copy of template with data filled)
 // ================================================================
-router.post("/generate", async (req, res) => {
+router.post("/generate", asyncHandler(async (req, res) => {
   try {
     const { template_id, student_ids } = req.body;
     if (!template_id) return res.status(400).json({ error: "template_id দিন" });
@@ -195,7 +200,7 @@ router.post("/generate", async (req, res) => {
       .from("students")
       .select("*, student_education(*), student_jp_exams(*), student_family(*), sponsors(*)")
       .in("id", student_ids);
-    if (sErr) return res.status(500).json({ error: sErr.message });
+    if (sErr) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
     // Template file: Supabase storage থেকে download
     const templateBuffer = await getTemplateBuffer(tmpl.template_url);
@@ -224,16 +229,17 @@ router.post("/generate", async (req, res) => {
       res.send(buffer);
     }
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Generate error:", err);
+    res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   }
-});
+}));
 
 // ================================================================
 // POST /api/excel/generate-single
 // Body: { template_id, student_id }
 // For bulk: frontend calls this once per student
 // ================================================================
-router.post("/generate-single", async (req, res) => {
+router.post("/generate-single", asyncHandler(async (req, res) => {
   try {
     const { template_id, student_id } = req.body;
     if (!template_id || !student_id) return res.status(400).json({ error: "template_id ও student_id দিন" });
@@ -263,14 +269,15 @@ router.post("/generate-single", async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${encName(tmpl.school_name)}_${encName(student.name_en || student.id)}.xlsx"`);
     res.send(buffer);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Generate single error:", err);
+    res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   }
-});
+}));
 
 // ================================================================
 // POST /api/excel/re-parse/:id
 // ================================================================
-router.post("/re-parse/:id", async (req, res) => {
+router.post("/re-parse/:id", asyncHandler(async (req, res) => {
   try {
     const { data: tmpl, error } = await supabase
       .from("excel_templates")
@@ -308,14 +315,15 @@ router.post("/re-parse/:id", async (req, res) => {
     const mappingSuggestions = detectMappings(allCells, workbook);
     res.json({ template: tmpl, allCells, mappingSuggestions, existingMappings: tmpl.mappings || [] });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Re-parse error:", err);
+    res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   }
-});
+}));
 
 // ================================================================
 // DELETE /api/excel/templates/:id
 // ================================================================
-router.delete("/templates/:id", async (req, res) => {
+router.delete("/templates/:id", asyncHandler(async (req, res) => {
   const { data: tmpl } = await supabase.from("excel_templates").select("template_url").eq("id", req.params.id).single();
   if (tmpl && tmpl.template_url) {
     // Delete from local
@@ -324,9 +332,9 @@ router.delete("/templates/:id", async (req, res) => {
     await supabase.storage.from("templates").remove([tmpl.template_url]);
   }
   const { error } = await supabase.from("excel_templates").delete().eq("id", req.params.id);
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json({ success: true });
-});
+}));
 
 // ================================================================
 // GET /api/excel/system-fields
@@ -709,7 +717,10 @@ async function resolveTemplatePath(templateUrl) {
 
   // Otherwise download from Supabase Storage
   const { data, error } = await supabase.storage.from("templates").download(templateUrl);
-  if (error) throw new Error("Template ফাইল ডাউনলোড ব্যর্থ: " + error.message);
+  if (error) {
+    console.error("Storage download error:", error.message);
+    throw new Error("Template ফাইল ডাউনলোড ব্যর্থ");
+  }
 
   // Save to temp file
   const tempPath = path.join(__dirname, "../../uploads", `temp_${Date.now()}.xlsx`);

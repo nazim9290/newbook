@@ -15,15 +15,30 @@ const cors = require("cors");
 const app = express();
 
 // ── Middleware ──
-// CORS: সব frontend origin allow (localhost যেকোনো port + production)
+
+// Security headers — XSS, clickjacking, MIME sniffing protection
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  next();
+});
+
+// CORS: শুধু অনুমোদিত origin allow (CORS_ORIGIN env var + localhost)
+const allowedOrigins = (process.env.CORS_ORIGIN || "").split(",").map(s => s.trim()).filter(Boolean);
 app.use(cors({
   origin: function (origin, callback) {
-    // localhost যেকোনো port, production URL, অথবা no origin (Postman/curl)
-    if (!origin || origin.includes("localhost") || origin.includes("127.0.0.1") || origin.includes("onrender.com") || origin.includes("vercel.app") || origin.includes("netlify.app")) {
-      callback(null, true);
-    } else {
-      callback(null, true); // সব allow — production-এ restrict করা যাবে
+    // Postman/curl — no origin header
+    if (!origin) return callback(null, true);
+    // localhost / 127.0.0.1 সবসময় allow (development)
+    if (origin.includes("localhost") || origin.includes("127.0.0.1")) {
+      return callback(null, true);
     }
+    // CORS_ORIGIN env var-এ থাকা origin গুলো allow
+    if (allowedOrigins.some(o => origin.includes(o))) {
+      return callback(null, true);
+    }
+    callback(new Error("CORS not allowed"), false);
   },
   credentials: true,
 }));
@@ -62,10 +77,10 @@ app.use((req, res) => {
   res.status(404).json({ error: `Route ${req.method} ${req.path} not found` });
 });
 
-// ── Error Handler — unexpected error ধরতে ──
+// ── Error Handler — unexpected error ধরতে (DB details client-এ পাঠায় না) ──
 app.use((err, req, res, next) => {
   console.error("Server error:", err);
-  res.status(500).json({ error: "Internal server error" });
+  res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 });
 
 // ── Server Start ──

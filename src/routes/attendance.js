@@ -1,12 +1,13 @@
 const express = require("express");
 const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
+const asyncHandler = require("../lib/asyncHandler");
 
 const router = express.Router();
 router.use(auth);
 
 // GET /api/attendance?date=2026-03-24&batch=xyz
-router.get("/", async (req, res) => {
+router.get("/", asyncHandler(async (req, res) => {
   const { date, batch } = req.query;
   if (!date) return res.status(400).json({ error: "তারিখ দিন" });
 
@@ -14,13 +15,13 @@ router.get("/", async (req, res) => {
   if (batch && batch !== "all") query = query.eq("students.batch", batch);
 
   const { data, error } = await query;
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
-});
+}));
 
 // POST /api/attendance/save — bulk save for a date
 // body: { date: "2026-03-24", records: [{ student_id, status }] }
-router.post("/save", async (req, res) => {
+router.post("/save", asyncHandler(async (req, res) => {
   const { date, records } = req.body;
   if (!date || !Array.isArray(records)) return res.status(400).json({ error: "date ও records দিন" });
 
@@ -32,8 +33,8 @@ router.post("/save", async (req, res) => {
     .upsert(rows, { onConflict: "date,student_id" })
     .select();
 
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json({ saved: data.length });
-});
+}));
 
 module.exports = router;

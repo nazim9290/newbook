@@ -1,13 +1,14 @@
 const express = require("express");
 const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
+const asyncHandler = require("../lib/asyncHandler");
 const { encryptSensitiveFields, decryptMany } = require("../lib/crypto");
 
 const router = express.Router();
 router.use(auth);
 
 // GET /api/visitors
-router.get("/", async (req, res) => {
+router.get("/", asyncHandler(async (req, res) => {
   const { search, status, branch, page = 1, limit = 50 } = req.query;
   const offset = (page - 1) * limit;
 
@@ -22,7 +23,7 @@ router.get("/", async (req, res) => {
   query = query.order("created_at", { ascending: false }).range(offset, offset + limit - 1);
 
   const { data, error, count } = await query;
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
   // DB columns → frontend field names mapping
   const mapped = (data || []).map(v => ({
@@ -35,10 +36,10 @@ router.get("/", async (req, res) => {
   }));
 
   res.json({ data: decryptMany(mapped), total: count });
-});
+}));
 
 // POST /api/visitors — নতুন visitor তৈরি
-router.post("/", async (req, res) => {
+router.post("/", asyncHandler(async (req, res) => {
   const body = req.body;
 
   // Frontend field → DB column mapping
@@ -73,27 +74,27 @@ router.post("/", async (req, res) => {
   };
 
   const { data, error } = await supabase.from("visitors").insert(encryptSensitiveFields(record)).select().single();
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
   // Response-এ frontend format-এ field mapping
   const mapped = { ...data, name_en: data.name, date: data.visit_date, lastFollowUp: data.last_follow_up };
   res.status(201).json(mapped);
-});
+}));
 
 // PATCH /api/visitors/:id
-router.patch("/:id", async (req, res) => {
+router.patch("/:id", asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("visitors")
     .update(req.body)
     .eq("id", req.params.id)
     .select()
     .single();
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
-});
+}));
 
 // POST /api/visitors/:id/convert — convert visitor to student
-router.post("/:id/convert", async (req, res) => {
+router.post("/:id/convert", asyncHandler(async (req, res) => {
   const { data: visitor, error: vErr } = await supabase
     .from("visitors")
     .select("*")
@@ -117,11 +118,11 @@ router.post("/:id/convert", async (req, res) => {
     .select()
     .single();
 
-  if (sErr) return res.status(400).json({ error: sErr.message });
+  if (sErr) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
   await supabase.from("visitors").update({ status: "converted", converted_student_id: student.id }).eq("id", req.params.id);
 
   res.status(201).json(student);
-});
+}));
 
 module.exports = router;

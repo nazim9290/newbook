@@ -1,62 +1,63 @@
 const express = require("express");
 const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
+const asyncHandler = require("../lib/asyncHandler");
 const { encrypt, decrypt } = require("../lib/crypto");
 
 const router = express.Router();
 router.use(auth);
 
 // GET /api/documents?student_id=xxx
-router.get("/", async (req, res) => {
+router.get("/", asyncHandler(async (req, res) => {
   const { student_id, status } = req.query;
   let query = supabase.from("documents").select("*, students(name_en)").order("updated_at", { ascending: false });
   if (student_id) query = query.eq("student_id", student_id);
   if (status && status !== "All") query = query.eq("status", status);
   const { data, error } = await query;
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
-});
+}));
 
 // POST /api/documents
-router.post("/", async (req, res) => {
+router.post("/", asyncHandler(async (req, res) => {
   const record = { ...req.body, agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001" };
   const { data, error } = await supabase.from("documents").insert(record).select().single();
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.status(201).json(data);
-});
+}));
 
 // PATCH /api/documents/:id
-router.patch("/:id", async (req, res) => {
+router.patch("/:id", asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("documents")
     .update({ ...req.body, updated_at: new Date().toISOString() })
     .eq("id", req.params.id)
     .select()
     .single();
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
-});
+}));
 
 // GET /api/documents/:id/fields — get document extracted fields for cross-validation
-router.get("/:id/fields", async (req, res) => {
+router.get("/:id/fields", asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("document_fields")
     .select("*")
     .eq("document_id", req.params.id);
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   // Decrypt sensitive field values
   const decrypted = (data || []).map((f) => ({
     ...f,
     field_value: SENSITIVE_DOC_FIELDS.includes(f.field_name) ? decrypt(f.field_value) : f.field_value,
   }));
   res.json(decrypted);
-});
+}));
 
 // Sensitive document field names that get encrypted
 const SENSITIVE_DOC_FIELDS = ["nid", "passport_number", "father_en", "mother_en", "permanent_address", "bank_account", "account_number"];
 
 // POST /api/documents/:id/fields — save extracted fields
-router.post("/:id/fields", async (req, res) => {
+router.post("/:id/fields", asyncHandler(async (req, res) => {
   const { fields } = req.body; // [{ field_name, field_value }]
   const rows = fields.map((f) => ({
     document_id: req.params.id,
@@ -69,18 +70,18 @@ router.post("/:id/fields", async (req, res) => {
     .from("document_fields")
     .upsert(rows, { onConflict: "document_id,field_name" })
     .select();
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
-});
+}));
 
 // GET /api/documents/cross-validate/:studentId — compare fields across docs
-router.get("/cross-validate/:studentId", async (req, res) => {
+router.get("/cross-validate/:studentId", asyncHandler(async (req, res) => {
   const { data: docs, error } = await supabase
     .from("documents")
     .select("id, doc_type, document_fields(field_name, field_value)")
     .eq("student_id", req.params.studentId);
 
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
   // Compare common fields across documents
   const fieldMap = {};
@@ -101,6 +102,6 @@ router.get("/cross-validate/:studentId", async (req, res) => {
   }
 
   res.json({ mismatches, total_docs: docs.length });
-});
+}));
 
 module.exports = router;

@@ -1,13 +1,14 @@
 const express = require("express");
 const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
+const asyncHandler = require("../lib/asyncHandler");
 const { encryptSensitiveFields, decryptSensitiveFields, decryptMany } = require("../lib/crypto");
 
 const router = express.Router();
 router.use(auth);
 
 // GET /api/students — list with search + filters
-router.get("/", async (req, res) => {
+router.get("/", asyncHandler(async (req, res) => {
   const { search, status, country, batch, school, branch, page = 1, limit = 50 } = req.query;
   const offset = (page - 1) * limit;
 
@@ -26,7 +27,7 @@ router.get("/", async (req, res) => {
   query = query.order("created_at", { ascending: false }).range(offset, offset + limit - 1);
 
   const { data, error, count } = await query;
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
   // DB fields → frontend field mapping
   const mapped = (data || []).map(s => ({
@@ -40,10 +41,10 @@ router.get("/", async (req, res) => {
   }));
 
   res.json({ data: decryptMany(mapped), total: count, page: +page, limit: +limit });
-});
+}));
 
 // GET /api/students/:id — single student with related data
-router.get("/:id", async (req, res) => {
+router.get("/:id", asyncHandler(async (req, res) => {
   const { data: student, error } = await supabase
     .from("students")
     .select(`
@@ -67,7 +68,7 @@ router.get("/:id", async (req, res) => {
     decrypted.sponsor = decryptSensitiveFields(decrypted.sponsor);
   }
   res.json(decrypted);
-});
+}));
 
 // POST /api/students — নতুন student তৈরি
 // students table-এ শুধু valid columns পাঠাও, বাকি সব ignore
@@ -81,7 +82,7 @@ const STUDENT_COLUMNS = [
   "counselor", "branch", "gdrive_folder_url", "photo_url", "internal_notes",
 ];
 
-router.post("/", async (req, res) => {
+router.post("/", asyncHandler(async (req, res) => {
   const body = req.body;
 
   // শুধু valid DB columns রাখো, বাকি সব ফেলে দাও
@@ -103,12 +104,12 @@ router.post("/", async (req, res) => {
     .select()
     .single();
 
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.status(201).json(decryptSensitiveFields(data));
-});
+}));
 
 // PATCH /api/students/:id — student update
-router.patch("/:id", async (req, res) => {
+router.patch("/:id", asyncHandler(async (req, res) => {
   const body = req.body;
 
   // শুধু valid DB columns রাখো
@@ -129,34 +130,34 @@ router.patch("/:id", async (req, res) => {
     .select()
     .single();
 
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(decryptSensitiveFields(data));
-});
+}));
 
 // DELETE /api/students/:id
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", asyncHandler(async (req, res) => {
   const { error } = await supabase.from("students").delete().eq("id", req.params.id);
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json({ success: true });
-});
+}));
 
 // POST /api/students/:id/payments — add payment
-router.post("/:id/payments", async (req, res) => {
+router.post("/:id/payments", asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("payments")
     .insert({ ...req.body, student_id: req.params.id })
     .select()
     .single();
 
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.status(201).json(data);
-});
+}));
 
 // ================================================================
 // GET /api/students/import/template — Import template (.xlsx) download
 // Phone, NID, WhatsApp column Text format — leading zero রক্ষা
 // ================================================================
-router.get("/import/template", async (req, res) => {
+router.get("/import/template", asyncHandler(async (req, res) => {
   const ExcelJS = require("exceljs");
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Students");
@@ -241,14 +242,14 @@ router.get("/import/template", async (req, res) => {
   res.setHeader("Content-Disposition", 'attachment; filename="AgencyBook_Student_Import_Template.xlsx"');
   await wb.xlsx.write(res);
   res.end();
-});
+}));
 
 // ================================================================
 // POST /api/students/import — Excel থেকে bulk student import
 // Body: { students: [{ name_en, phone, dob, ... }, ...] }
 // Frontend Excel parse করে mapped data পাঠায়
 // ================================================================
-router.post("/import", async (req, res) => {
+router.post("/import", asyncHandler(async (req, res) => {
   const { students: rows } = req.body;
   if (!Array.isArray(rows) || rows.length === 0) {
     return res.status(400).json({ error: "কোনো student data পাওয়া যায়নি" });
@@ -288,7 +289,7 @@ router.post("/import", async (req, res) => {
       const { error: sErr } = await supabase.from("students").insert(records[i]).select();
       if (sErr) {
         results.failed++;
-        results.errors.push({ row: i + 1, name: rows[i].name_en || rows[i].name || `Row ${i + 1}`, error: sErr.message });
+        results.errors.push({ row: i + 1, name: rows[i].name_en || rows[i].name || `Row ${i + 1}`, error: "ডাটা সংরক্ষণ ব্যর্থ" });
       } else {
         results.success++;
       }
@@ -302,7 +303,7 @@ router.post("/import", async (req, res) => {
     ...results,
     total: rows.length,
   });
-});
+}));
 
 // ================================================================
 // POST /api/students/import/parse — Excel file parse করে columns return
@@ -311,7 +312,7 @@ const multer = require("multer");
 const ExcelJS = require("exceljs");
 const importUpload = multer({ dest: require("path").join(__dirname, "../../uploads"), limits: { fileSize: 10 * 1024 * 1024 } });
 
-router.post("/import/parse", importUpload.single("file"), async (req, res) => {
+router.post("/import/parse", importUpload.single("file"), asyncHandler(async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Excel ফাইল দিন" });
 
@@ -378,15 +379,16 @@ router.post("/import/parse", importUpload.single("file"), async (req, res) => {
       suggestions,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Import parse error:", err);
+    res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   }
-});
+}));
 
 // ================================================================
 // POST /api/students/import/mapped — Excel + mapping → bulk import
 // FormData: file + mapping JSON
 // ================================================================
-router.post("/import/mapped", importUpload.single("file"), async (req, res) => {
+router.post("/import/mapped", importUpload.single("file"), asyncHandler(async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Excel ফাইল দিন" });
     const mapping = JSON.parse(req.body.mapping || "{}");
@@ -448,7 +450,7 @@ router.post("/import/mapped", importUpload.single("file"), async (req, res) => {
       // Bulk fail → one by one
       for (let i = 0; i < records.length; i++) {
         const { error: sErr } = await supabase.from("students").insert(records[i]);
-        if (sErr) { results.failed++; results.errors.push({ row: i + 2, name: records[i].name_en || `Row ${i + 2}`, error: sErr.message }); }
+        if (sErr) { results.failed++; results.errors.push({ row: i + 2, name: records[i].name_en || `Row ${i + 2}`, error: "ডাটা সংরক্ষণ ব্যর্থ" }); }
         else { results.success++; }
       }
     } else {
@@ -461,8 +463,9 @@ router.post("/import/mapped", importUpload.single("file"), async (req, res) => {
 
     res.json({ message: `${results.success} জন student import সফল, ${results.failed} জন ব্যর্থ`, ...results, total: records.length });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Import mapped error:", err);
+    res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   }
-});
+}));
 
 module.exports = router;
