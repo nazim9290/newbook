@@ -10,7 +10,7 @@ router.use(auth);
 // GET /api/accounts/income — payments table থেকে income (student fee collections)
 router.get("/income", checkPermission("accounts", "read"), asyncHandler(async (req, res) => {
   const { month, branch } = req.query;
-  let query = supabase.from("payments").select("*, students(name_en)").order("created_at", { ascending: false });
+  let query = supabase.from("payments").select("*, students(name_en)").eq("agency_id", req.user.agency_id).order("created_at", { ascending: false });
   if (month) query = query.ilike("created_at", `${month}%`);
   if (branch && branch !== "All") query = query.eq("branch", branch);
   const { data, error } = await query;
@@ -35,7 +35,7 @@ router.post("/income", checkPermission("accounts", "write"), asyncHandler(async 
 // GET /api/accounts/expenses
 router.get("/expenses", checkPermission("accounts", "read"), asyncHandler(async (req, res) => {
   const { month, branch } = req.query;
-  let query = supabase.from("expenses").select("*").order("date", { ascending: false });
+  let query = supabase.from("expenses").select("*").eq("agency_id", req.user.agency_id).order("date", { ascending: false });
   if (month) query = query.ilike("date", `${month}%`);
   if (branch && branch !== "All") query = query.eq("branch", branch);
   const { data, error } = await query;
@@ -54,7 +54,7 @@ router.post("/expenses", checkPermission("accounts", "write"), asyncHandler(asyn
 // GET /api/accounts/payments — student fee payments
 router.get("/payments", checkPermission("accounts", "read"), asyncHandler(async (req, res) => {
   const { student_id } = req.query;
-  let query = supabase.from("payments").select("*, students(name_en)").order("date", { ascending: false });
+  let query = supabase.from("payments").select("*, students(name_en)").eq("agency_id", req.user.agency_id).order("date", { ascending: false });
   if (student_id) query = query.eq("student_id", student_id);
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });

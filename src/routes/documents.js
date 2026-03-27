@@ -11,7 +11,7 @@ router.use(auth);
 // GET /api/documents?student_id=xxx
 router.get("/", checkPermission("documents", "read"), asyncHandler(async (req, res) => {
   const { student_id, status } = req.query;
-  let query = supabase.from("documents").select("*, students(name_en)").order("updated_at", { ascending: false });
+  let query = supabase.from("documents").select("*, students(name_en)").eq("agency_id", req.user.agency_id).order("updated_at", { ascending: false });
   if (student_id) query = query.eq("student_id", student_id);
   if (status && status !== "All") query = query.eq("status", status);
   const { data, error } = await query;
@@ -33,6 +33,7 @@ router.patch("/:id", checkPermission("documents", "write"), asyncHandler(async (
     .from("documents")
     .update({ ...req.body, updated_at: new Date().toISOString() })
     .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id)
     .select()
     .single();
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
@@ -80,6 +81,7 @@ router.get("/cross-validate/:studentId", checkPermission("documents", "read"), a
   const { data: docs, error } = await supabase
     .from("documents")
     .select("id, doc_type, document_fields(field_name, field_value)")
+    .eq("agency_id", req.user.agency_id)
     .eq("student_id", req.params.studentId);
 
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });

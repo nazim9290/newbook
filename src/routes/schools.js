@@ -10,7 +10,7 @@ router.use(auth);
 // GET /api/schools
 router.get("/", checkPermission("schools", "read"), asyncHandler(async (req, res) => {
   const { country } = req.query;
-  let query = supabase.from("schools").select("*").order("name_en");
+  let query = supabase.from("schools").select("*").eq("agency_id", req.user.agency_id).order("name_en");
   if (country && country !== "All") query = query.eq("country", country);
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
@@ -30,14 +30,14 @@ router.post("/", checkPermission("schools", "write"), asyncHandler(async (req, r
 
 // PATCH /api/schools/:id
 router.patch("/:id", checkPermission("schools", "write"), asyncHandler(async (req, res) => {
-  const { data, error } = await supabase.from("schools").update(req.body).eq("id", req.params.id).select().single();
+  const { data, error } = await supabase.from("schools").update(req.body).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
 }));
 
 // DELETE /api/schools/:id
 router.delete("/:id", checkPermission("schools", "delete"), asyncHandler(async (req, res) => {
-  const { error } = await supabase.from("schools").delete().eq("id", req.params.id);
+  const { error } = await supabase.from("schools").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json({ success: true });
 }));
@@ -47,6 +47,7 @@ router.get("/:id/submissions", checkPermission("schools", "read"), asyncHandler(
   const { data, error } = await supabase
     .from("submissions")
     .select("*, students(name_en)")
+    .eq("agency_id", req.user.agency_id)
     .eq("school_id", req.params.id)
     .order("submission_date", { ascending: false });
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
@@ -57,7 +58,7 @@ router.get("/:id/submissions", checkPermission("schools", "read"), asyncHandler(
 router.post("/:id/submissions", checkPermission("schools", "write"), asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("submissions")
-    .insert({ ...req.body, school_id: req.params.id })
+    .insert({ ...req.body, school_id: req.params.id, agency_id: req.user.agency_id })
     .select()
     .single();
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
@@ -66,7 +67,7 @@ router.post("/:id/submissions", checkPermission("schools", "write"), asyncHandle
 
 // PATCH /api/schools/submissions/:subId
 router.patch("/submissions/:subId", checkPermission("schools", "write"), asyncHandler(async (req, res) => {
-  const { data, error } = await supabase.from("submissions").update(req.body).eq("id", req.params.subId).select().single();
+  const { data, error } = await supabase.from("submissions").update(req.body).eq("id", req.params.subId).eq("agency_id", req.user.agency_id).select().single();
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
 }));

@@ -8,7 +8,7 @@ router.use(auth);
 
 router.get("/", checkPermission("agents", "read"), asyncHandler(async (req, res) => {
   const { status } = req.query;
-  let q = supabase.from("agents").select("*").order("name");
+  let q = supabase.from("agents").select("*").eq("agency_id", req.user.agency_id).order("name");
   if (status && status !== "All") q = q.eq("status", status);
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
@@ -22,13 +22,13 @@ router.post("/", checkPermission("agents", "write"), asyncHandler(async (req, re
 }));
 
 router.patch("/:id", checkPermission("agents", "write"), asyncHandler(async (req, res) => {
-  const { data, error } = await supabase.from("agents").update(req.body).eq("id", req.params.id).select().single();
+  const { data, error } = await supabase.from("agents").update(req.body).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
 }));
 
 router.delete("/:id", checkPermission("agents", "delete"), asyncHandler(async (req, res) => {
-  const { error } = await supabase.from("agents").delete().eq("id", req.params.id);
+  const { error } = await supabase.from("agents").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json({ success: true });
 }));

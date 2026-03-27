@@ -20,6 +20,7 @@ router.get("/types", asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("doc_types")
     .select("*")
+    .eq("agency_id", req.user.agency_id)
     .eq("is_active", true)
     .order("sort_order");
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
@@ -39,14 +40,14 @@ router.post("/types", asyncHandler(async (req, res) => {
 
 // PATCH /api/docdata/types/:id — document type update
 router.patch("/types/:id", asyncHandler(async (req, res) => {
-  const { data, error } = await supabase.from("doc_types").update(req.body).eq("id", req.params.id).select().single();
+  const { data, error } = await supabase.from("doc_types").update(req.body).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
 }));
 
 // DELETE /api/docdata/types/:id
 router.delete("/types/:id", asyncHandler(async (req, res) => {
-  const { error } = await supabase.from("doc_types").delete().eq("id", req.params.id);
+  const { error } = await supabase.from("doc_types").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json({ success: true });
 }));
@@ -58,6 +59,7 @@ router.get("/student/:studentId", asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("document_data")
     .select("*, doc_types(name, name_bn, category, fields)")
+    .eq("agency_id", req.user.agency_id)
     .eq("student_id", req.params.studentId)
     .order("created_at");
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
@@ -69,6 +71,7 @@ router.get("/student/:studentId/:docTypeId", asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("document_data")
     .select("*, doc_types(name, name_bn, fields)")
+    .eq("agency_id", req.user.agency_id)
     .eq("student_id", req.params.studentId)
     .eq("doc_type_id", req.params.docTypeId)
     .single();
@@ -104,7 +107,7 @@ router.post("/save", asyncHandler(async (req, res) => {
 
 // DELETE /api/docdata/:id
 router.delete("/:id", asyncHandler(async (req, res) => {
-  const { error } = await supabase.from("document_data").delete().eq("id", req.params.id);
+  const { error } = await supabase.from("document_data").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json({ success: true });
 }));

@@ -18,7 +18,7 @@ router.use(auth);
 // GET /api/submissions — list with filters
 router.get("/", asyncHandler(async (req, res) => {
   const { school_id, student_id, status } = req.query;
-  let q = supabase.from("submissions").select("*, students(name_en, phone, status), schools(name_en, name_jp)").order("submission_date", { ascending: false });
+  let q = supabase.from("submissions").select("*, students(name_en, phone, status), schools(name_en, name_jp)").eq("agency_id", req.user.agency_id).order("submission_date", { ascending: false });
   if (school_id) q = q.eq("school_id", school_id);
   if (student_id) q = q.eq("student_id", student_id);
   if (status && status !== "All") q = q.eq("status", status);
@@ -43,7 +43,7 @@ router.post("/", asyncHandler(async (req, res) => {
 // PATCH /api/submissions/:id — status update, feedback add
 router.patch("/:id", asyncHandler(async (req, res) => {
   const updates = { ...req.body, updated_at: new Date().toISOString() };
-  const { data, error } = await supabase.from("submissions").update(updates).eq("id", req.params.id).select("*, students(name_en), schools(name_en)").single();
+  const { data, error } = await supabase.from("submissions").update(updates).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select("*, students(name_en), schools(name_en)").single();
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
 }));

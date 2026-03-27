@@ -5,6 +5,7 @@ const asyncHandler = require("../lib/asyncHandler");
 const bcrypt = require("bcryptjs");
 const { encryptSensitiveFields, decryptSensitiveFields, decryptMany } = require("../lib/crypto");
 const { checkPermission } = require("../middleware/checkPermission");
+const { logActivity } = require("../lib/activityLog");
 
 const router = express.Router();
 router.use(auth);
@@ -109,6 +110,11 @@ router.post("/", checkPermission("students", "write"), asyncHandler(async (req, 
     .single();
 
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+
+  // Activity log — student তৈরি
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "students",
+    recordId: data.id, description: `নতুন স্টুডেন্ট: ${data.name_en}`, ip: req.ip });
+
   res.status(201).json(decryptSensitiveFields(data));
 }));
 
@@ -171,6 +177,10 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
 router.delete("/:id", checkPermission("students", "delete"), asyncHandler(async (req, res) => {
   const { error } = await supabase.from("students").delete().eq("id", req.params.id);
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "delete", module: "students",
+    recordId: req.params.id, description: `স্টুডেন্ট মুছে ফেলা: ${req.params.id}`, ip: req.ip });
+
   res.json({ success: true });
 }));
 

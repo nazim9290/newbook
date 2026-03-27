@@ -6,6 +6,7 @@ const asyncHandler = require("../lib/asyncHandler");
 const rateLimit = require("express-rate-limit");
 const auth = require("../middleware/auth");
 const { getPermissionsForRole } = require("../middleware/checkPermission");
+const { logActivity } = require("../lib/activityLog");
 
 const router = express.Router();
 
@@ -17,23 +18,33 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
 });
 
-// Email format validation helper
-const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+// Email format validation
+const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
+
+// ── Cookie config — httpOnly, secure, SameSite ──
+const isProduction = process.env.NODE_ENV === "production";
+const COOKIE_OPTS = {
+  httpOnly: true,          // JavaScript থেকে access করা যাবে না (XSS protection)
+  secure: isProduction,    // HTTPS-এ শুধু পাঠাবে (production)
+  sameSite: "lax",         // CSRF protection
+  maxAge: 7 * 24 * 60 * 60 * 1000,  // ৭ দিন
+  path: "/",
+};
+
+// ── Helper: cookie-তে token set করো ──
+function setTokenCookie(res, token) {
+  res.cookie("agencybook_token", token, COOKIE_OPTS);
+}
 
 // POST /api/auth/login
 router.post("/login", loginLimiter, asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: "Email ও password দিন" });
-
-  // Input validation — email format check
   if (!isValidEmail(email)) return res.status(400).json({ error: "সঠিক email দিন" });
   if (!password.trim()) return res.status(400).json({ error: "Password দিন" });
 
   const { data: user, error } = await supabase
-    .from("users")
-    .select("*")
-    .eq("email", email.toLowerCase())
-    .single();
+    .from("users").select("*").eq("email", email.toLowerCase()).single();
 
   if (error || !user) return res.status(401).json({ error: "Email বা password ভুল" });
 
@@ -46,18 +57,25 @@ router.post("/login", loginLimiter, asyncHandler(async (req, res) => {
     { expiresIn: "7d" }
   );
 
+  // httpOnly cookie-তে token set (XSS safe)
+  setTokenCookie(res, token);
+
+  // Activity log — login
+  logActivity({ agencyId: user.agency_id, userId: user.id, action: "login", module: "auth",
+    description: `Login: ${user.email}`, ip: req.ip });
+
+  // JSON-এও token পাঠাও (backward compatibility)
   res.json({
     token,
     user: { id: user.id, name: user.name, email: user.email, role: user.role, branch: user.branch, agency_id: user.agency_id }
   });
 }));
 
-// POST /api/auth/student-login — Student Portal Login (staff login থেকে আলাদা)
+// POST /api/auth/student-login — Student Portal Login
 router.post("/student-login", loginLimiter, asyncHandler(async (req, res) => {
   const { phone, password } = req.body;
   if (!phone || !password) return res.status(400).json({ error: "ফোন ও পাসওয়ার্ড দিন" });
 
-  // ফোন নম্বর দিয়ে student খুঁজো — portal access enabled কিনা চেক
   const { data: student, error } = await supabase.from("students")
     .select("id, name_en, name_bn, phone, email, status, country, school, batch, branch, portal_password_hash, portal_access, portal_sections, agency_id")
     .eq("phone", phone).single();
@@ -69,7 +87,6 @@ router.post("/student-login", loginLimiter, asyncHandler(async (req, res) => {
   const valid = await bcrypt.compare(password, student.portal_password_hash);
   if (!valid) return res.status(401).json({ error: "পাসওয়ার্ড ভুল হয়েছে" });
 
-  // সর্বশেষ login সময় আপডেট
   await supabase.from("students").update({ last_portal_login: new Date().toISOString() }).eq("id", student.id);
 
   const token = jwt.sign(
@@ -77,23 +94,32 @@ router.post("/student-login", loginLimiter, asyncHandler(async (req, res) => {
     process.env.JWT_SECRET, { expiresIn: "7d" }
   );
 
+  // httpOnly cookie set
+  res.cookie("agencybook_student_token", token, COOKIE_OPTS);
+
   res.json({
     token,
     user: { id: student.id, name: student.name_en, name_bn: student.name_bn, type: "student", phone: student.phone, status: student.status, country: student.country, school: student.school, batch: student.batch }
   });
 }));
 
+// POST /api/auth/logout — cookie clear
+router.post("/logout", (req, res) => {
+  res.clearCookie("agencybook_token", { path: "/" });
+  res.clearCookie("agencybook_student_token", { path: "/" });
+  res.json({ success: true });
+});
+
 // POST /api/auth/register (admin only — create new staff account)
 router.post("/register", loginLimiter, asyncHandler(async (req, res) => {
   const { name, email, password, role, branch } = req.body;
 
-  // Input validation
   if (!name || !name.trim()) return res.status(400).json({ error: "নাম দিন" });
   if (!email) return res.status(400).json({ error: "Email দিন" });
   if (!isValidEmail(email)) return res.status(400).json({ error: "সঠিক email দিন" });
   if (!password || password.length < 8) return res.status(400).json({ error: "Password কমপক্ষে ৮ অক্ষর হতে হবে" });
 
-  const hash = await bcrypt.hash(password, 10);
+  const hash = await bcrypt.hash(password, 12); // bcrypt rounds ১২ (stronger)
 
   const { data, error } = await supabase
     .from("users")
@@ -105,7 +131,7 @@ router.post("/register", loginLimiter, asyncHandler(async (req, res) => {
   res.status(201).json(data);
 }));
 
-// GET /api/auth/permissions — logged-in user-এর permissions return করে
+// GET /api/auth/permissions
 router.get("/permissions", auth, asyncHandler(async (req, res) => {
   const permissions = getPermissionsForRole(req.user.role);
   res.json({ role: req.user.role, permissions });

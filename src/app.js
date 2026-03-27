@@ -11,6 +11,7 @@
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 const express = require("express");
 const cors = require("cors");
+const cookieParser = require("cookie-parser");
 const rateLimit = require("express-rate-limit");
 
 const app = express();
@@ -54,6 +55,9 @@ app.use(cors({
   },
   credentials: true,
 }));
+
+// Cookie parser — httpOnly cookie থেকে JWT token পড়তে
+app.use(cookieParser());
 
 // JSON body parser: max 1MB (DoS prevention)
 app.use(express.json({ limit: "1mb" }));

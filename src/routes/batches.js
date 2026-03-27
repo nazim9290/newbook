@@ -9,7 +9,7 @@ router.use(auth);
 // GET /api/batches
 router.get("/", asyncHandler(async (req, res) => {
   const { status, branch } = req.query;
-  let query = supabase.from("batches").select("*").order("start_date", { ascending: false });
+  let query = supabase.from("batches").select("*").eq("agency_id", req.user.agency_id).order("start_date", { ascending: false });
   if (status && status !== "All") query = query.eq("status", status);
   if (branch && branch !== "All") query = query.eq("branch", branch);
   const { data, error } = await query;
@@ -23,6 +23,7 @@ router.get("/:id", asyncHandler(async (req, res) => {
     .from("batches")
     .select("*")
     .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id)
     .single();
   if (error) return res.status(404).json({ error: "Batch পাওয়া যায়নি" });
 
@@ -49,7 +50,7 @@ router.post("/", asyncHandler(async (req, res) => {
 
 // PATCH /api/batches/:id
 router.patch("/:id", asyncHandler(async (req, res) => {
-  const { data, error } = await supabase.from("batches").update(req.body).eq("id", req.params.id).select().single();
+  const { data, error } = await supabase.from("batches").update(req.body).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
 }));
