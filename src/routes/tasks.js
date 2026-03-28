@@ -25,7 +25,7 @@ router.get("/", checkPermission("tasks", "read"), asyncHandler(async (req, res) 
 router.post("/", checkPermission("tasks", "write"), asyncHandler(async (req, res) => {
   const record = { ...req.body, agency_id: req.user.agency_id, created_by: req.user.id };
   const { data, error } = await supabase.from("tasks").insert(record).select().single();
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.status(201).json(data);
 }));
 
@@ -35,7 +35,7 @@ router.patch("/:id", checkPermission("tasks", "write"), asyncHandler(async (req,
     .eq("id", req.params.id)
     .eq("agency_id", req.user.agency_id)
     .select().single();
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.json(data);
 }));
 
@@ -44,7 +44,7 @@ router.delete("/:id", checkPermission("tasks", "delete"), asyncHandler(async (re
   const { error } = await supabase.from("tasks").delete()
     .eq("id", req.params.id)
     .eq("agency_id", req.user.agency_id);
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.json({ success: true });
 }));
 

@@ -23,7 +23,7 @@ router.get("/", checkPermission("documents", "read"), asyncHandler(async (req, r
 router.post("/", checkPermission("documents", "write"), asyncHandler(async (req, res) => {
   const record = { ...req.body, agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001" };
   const { data, error } = await supabase.from("documents").insert(record).select().single();
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.status(201).json(data);
 }));
 
@@ -36,7 +36,7 @@ router.patch("/:id", checkPermission("documents", "write"), asyncHandler(async (
     .eq("agency_id", req.user.agency_id)
     .select()
     .single();
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.json(data);
 }));
 
@@ -72,7 +72,7 @@ router.post("/:id/fields", checkPermission("documents", "write"), asyncHandler(a
     .from("document_fields")
     .upsert(rows, { onConflict: "document_id,field_name" })
     .select();
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.json(data);
 }));
 

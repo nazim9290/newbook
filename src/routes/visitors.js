@@ -83,7 +83,7 @@ router.post("/", checkPermission("visitors", "write"), asyncHandler(async (req, 
   };
 
   const { data, error } = await supabase.from("visitors").insert(encryptSensitiveFields(record)).select().single();
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
 
   // Response-এ frontend format-এ field mapping
   const mapped = { ...data, name_en: data.name, date: data.visit_date, lastFollowUp: data.last_follow_up };
@@ -98,7 +98,7 @@ router.patch("/:id", checkPermission("visitors", "write"), asyncHandler(async (r
     .eq("id", req.params.id)
     .select()
     .single();
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.json(data);
 }));
 

@@ -23,14 +23,14 @@ router.get("/employees", checkPermission("hr", "read"), asyncHandler(async (req,
 router.post("/employees", checkPermission("hr", "write"), asyncHandler(async (req, res) => {
   const record = { ...req.body, agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001" };
   const { data, error } = await supabase.from("employees").insert(encryptSensitiveFields(record)).select().single();
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.status(201).json(decryptSensitiveFields(data));
 }));
 
 // PATCH /api/hr/employees/:id
 router.patch("/employees/:id", checkPermission("hr", "write"), asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("employees").update(encryptSensitiveFields(req.body)).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.json(decryptSensitiveFields(data));
 }));
 
@@ -48,7 +48,7 @@ router.get("/salary", checkPermission("hr", "read"), asyncHandler(async (req, re
 // POST /api/hr/salary — pay salary
 router.post("/salary", checkPermission("hr", "write"), asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("salary_history").insert({ ...req.body, agency_id: req.user.agency_id }).select().single();
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.status(201).json(data);
 }));
 

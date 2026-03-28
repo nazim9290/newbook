@@ -36,7 +36,7 @@ router.post("/", asyncHandler(async (req, res) => {
     status: req.body.status || "submitted",
   };
   const { data, error } = await supabase.from("submissions").insert(record).select("*, students(name_en), schools(name_en)").single();
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.status(201).json(data);
 }));
 
@@ -44,7 +44,7 @@ router.post("/", asyncHandler(async (req, res) => {
 router.patch("/:id", asyncHandler(async (req, res) => {
   const updates = { ...req.body, updated_at: new Date().toISOString() };
   const { data, error } = await supabase.from("submissions").update(updates).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select("*, students(name_en), schools(name_en)").single();
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.json(data);
 }));
 
@@ -67,7 +67,7 @@ router.post("/:id/feedback", asyncHandler(async (req, res) => {
     updated_at: new Date().toISOString(),
   }).eq("id", req.params.id).select("*, students(name_en), schools(name_en)").single();
 
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.json(data);
 }));
 
@@ -87,14 +87,14 @@ router.patch("/:id/feedback/:index/resolve", asyncHandler(async (req, res) => {
     updated_at: new Date().toISOString(),
   }).eq("id", req.params.id).select("*, students(name_en), schools(name_en)").single();
 
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.json(data);
 }));
 
 // DELETE /api/submissions/:id
 router.delete("/:id", asyncHandler(async (req, res) => {
   const { error } = await supabase.from("submissions").delete().eq("id", req.params.id);
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.json({ success: true });
 }));
 

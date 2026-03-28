@@ -44,14 +44,14 @@ router.post("/", asyncHandler(async (req, res) => {
     branch: req.body.branch || req.user.branch || "Main",
   };
   const { data, error } = await supabase.from("batches").insert(record).select().single();
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.status(201).json(data);
 }));
 
 // PATCH /api/batches/:id
 router.patch("/:id", asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("batches").update(req.body).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.json(data);
 }));
 
@@ -64,7 +64,7 @@ router.post("/:id/enroll", asyncHandler(async (req, res) => {
     .insert({ batch_id: req.params.id, student_id })
     .select()
     .single();
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.status(201).json(data);
 }));
 
