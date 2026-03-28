@@ -137,4 +137,58 @@ router.get("/permissions", auth, asyncHandler(async (req, res) => {
   res.json({ role: req.user.role, permissions });
 }));
 
+// ── POST /api/auth/upload-avatar — প্রোফাইল ছবি আপলোড ──
+const multer = require("multer");
+const path = require("path");
+const avatarStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(process.env.UPLOAD_DIR || path.join(__dirname, "../../uploads"), "avatars");
+    require("fs").mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => cb(null, `${req.user.id}${path.extname(file.originalname)}`),
+});
+const avatarUpload = multer({
+  storage: avatarStorage,
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB max
+  fileFilter: (req, file, cb) => {
+    if (/\.(jpg|jpeg|png|webp)$/i.test(file.originalname)) cb(null, true);
+    else cb(new Error("শুধু JPG, PNG, WEBP ফাইল আপলোড করুন"));
+  },
+});
+
+router.post("/upload-avatar", auth, avatarUpload.single("avatar"), asyncHandler(async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "ফাইল দিন" });
+  const avatarUrl = `/uploads/avatars/${req.file.filename}`;
+
+  await supabase.from("users").update({ avatar_url: avatarUrl }).eq("id", req.user.id);
+  res.json({ avatar_url: avatarUrl });
+}));
+
+// ── POST /api/auth/upload-logo — এজেন্সি লোগো আপলোড ──
+const logoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(process.env.UPLOAD_DIR || path.join(__dirname, "../../uploads"), "logos");
+    require("fs").mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => cb(null, `${req.user.agency_id}${path.extname(file.originalname)}`),
+});
+const logoUpload = multer({
+  storage: logoStorage,
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (/\.(jpg|jpeg|png|webp|svg)$/i.test(file.originalname)) cb(null, true);
+    else cb(new Error("শুধু JPG, PNG, WEBP, SVG ফাইল আপলোড করুন"));
+  },
+});
+
+router.post("/upload-logo", auth, logoUpload.single("logo"), asyncHandler(async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "ফাইল দিন" });
+  const logoUrl = `/uploads/logos/${req.file.filename}`;
+
+  await supabase.from("agencies").update({ logo_url: logoUrl }).eq("id", req.user.agency_id);
+  res.json({ logo_url: logoUrl });
+}));
+
 module.exports = router;
