@@ -65,11 +65,12 @@ app.use(express.json({ limit: "1mb" }));
 
 // ── Global Rate Limiter — প্রতি IP থেকে ১ মিনিটে সর্বোচ্চ ১০০ request ──
 const apiLimiter = rateLimit({
-  windowMs: 60 * 1000,  // ১ মিনিট
-  max: 100,              // সর্বোচ্চ ১০০ request
+  windowMs: 60 * 1000,
+  max: 100,
   message: { error: "অনেক বেশি request — ১ মিনিট পরে চেষ্টা করুন" },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false }, // Nginx proxy-র পিছনে — validation বন্ধ
 });
 app.use("/api/", apiLimiter);
 
