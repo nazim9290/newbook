@@ -37,6 +37,7 @@ app.use((req, res, next) => {
 const allowedOrigins = new Set([
   "https://agencybook.net",
   "https://www.agencybook.net",
+  "https://demo.agencybook.net",
   ...(process.env.CORS_ORIGIN || "").split(",").map(s => s.trim()).filter(Boolean),
 ]);
 app.use(cors({
