@@ -132,6 +132,18 @@ CREATE TABLE IF NOT EXISTS doc_types (id UUID PRIMARY KEY DEFAULT uuid_generate_
 CREATE TABLE IF NOT EXISTS document_data (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), agency_id UUID REFERENCES agencies(id), student_id TEXT REFERENCES students(id) ON DELETE CASCADE, doc_type_id UUID REFERENCES doc_types(id) ON DELETE CASCADE, field_data JSONB DEFAULT '{}', status TEXT DEFAULT 'incomplete', created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now(), UNIQUE(student_id, doc_type_id));
 CREATE TABLE IF NOT EXISTS activity_log (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), agency_id UUID REFERENCES agencies(id), user_id UUID, action TEXT, module TEXT, record_id TEXT, description TEXT, old_value JSONB, new_value JSONB, ip_address TEXT, created_at TIMESTAMPTZ DEFAULT now());
 
+-- Branches — এজেন্সির শাখা (ঠিকানা, ফোন, ম্যানেজার সহ)
+CREATE TABLE IF NOT EXISTS branches (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  agency_id UUID REFERENCES agencies(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, name_bn TEXT, city TEXT,
+  address TEXT, address_bn TEXT, phone TEXT, email TEXT,
+  manager TEXT, is_hq BOOLEAN DEFAULT false,
+  status TEXT DEFAULT 'active',
+  created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(agency_id, name)
+);
+
 -- Partner Agencies (B2B) — অন্য এজেন্সি থেকে আসা student tracking
 CREATE TABLE IF NOT EXISTS partner_agencies (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

@@ -254,13 +254,22 @@ router.post("/generate-single", asyncHandler(async (req, res) => {
       .single();
     if (!student) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
 
-    // Template file: Supabase storage থেকে download, অথবা local path
+    // ── সিস্টেম ভ্যারিয়েবল: এজেন্সি, ব্যাচ, ব্রাঞ্চ, স্কুল fetch ──
+    const [agencyRes, batchRes, branchRes, schoolRes] = await Promise.all([
+      supabase.from("agencies").select("*").eq("id", req.user.agency_id).single(),
+      student.batch_id ? supabase.from("batches").select("*").eq("id", student.batch_id).single() : { data: null },
+      student.branch ? supabase.from("branches").select("*").eq("agency_id", req.user.agency_id).eq("name", student.branch).single() : { data: null },
+      student.school_id ? supabase.from("schools").select("*").eq("id", student.school_id).single() : { data: null },
+    ]);
+    const sysContext = buildSystemContext(agencyRes.data, batchRes.data, branchRes.data, schoolRes.data);
+
+    // Template file: storage থেকে download, অথবা local path
     const templateBuffer = await getTemplateBuffer(tmpl.template_url);
     if (!templateBuffer) {
       return generateCSV(res, tmpl, [student]);
     }
 
-    const buffer = await fillSingleStudentFromBuffer(templateBuffer, tmpl.mappings, student);
+    const buffer = await fillSingleStudentFromBuffer(templateBuffer, tmpl.mappings, student, sysContext);
     if (!buffer) {
       // .xls format বা corrupted — CSV fallback
       return generateCSV(res, tmpl, [student]);
@@ -367,8 +376,8 @@ async function getTemplateBuffer(templateUrl) {
   }
 }
 
-// Buffer থেকে template পড়ে student data fill করে return
-async function fillSingleStudentFromBuffer(templateBuffer, mappings, student) {
+// Buffer থেকে template পড়ে student data + system context fill করে return
+async function fillSingleStudentFromBuffer(templateBuffer, mappings, student, sysContext = {}) {
   const workbook = new ExcelJS.Workbook();
   // .xlsx.load(buffer) try করো, fail হলে temp file-এ write করে readFile ব্যবহার
   try {
@@ -385,8 +394,8 @@ async function fillSingleStudentFromBuffer(templateBuffer, mappings, student) {
     }
   }
 
-  // Flatten student data for mapping
-  const flat = flattenStudent(student);
+  // Flatten student data + system context merge
+  const flat = { ...flattenStudent(student), ...sysContext };
 
   // সব sheet-এর সব cell scan করো — {{...}} থাকলে replace করো
   workbook.eachSheet((sheet) => {
@@ -453,6 +462,64 @@ function flattenStudent(student) {
   }
 
   return flat;
+}
+
+/**
+ * buildSystemContext — এজেন্সি, ব্যাচ, ব্রাঞ্চ, স্কুলের তথ্য flat key-value-তে
+ * sys_* prefix দিয়ে রাখে — Excel template-এ {{sys_agency_name}} দিলে কাজ করবে
+ */
+function buildSystemContext(agency, batch, branch, school) {
+  const ctx = {};
+  const today = new Date();
+
+  // ── এজেন্সি ──
+  ctx.sys_agency_name = agency?.name || "";
+  ctx.sys_agency_name_bn = agency?.name_bn || "";
+  ctx.sys_agency_address = agency?.address || "";
+  ctx.sys_agency_phone = agency?.phone || "";
+  ctx.sys_agency_email = agency?.email || "";
+
+  // ── ব্রাঞ্চ ──
+  ctx.sys_branch_name = branch?.name || "";
+  ctx.sys_branch_address = branch?.address || branch?.address_bn || "";
+  ctx.sys_branch_phone = branch?.phone || "";
+  ctx.sys_branch_manager = branch?.manager || "";
+
+  // ── আজকের তারিখ ──
+  ctx.sys_today = today.toISOString().slice(0, 10);
+  ctx["sys_today:year"] = String(today.getFullYear());
+  ctx["sys_today:month"] = String(today.getMonth() + 1).padStart(2, "0");
+  ctx["sys_today:day"] = String(today.getDate()).padStart(2, "0");
+  // 日本語 format: 2026年03月28日
+  ctx.sys_today_jp = `${today.getFullYear()}年${String(today.getMonth()+1).padStart(2,"0")}月${String(today.getDate()).padStart(2,"0")}日`;
+
+  // ── ব্যাচ ──
+  ctx.sys_batch_name = batch?.name || "";
+  ctx.sys_batch_teacher = batch?.teacher || "";
+  ctx.sys_batch_schedule = batch?.schedule || "";
+  const bStart = batch?.start_date || "";
+  const bEnd = batch?.end_date || "";
+  ctx.sys_batch_start = bStart;
+  ctx.sys_batch_end = bEnd;
+  if (bStart) {
+    const d = new Date(bStart);
+    ctx["sys_batch_start:year"] = String(d.getFullYear());
+    ctx["sys_batch_start:month"] = String(d.getMonth()+1).padStart(2,"0");
+    ctx["sys_batch_start:day"] = String(d.getDate()).padStart(2,"0");
+  }
+  if (bEnd) {
+    const d = new Date(bEnd);
+    ctx["sys_batch_end:year"] = String(d.getFullYear());
+    ctx["sys_batch_end:month"] = String(d.getMonth()+1).padStart(2,"0");
+    ctx["sys_batch_end:day"] = String(d.getDate()).padStart(2,"0");
+  }
+
+  // ── স্কুল ──
+  ctx.sys_school_name = school?.name_en || "";
+  ctx.sys_school_name_jp = school?.name_jp || "";
+  ctx.sys_school_address = school?.address || "";
+
+  return ctx;
 }
 
 /**
@@ -973,6 +1040,36 @@ const SYSTEM_FIELDS = [
   { group: "গন্তব্য", fields: [
     { key: "country", label: "দেশ" }, { key: "intake", label: "Intake" },
     { key: "visa_type", label: "ভিসার ধরন" }, { key: "student_type", label: "স্টুডেন্ট টাইপ" },
+  ]},
+  { group: "সিস্টেম ভ্যারিয়েবল", fields: [
+    { key: "sys_agency_name", label: "এজেন্সি নাম" },
+    { key: "sys_agency_name_bn", label: "এজেন্সি নাম (বাংলা)" },
+    { key: "sys_agency_address", label: "এজেন্সি ঠিকানা" },
+    { key: "sys_agency_phone", label: "এজেন্সি ফোন" },
+    { key: "sys_agency_email", label: "এজেন্সি ইমেইল" },
+    { key: "sys_branch_name", label: "ব্রাঞ্চ নাম" },
+    { key: "sys_branch_address", label: "ব্রাঞ্চ ঠিকানা" },
+    { key: "sys_branch_phone", label: "ব্রাঞ্চ ফোন" },
+    { key: "sys_branch_manager", label: "ব্রাঞ্চ ম্যানেজার" },
+    { key: "sys_today", label: "আজকের তারিখ" },
+    { key: "sys_today:year", label: "আজ → বছর" },
+    { key: "sys_today:month", label: "আজ → মাস" },
+    { key: "sys_today:day", label: "আজ → দিন" },
+    { key: "sys_today_jp", label: "আজকের তারিখ (日本語)" },
+    { key: "sys_batch_name", label: "ব্যাচ নাম" },
+    { key: "sys_batch_start", label: "ব্যাচ শুরু তারিখ" },
+    { key: "sys_batch_start:year", label: "ব্যাচ শুরু → বছর" },
+    { key: "sys_batch_start:month", label: "ব্যাচ শুরু → মাস" },
+    { key: "sys_batch_start:day", label: "ব্যাচ শুরু → দিন" },
+    { key: "sys_batch_end", label: "ব্যাচ শেষ তারিখ" },
+    { key: "sys_batch_end:year", label: "ব্যাচ শেষ → বছর" },
+    { key: "sys_batch_end:month", label: "ব্যাচ শেষ → মাস" },
+    { key: "sys_batch_end:day", label: "ব্যাচ শেষ → দিন" },
+    { key: "sys_batch_teacher", label: "ব্যাচ শিক্ষক" },
+    { key: "sys_batch_schedule", label: "ব্যাচ সময়সূচী" },
+    { key: "sys_school_name", label: "স্কুল নাম (EN)" },
+    { key: "sys_school_name_jp", label: "স্কুল নাম (JP)" },
+    { key: "sys_school_address", label: "স্কুল ঠিকানা" },
   ]},
 ];
 
