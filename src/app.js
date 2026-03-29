@@ -65,6 +65,10 @@ app.use(cookieParser());
 // JSON body parser: max 1MB (DoS prevention)
 app.use(express.json({ limit: "1mb" }));
 
+// Body sanitizer — empty date string → null (PostgreSQL compatibility)
+const sanitizeBody = require("./middleware/sanitizeBody");
+app.use(sanitizeBody);
+
 // ── Global Rate Limiter — প্রতি IP থেকে ১ মিনিটে সর্বোচ্চ ১০০ request ──
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
