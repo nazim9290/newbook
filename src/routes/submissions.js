@@ -60,12 +60,10 @@ router.post("/:id/feedback", asyncHandler(async (req, res) => {
   const feedback = [...(sub.feedback || []), { doc, issue, severity: severity || "warning", date: new Date().toISOString().slice(0, 10), resolved: false }];
 
   const { data, error } = await supabase.from("submissions").update({
-    feedback,
+    feedback: JSON.stringify(feedback),
     status: "issues_found",
     recheck_count: (sub.recheck_count || 0) + 1,
-    last_recheck_date: new Date().toISOString().slice(0, 10),
-    updated_at: new Date().toISOString(),
-  }).eq("id", req.params.id).select("*, students(name_en), schools(name_en)").single();
+  }).eq("id", req.params.id).select().single();
 
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.json(data);
@@ -82,10 +80,9 @@ router.patch("/:id/feedback/:index/resolve", asyncHandler(async (req, res) => {
 
   const allResolved = feedback.every(f => f.resolved);
   const { data, error } = await supabase.from("submissions").update({
-    feedback,
+    feedback: JSON.stringify(feedback),
     status: allResolved ? "resubmitted" : "issues_found",
-    updated_at: new Date().toISOString(),
-  }).eq("id", req.params.id).select("*, students(name_en), schools(name_en)").single();
+  }).eq("id", req.params.id).select().single();
 
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.json(data);
