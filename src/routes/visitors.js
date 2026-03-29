@@ -103,25 +103,28 @@ const VISITOR_FIELD_MAP = {
 };
 router.patch("/:id", checkPermission("visitors", "write"), asyncHandler(async (req, res) => {
   // Frontend field names → DB column names convert
-  // Date columns — empty string → null (PostgreSQL date column "" reject করে)
   const DATE_COLS = ["visit_date", "last_follow_up", "next_follow_up", "dob"];
+  // Valid DB columns — এগুলোই শুধু update হবে, বাকি সব ignore
+  const VALID_COLS = [
+    "name", "name_en", "name_bn", "phone", "guardian_phone", "email",
+    "dob", "gender", "blood_group", "address", "education",
+    "has_jp_cert", "jp_exam_type", "jp_exam_type_other", "jp_level", "jp_score",
+    "visa_type", "visa_type_other", "interested_countries", "interested_intake",
+    "budget_concern", "source", "agent_id", "agent_name", "referral_info",
+    "counselor", "branch", "status", "notes", "next_follow_up", "last_follow_up",
+    "visit_date",
+  ];
   const updates = {};
   for (const [key, val] of Object.entries(req.body)) {
     const dbKey = VISITOR_FIELD_MAP[key] || key;
-    // empty string date → null
+    if (!VALID_COLS.includes(dbKey)) continue; // unknown column skip
+    // Date empty string → null (PostgreSQL date column "" reject করে)
     if (DATE_COLS.includes(dbKey) && (val === "" || val === null)) {
       updates[dbKey] = null;
     } else if (val !== undefined) {
       updates[dbKey] = val;
     }
   }
-  // extra fields clean — DB-তে নেই এমন frontend fields বাদ
-  delete updates.id;
-  delete updates.agency_id;
-  delete updates.lastFollowUp;
-  delete updates.nextFollowUp;
-  delete updates.created;
-  delete updates.name_en;  // name_en → name already mapped
 
   const { data, error } = await supabase
     .from("visitors")
