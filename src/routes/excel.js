@@ -164,14 +164,17 @@ router.get("/templates/:id", asyncHandler(async (req, res) => {
 // Body: { mappings: [{ cell: "B3", label: "名前", field: "name_en", targetCell: "B3" }, ...] }
 // ================================================================
 router.post("/templates/:id/mapping", asyncHandler(async (req, res) => {
+  console.error("[MAPPING DEBUG] body:", JSON.stringify(req.body).slice(0, 300), "type:", typeof req.body.mappings, "isArray:", Array.isArray(req.body.mappings));
   const { mappings } = req.body;
-  if (!Array.isArray(mappings)) return res.status(400).json({ error: "mappings array দিন" });
+  if (!mappings) return res.status(400).json({ error: "mappings field নেই", received: Object.keys(req.body) });
+  const arr = Array.isArray(mappings) ? mappings : (typeof mappings === "string" ? JSON.parse(mappings) : []);
+  if (!arr.length) return res.status(400).json({ error: "mappings খালি" });
 
-  const mapped = mappings.filter((m) => m.field && m.field.trim());
+  const mapped = arr.filter((m) => m.field && m.field.trim());
 
   const { data, error } = await supabase
     .from("excel_templates")
-    .update({ mappings: JSON.stringify(mappings), mapped_fields: mapped.length, total_fields: mappings.length })
+    .update({ mappings: JSON.stringify(arr), mapped_fields: mapped.length, total_fields: arr.length })
     .eq("id", req.params.id)
     .select()
     .single();
