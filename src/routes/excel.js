@@ -41,26 +41,18 @@ router.post("/upload-template", upload.single("file"), asyncHandler(async (req, 
 
     const agencyId = req.user.agency_id || "a0000000-0000-0000-0000-000000000001";
 
-    // 1. Upload file to Supabase Storage (templates bucket)
-    const fileBuffer = fs.readFileSync(req.file.path);
-    const storagePath = `${agencyId}/${Date.now()}_${req.file.originalname}`;
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from("templates")
-      .upload(storagePath, fileBuffer, {
-        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        upsert: false,
-      });
-
-    if (uploadError) {
-      console.error("Storage upload error:", uploadError.message);
-      // Continue with local file as fallback
-    } else {
-      console.log("Uploaded to storage:", storagePath);
-    }
+    // 1. Local VPS-এ ফাইল রাখি — permanent path-এ move
+    const permanentDir = path.join(__dirname, "../../uploads/excel-templates");
+    if (!fs.existsSync(permanentDir)) fs.mkdirSync(permanentDir, { recursive: true });
+    const safeName = `${agencyId}_${Date.now()}_${req.file.originalname.replace(/[^a-zA-Z0-9._\-]/g, "_")}`;
+    const permanentPath = path.join(permanentDir, safeName);
+    fs.copyFileSync(req.file.path, permanentPath);
+    try { fs.unlinkSync(req.file.path); } catch {} // temp file মুছি
+    console.log("Template saved locally:", permanentPath);
 
     // 2. Parse Excel — শুধু {{placeholder}} cells detect করো
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(req.file.path);
+    await workbook.xlsx.readFile(permanentPath);
 
     const placeholders = []; // শুধু {{...}} আছে এমন cells
     const seen = new Set();  // duplicate detect (merged cells একই data repeat করে)
@@ -115,7 +107,7 @@ router.post("/upload-template", upload.single("file"), asyncHandler(async (req, 
         agency_id: agencyId,
         school_name,
         file_name: req.file.originalname,
-        template_url: req.file.path, // সবসময় local path রাখি — getTemplateBuffer local থেকে পড়বে
+        template_url: permanentPath, // VPS local path — getTemplateBuffer এখান থেকে পড়বে
         mappings: JSON.stringify(placeholders), // {{}} mappings — JSONB column-এ string হিসেবে পাঠাই
         total_fields: placeholders.length,
         mapped_fields: placeholders.filter(p => p.field).length,
@@ -125,9 +117,8 @@ router.post("/upload-template", upload.single("file"), asyncHandler(async (req, 
 
     if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
-    // 4. Local file রাখি — template generate-এ ব্যবহার হবে
-    // Supabase-এ backup আছে, local-ও রাখছি reliability-র জন্য
-    if (false) { // local file delete বন্ধ
+    // 4. File already moved to permanent path — nothing to clean
+    if (false) {
     }
 
     res.json({
@@ -135,7 +126,7 @@ router.post("/upload-template", upload.single("file"), asyncHandler(async (req, 
       sheets: workbook.worksheets.map((s) => s.name),
       placeholders,
       totalPlaceholders: placeholders.length,
-      storage: uploadError ? "local" : "supabase",
+      storage: "local",
     });
   } catch (err) {
     console.error("Upload template error:", err);
@@ -374,39 +365,25 @@ router.get("/system-fields", (req, res) => res.json(SYSTEM_FIELDS));
 async function getTemplateBuffer(templateUrl) {
   if (!templateUrl) return null;
 
-  // 1. Absolute path হলে সরাসরি read
-  if (path.isAbsolute(templateUrl) && fs.existsSync(templateUrl)) {
+  // 1. Absolute path (VPS local) — সরাসরি read
+  if (fs.existsSync(templateUrl)) {
     return fs.readFileSync(templateUrl);
   }
 
-  // 2. uploads/ folder-এ আছে কিনা চেক
+  // 2. uploads/excel-templates/ folder-এ filename দিয়ে চেক
   const uploadsPath = path.join(__dirname, "../../uploads/excel-templates", path.basename(templateUrl));
   if (fs.existsSync(uploadsPath)) {
     return fs.readFileSync(uploadsPath);
   }
 
-  // 3. multer temp path — original upload location
-  const multerPath = path.join(__dirname, "../../uploads", templateUrl);
-  if (fs.existsSync(multerPath)) {
-    return fs.readFileSync(multerPath);
-  }
-
-  // 4. Relative path — check from backend root
+  // 3. Backend root-এর relative path
   const relPath = path.join(__dirname, "../..", templateUrl);
   if (fs.existsSync(relPath)) {
     return fs.readFileSync(relPath);
   }
 
-  // 5. Supabase Storage path হলে download
-  try {
-    const { data, error } = await supabase.storage.from("templates").download(templateUrl);
-    if (error || !data) { console.error("Storage download error:", error?.message); return null; }
-    const arrayBuffer = await data.arrayBuffer();
-    return Buffer.from(arrayBuffer);
-  } catch (err) {
-    console.error("Template download failed:", err.message);
-    return null;
-  }
+  console.error("Template file not found:", templateUrl);
+  return null;
 }
 
 // Buffer থেকে template পড়ে student data + system context fill করে return
