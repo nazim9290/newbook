@@ -103,14 +103,25 @@ const VISITOR_FIELD_MAP = {
 };
 router.patch("/:id", checkPermission("visitors", "write"), asyncHandler(async (req, res) => {
   // Frontend field names → DB column names convert
+  // Date columns — empty string → null (PostgreSQL date column "" reject করে)
+  const DATE_COLS = ["visit_date", "last_follow_up", "next_follow_up", "dob"];
   const updates = {};
   for (const [key, val] of Object.entries(req.body)) {
     const dbKey = VISITOR_FIELD_MAP[key] || key;
-    if (val !== undefined) updates[dbKey] = val;
+    // empty string date → null
+    if (DATE_COLS.includes(dbKey) && (val === "" || val === null)) {
+      updates[dbKey] = null;
+    } else if (val !== undefined) {
+      updates[dbKey] = val;
+    }
   }
-  // undefined/extra fields clean
+  // extra fields clean — DB-তে নেই এমন frontend fields বাদ
   delete updates.id;
   delete updates.agency_id;
+  delete updates.lastFollowUp;
+  delete updates.nextFollowUp;
+  delete updates.created;
+  delete updates.name_en;  // name_en → name already mapped
 
   const { data, error } = await supabase
     .from("visitors")
