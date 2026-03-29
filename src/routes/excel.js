@@ -102,7 +102,7 @@ router.post("/upload-template", upload.single("file"), asyncHandler(async (req, 
         school_name,
         file_name: req.file.originalname,
         template_url: uploadError ? req.file.path : storagePath,
-        mappings: placeholders, // {{}} mappings auto-save
+        mappings: JSON.stringify(placeholders), // {{}} mappings — JSONB column-এ string হিসেবে পাঠাই
         total_fields: placeholders.length,
         mapped_fields: placeholders.filter(p => p.field).length,
       })
