@@ -273,23 +273,28 @@ router.post("/:id/interview-list", checkPermission("schools", "write"), asyncHan
 
     } else {
       // ── Row-wise: প্রতি student = ১টি row ──
-      // Header row detect — look for row with known keywords
-      const HEADER_MAP = {
-        "no": "no", "no.": "no", "ক্রমিক": "no",
-        "family name": "family_name", "氏": "family_name", "sir name": "family_name",
-        "given name": "given_name", "名": "given_name", "first name": "given_name",
-        "name": "full_name", "full name": "full_name", "নাম": "full_name",
-        "gender": "gender", "性別": "gender", "m/f": "gender", "লিঙ্গ": "gender",
-        "date of birth": "dob_age", "生年月日": "dob_age", "age": "dob_age", "birth": "dob_age", "年齢": "dob_age",
-        "education": "education", "最終学歴": "education", "শিক্ষা": "education",
-        "gpa": "gpa",
-        "jp level": "jp_level", "日本語能力": "jp_level", "score": "jp_score",
-        "sponsor": "sponsor", "経費支弁者": "sponsor", "income": "sponsor",
-        "passport": "passport_no", "phone": "phone", "email": "email",
-        "address": "address", "intake": "intended_semester",
-        "coe": "coe_applied", "goal": "goal",
-        "フジ": "", // School-specific column — skip
-      };
+      // Header row detect — keyword → student field mapping
+      // কীওয়ার্ড ম্যাচিং: exact word/phrase match (includes false positive avoid)
+      const HEADER_RULES = [
+        { test: v => /^no\.?$/i.test(v.trim()), field: "no" },
+        { test: v => /ক্রমিক/i.test(v), field: "no" },
+        { test: v => /family|sir\s*name|氏/i.test(v), field: "family_name" },
+        { test: v => /given\s*name|first\s*name|名\s*given/i.test(v), field: "given_name" },
+        { test: v => /gender|性別|m\/f/i.test(v), field: "gender" },
+        { test: v => /birth|生年月日|年齢|dob|date of birth/i.test(v), field: "dob_age" },
+        { test: v => /education|最終学歴|学歴/i.test(v), field: "education" },
+        { test: v => /^gpa$/i.test(v.trim()), field: "gpa" },
+        { test: v => /jp\s*level|日本語能力|日本語/i.test(v), field: "jp_level" },
+        { test: v => /sponsor|経費支弁者|経費/i.test(v), field: "sponsor" },
+        { test: v => /passport|パスポート/i.test(v), field: "passport_no" },
+        { test: v => /phone|電話/i.test(v), field: "phone" },
+        { test: v => /email|メール/i.test(v), field: "email" },
+        { test: v => /address|住所/i.test(v), field: "address" },
+        { test: v => /intake|semester/i.test(v), field: "intended_semester" },
+        { test: v => /coe/i.test(v), field: "coe_applied" },
+        { test: v => /goal|目標/i.test(v), field: "goal" },
+        { test: v => /フジ|記入/i.test(v), field: "" }, // skip school-specific
+      ];
 
       // Find header row
       let headerRowNum = -1;
@@ -299,9 +304,20 @@ router.post("/:id/interview-list", checkPermission("schools", "write"), asyncHan
         let matchCount = 0;
         const tempMap = {};
         row.eachCell({ includeEmpty: false }, (cell, colNum) => {
-          const val = String(cell.value || "").toLowerCase().trim();
-          for (const [keyword, field] of Object.entries(HEADER_MAP)) {
-            if (val.includes(keyword) && field) { tempMap[colNum] = field; matchCount++; break; }
+          // ExcelJS richText support — extract plain text
+          let val = "";
+          if (cell.value && typeof cell.value === "object" && cell.value.richText) {
+            val = cell.value.richText.map(r => r.text || "").join("");
+          } else {
+            val = String(cell.value || "");
+          }
+          val = val.replace(/\n/g, " ").trim();
+          if (!val) return;
+          for (const rule of HEADER_RULES) {
+            if (rule.test(val)) {
+              if (rule.field) { tempMap[colNum] = rule.field; matchCount++; }
+              break;
+            }
           }
         });
         if (matchCount >= 3) { headerRowNum = r; colMap = tempMap; break; }
@@ -310,7 +326,11 @@ router.post("/:id/interview-list", checkPermission("schools", "write"), asyncHan
       if (headerRowNum === -1) {
         // Header পাওয়া যায়নি — row 3 assume (default template format)
         headerRowNum = 3;
+        // Default column mapping for default template
+        colMap = { 1: "no", 2: "family_name", 3: "given_name", 4: "gender", 5: "dob_age", 6: "education", 7: "gpa", 8: "jp_level", 9: "sponsor" };
       }
+
+      console.log("[Interview] Header row:", headerRowNum, "colMap:", JSON.stringify(colMap));
 
       // Agency name fill (row 1 — 行名)
       const row1Val = String(ws.getCell(1, 1).value || "").toLowerCase();
@@ -323,20 +343,10 @@ router.post("/:id/interview-list", checkPermission("schools", "write"), asyncHan
       students.forEach((s, i) => {
         const flat = studentToFlat(s, i, agency_name, staff_name);
         const targetRow = dataStartRow + i;
-        // Ensure row exists
         const row = ws.getRow(targetRow);
-        // Fill using colMap
-        if (Object.keys(colMap).length > 0) {
-          for (const [colStr, field] of Object.entries(colMap)) {
-            const col = parseInt(colStr);
-            row.getCell(col).value = flat[field] || "";
-          }
-        } else {
-          // Default column order (match default template)
-          const defaultOrder = ["no", "family_name", "given_name", "gender", "dob_age", "education", "gpa", "jp_level", "sponsor"];
-          defaultOrder.forEach((field, ci) => {
-            row.getCell(ci + 1).value = flat[field] || "";
-          });
+        for (const [colStr, field] of Object.entries(colMap)) {
+          const col = parseInt(colStr);
+          row.getCell(col).value = flat[field] || "";
         }
         row.commit();
       });
