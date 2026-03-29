@@ -112,15 +112,17 @@ const templateUpload = multer({ dest: uploadDir, limits: { fileSize: 5 * 1024 * 
 // POST /api/schools/:id/interview-template — টেমপ্লেট আপলোড
 router.post("/:id/interview-template", checkPermission("schools", "write"), templateUpload.single("template"), asyncHandler(async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "ফাইল দিন" });
-  // .xlsx extension দিয়ে rename
-  const finalPath = req.file.path + ".xlsx";
+  // Original filename sanitize করে রাখি (school_id prefix দিয়ে unique)
+  const origName = (req.file.originalname || "template.xlsx").replace(/[^a-zA-Z0-9._\-\u0980-\u09FF]/g, "_");
+  const safeName = `${req.params.id}_${origName}`;
+  const finalPath = path.join(uploadDir, safeName);
   fs.renameSync(req.file.path, finalPath);
-  // DB-তে template path সেভ
+  // DB-তে original filename সেভ (display-এর জন্য) + server filename
   const { data, error } = await supabase.from("schools")
-    .update({ interview_template: path.basename(finalPath) })
+    .update({ interview_template: safeName, interview_template_name: origName })
     .eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) return dbError(res, error, "schools.uploadTemplate");
-  res.json({ template: data.interview_template, message: "টেমপ্লেট আপলোড হয়েছে" });
+  res.json({ template: safeName, template_name: origName, message: "টেমপ্লেট আপলোড হয়েছে" });
 }));
 
 // DELETE /api/schools/:id/interview-template — টেমপ্লেট মুছুন
