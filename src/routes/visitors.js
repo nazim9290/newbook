@@ -173,4 +173,14 @@ router.post("/:id/convert", checkPermission("visitors", "write"), asyncHandler(a
   res.status(201).json(student);
 }));
 
+// DELETE /api/visitors/:id
+router.delete("/:id", checkPermission("visitors", "delete"), asyncHandler(async (req, res) => {
+  const { error } = await supabase.from("visitors")
+    .delete()
+    .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id);
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: error.message }); }
+  res.json({ success: true });
+}));
+
 module.exports = router;
