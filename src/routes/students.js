@@ -51,27 +51,32 @@ router.get("/", checkPermission("students", "read"), asyncHandler(async (req, re
 
 // GET /api/students/:id — single student with related data
 router.get("/:id", checkPermission("students", "read"), asyncHandler(async (req, res) => {
+  // Main student record
   const { data: student, error } = await supabase
-    .from("students")
-    .select(`
-      *,
-      student_education(*),
-      student_jp_exams(*),
-      student_family(*),
-      sponsors(*),
-      payments(*),
-      documents(*)
-    `)
-    .eq("id", req.params.id)
-    .single();
+    .from("students").select("*").eq("id", req.params.id).single();
 
   if (error) return res.status(404).json({ error: "স্টুডেন্ট পাওয়া যায়নি" });
 
-  // Decrypt student + sponsor sensitive fields
+  // Related data — আলাদা query (JOIN error এড়ানোর জন্য)
+  const sid = req.params.id;
+  const [eduRes, examRes, famRes, sponsorRes, payRes, docRes] = await Promise.all([
+    supabase.from("student_education").select("*").eq("student_id", sid),
+    supabase.from("student_jp_exams").select("*").eq("student_id", sid),
+    supabase.from("student_family").select("*").eq("student_id", sid),
+    supabase.from("sponsors").select("*").eq("student_id", sid).single(),
+    supabase.from("payments").select("*").eq("student_id", sid).order("date", { ascending: false }),
+    supabase.from("documents").select("*").eq("student_id", sid),
+  ]);
+
   const decrypted = decryptSensitiveFields(student);
-  if (decrypted.sponsor) {
-    decrypted.sponsor = decryptSensitiveFields(decrypted.sponsor);
-  }
+  decrypted.student_education = eduRes.data || [];
+  decrypted.student_jp_exams = examRes.data || [];
+  decrypted.student_family = famRes.data || [];
+  decrypted.sponsors = sponsorRes.data ? [decryptSensitiveFields(sponsorRes.data)] : [];
+  decrypted.sponsor = sponsorRes.data ? decryptSensitiveFields(sponsorRes.data) : null;
+  decrypted.payments = payRes.data || [];
+  decrypted.documents = docRes.data || [];
+
   res.json(decrypted);
 }));
 

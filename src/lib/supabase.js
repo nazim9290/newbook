@@ -39,6 +39,15 @@ const FK_MAP = {
   doc_types: "doc_type_id",
   sponsors: "sponsor_id",
   documents: "document_id",
+  // Student related tables — সব student_id দিয়ে join
+  student_education: "student_id",
+  student_jp_exams: "student_id",
+  student_family: "student_id",
+  sponsor_banks: "sponsor_id",
+  payments: "student_id",
+  fee_items: "student_id",
+  batch_students: "batch_id",
+  class_tests: "batch_id",
 };
 
 // ═══════════════════════════════════════════════════
