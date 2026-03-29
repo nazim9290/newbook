@@ -90,11 +90,31 @@ router.post("/", checkPermission("visitors", "write"), asyncHandler(async (req, 
   res.status(201).json(mapped);
 }));
 
-// PATCH /api/visitors/:id
+// PATCH /api/visitors/:id — frontend camelCase → DB snake_case mapping
+const VISITOR_FIELD_MAP = {
+  lastFollowUp: "last_follow_up", nextFollowUp: "next_follow_up",
+  visitDate: "visit_date", guardianPhone: "guardian_phone",
+  hasJpCert: "has_jp_cert", jpExamType: "jp_exam_type",
+  jpLevel: "jp_level", jpScore: "jp_score",
+  interestedCountries: "interested_countries", interestedIntake: "interested_intake",
+  budgetConcern: "budget_concern", referralInfo: "referral_info",
+  agentName: "agent_name", createdBy: "created_by",
+  name_en: "name", date: "visit_date",
+};
 router.patch("/:id", checkPermission("visitors", "write"), asyncHandler(async (req, res) => {
+  // Frontend field names → DB column names convert
+  const updates = {};
+  for (const [key, val] of Object.entries(req.body)) {
+    const dbKey = VISITOR_FIELD_MAP[key] || key;
+    if (val !== undefined) updates[dbKey] = val;
+  }
+  // undefined/extra fields clean
+  delete updates.id;
+  delete updates.agency_id;
+
   const { data, error } = await supabase
     .from("visitors")
-    .update(req.body)
+    .update(updates)
     .eq("id", req.params.id)
     .select()
     .single();
