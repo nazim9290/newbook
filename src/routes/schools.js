@@ -333,9 +333,12 @@ router.post("/:id/interview-list", checkPermission("schools", "write"), asyncHan
       console.log("[Interview] Header row:", headerRowNum, "colMap:", JSON.stringify(colMap));
 
       // Agency name fill (row 1 — 行名)
+      const row1 = ws.getRow(1);
       const row1Val = String(ws.getCell(1, 1).value || "").toLowerCase();
       if (row1Val.includes("agent") || row1Val.includes("行名") || row1Val.includes("agency")) {
-        ws.getCell(1, 2).value = agency_name || "";
+        // Unmerge cleanup — শুধু A1-তে label + agency name, বাকি clear
+        ws.getCell(1, 1).value = `行名(Agent Name): ${agency_name || ""}`;
+        for (let c = 2; c <= 10; c++) ws.getCell(1, c).value = "";
       }
 
       // Insert student rows after header
