@@ -24,7 +24,12 @@ router.get("/", asyncHandler(async (req, res) => {
   if (status && status !== "All") q = q.eq("status", status);
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
-  res.json(data || []);
+  // feedback JSONB string → array parse
+  const parsed = (data || []).map(s => ({
+    ...s,
+    feedback: typeof s.feedback === "string" ? JSON.parse(s.feedback) : (s.feedback || []),
+  }));
+  res.json(parsed);
 }));
 
 // POST /api/submissions — নতুন submission
@@ -57,7 +62,8 @@ router.post("/:id/feedback", asyncHandler(async (req, res) => {
   const { data: sub } = await supabase.from("submissions").select("feedback, recheck_count").eq("id", req.params.id).single();
   if (!sub) return res.status(404).json({ error: "Submission পাওয়া যায়নি" });
 
-  const feedback = [...(sub.feedback || []), { doc, issue, severity: severity || "warning", date: new Date().toISOString().slice(0, 10), resolved: false }];
+  const existing = typeof sub.feedback === "string" ? JSON.parse(sub.feedback) : (sub.feedback || []);
+  const feedback = [...existing, { doc, issue, severity: severity || "warning", date: new Date().toISOString().slice(0, 10), resolved: false }];
 
   const { data, error } = await supabase.from("submissions").update({
     feedback: JSON.stringify(feedback),
@@ -74,7 +80,7 @@ router.patch("/:id/feedback/:index/resolve", asyncHandler(async (req, res) => {
   const { data: sub } = await supabase.from("submissions").select("feedback").eq("id", req.params.id).single();
   if (!sub) return res.status(404).json({ error: "Submission পাওয়া যায়নি" });
 
-  const feedback = [...(sub.feedback || [])];
+  const feedback = typeof sub.feedback === "string" ? JSON.parse(sub.feedback) : [...(sub.feedback || [])];
   const idx = parseInt(req.params.index);
   if (feedback[idx]) feedback[idx].resolved = true;
 
