@@ -55,11 +55,10 @@ router.get("/:id", checkPermission("students", "read"), asyncHandler(async (req,
     .from("students")
     .select(`
       *,
-      education(*),
-      employment(*),
-      jp_study(*),
-      jp_exams(*),
-      sponsor(*),
+      student_education(*),
+      student_jp_exams(*),
+      student_family(*),
+      sponsors(*),
       payments(*),
       documents(*)
     `)
