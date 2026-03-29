@@ -49,10 +49,11 @@ app.use(cors({
     if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
       return callback(null, true);
     }
-    // Production — exact match only
-    if (allowedOrigins.has(origin)) {
+    // Production — exact match বা agencybook.net subdomain
+    if (allowedOrigins.has(origin) || origin.endsWith(".agencybook.net")) {
       return callback(null, true);
     }
+    console.error("[CORS Rejected]", origin);
     callback(new Error("CORS not allowed"), false);
   },
   credentials: true,
