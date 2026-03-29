@@ -72,12 +72,15 @@ router.post("/upload", upload.single("file"), asyncHandler(async (req, res) => {
 
     const agencyId = req.user.agency_id || "a0000000-0000-0000-0000-000000000001";
 
-    // Upload to Supabase Storage
-    const fileBuffer = fs.readFileSync(req.file.path);
-    const storagePath = `${agencyId}/docs/${Date.now()}_${req.file.originalname}`;
-    const { error: upErr } = await supabase.storage
-      .from("templates")
-      .upload(storagePath, fileBuffer, { contentType: req.file.mimetype, upsert: false });
+    // Local VPS-এ permanent path-এ save
+    const permanentDir = path.join(__dirname, "../../uploads/doc-templates");
+    if (!fs.existsSync(permanentDir)) fs.mkdirSync(permanentDir, { recursive: true });
+    const safeName = `${agencyId}_${Date.now()}_${req.file.originalname.replace(/[^a-zA-Z0-9._\-]/g, "_")}`;
+    const permanentPath = path.join(permanentDir, safeName);
+    fs.copyFileSync(req.file.path, permanentPath);
+    try { fs.unlinkSync(req.file.path); } catch {}
+
+    const fileBuffer = fs.readFileSync(permanentPath);
 
     // Parse .docx (ZIP of XML files) to find {{placeholders}}
     const AdmZip = require("adm-zip");
@@ -115,17 +118,18 @@ router.post("/upload", upload.single("file"), asyncHandler(async (req, res) => {
       });
     }
 
-    // Save to DB
+    // Save to DB — column names match actual table schema
     const { data: tmpl, error: dbErr } = await supabase
       .from("doc_templates")
       .insert({
         agency_id: agencyId,
         name: template_name,
         category: category || "translation",
-        file_name: req.file.originalname,
-        file_url: upErr ? req.file.path : storagePath,
-        placeholders,
-        total_fields: placeholders.length,
+        description: req.file.originalname,
+        template_url: permanentPath,
+        file_path: permanentPath,
+        field_mappings: JSON.stringify(placeholders),
+        placeholders: JSON.stringify(placeholders),
       })
       .select()
       .single();
