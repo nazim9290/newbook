@@ -115,7 +115,7 @@ router.post("/upload-template", upload.single("file"), asyncHandler(async (req, 
         agency_id: agencyId,
         school_name,
         file_name: req.file.originalname,
-        template_url: uploadError ? req.file.path : storagePath,
+        template_url: req.file.path, // সবসময় local path রাখি — getTemplateBuffer local থেকে পড়বে
         mappings: JSON.stringify(placeholders), // {{}} mappings — JSONB column-এ string হিসেবে পাঠাই
         total_fields: placeholders.length,
         mapped_fields: placeholders.filter(p => p.field).length,
@@ -125,9 +125,9 @@ router.post("/upload-template", upload.single("file"), asyncHandler(async (req, 
 
     if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
-    // 4. Clean up local file
-    if (!uploadError) {
-      try { fs.unlinkSync(req.file.path); } catch {}
+    // 4. Local file রাখি — template generate-এ ব্যবহার হবে
+    // Supabase-এ backup আছে, local-ও রাখছি reliability-র জন্য
+    if (false) { // local file delete বন্ধ
     }
 
     res.json({
@@ -374,16 +374,33 @@ router.get("/system-fields", (req, res) => res.json(SYSTEM_FIELDS));
 async function getTemplateBuffer(templateUrl) {
   if (!templateUrl) return null;
 
-  // Local file path হলে সরাসরি read
-  if (fs.existsSync(templateUrl)) {
+  // 1. Absolute path হলে সরাসরি read
+  if (path.isAbsolute(templateUrl) && fs.existsSync(templateUrl)) {
     return fs.readFileSync(templateUrl);
   }
 
-  // Supabase Storage path হলে download
+  // 2. uploads/ folder-এ আছে কিনা চেক
+  const uploadsPath = path.join(__dirname, "../../uploads/excel-templates", path.basename(templateUrl));
+  if (fs.existsSync(uploadsPath)) {
+    return fs.readFileSync(uploadsPath);
+  }
+
+  // 3. multer temp path — original upload location
+  const multerPath = path.join(__dirname, "../../uploads", templateUrl);
+  if (fs.existsSync(multerPath)) {
+    return fs.readFileSync(multerPath);
+  }
+
+  // 4. Relative path — check from backend root
+  const relPath = path.join(__dirname, "../..", templateUrl);
+  if (fs.existsSync(relPath)) {
+    return fs.readFileSync(relPath);
+  }
+
+  // 5. Supabase Storage path হলে download
   try {
     const { data, error } = await supabase.storage.from("templates").download(templateUrl);
     if (error || !data) { console.error("Storage download error:", error?.message); return null; }
-    // data is a Blob → convert to Buffer
     const arrayBuffer = await data.arrayBuffer();
     return Buffer.from(arrayBuffer);
   } catch (err) {
