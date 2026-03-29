@@ -65,6 +65,20 @@ router.post("/upload-template", upload.single("file"), asyncHandler(async (req, 
     const placeholders = []; // শুধু {{...}} আছে এমন cells
     const seen = new Set();  // duplicate detect (merged cells একই data repeat করে)
     workbook.eachSheet((sheet) => {
+      // Merged cell ranges সংগ্রহ — duplicate skip-এর জন্য
+      const mergedMaster = new Set(); // "col:row" of master cells
+      const mergedSlave = new Set();  // "col:row" of slave cells (skip these)
+      if (sheet.model?.merges) {
+        sheet.model.merges.forEach(range => {
+          // range = "A7:A8" format
+          const parts = range.split(":");
+          if (parts.length === 2) {
+            // First cell = master, rest = slaves
+            mergedMaster.add(parts[0]);
+          }
+        });
+      }
+
       sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
         row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
           const value = getCellText(cell);
@@ -72,8 +86,8 @@ router.post("/upload-template", upload.single("file"), asyncHandler(async (req, 
           if (matches) {
             matches.forEach(match => {
               const key = match.replace(/\{\{|\}\}/g, "").trim();
-              // Merged cell duplicate skip: sheet+row+key combination একবারই রাখো
-              const uniqueKey = `${sheet.name}::${rowNumber}::${key}`;
+              // Merged cell duplicate: same key + same column = merged cell repeat → প্রথমটাই রাখো
+              const uniqueKey = `${sheet.name}::${key}`;
               if (seen.has(uniqueKey)) return;
               seen.add(uniqueKey);
 
