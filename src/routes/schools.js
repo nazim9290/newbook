@@ -101,79 +101,294 @@ router.patch("/submissions/:subId", checkPermission("schools", "write"), asyncHa
   res.json(data);
 }));
 
-// POST /api/schools/:id/interview-list — Excel download
+// ── Interview Template upload ──
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+const uploadDir = path.join(__dirname, "../../uploads/interview-templates");
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+const templateUpload = multer({ dest: uploadDir, limits: { fileSize: 5 * 1024 * 1024 } });
+
+// POST /api/schools/:id/interview-template — টেমপ্লেট আপলোড
+router.post("/:id/interview-template", checkPermission("schools", "write"), templateUpload.single("template"), asyncHandler(async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "ফাইল দিন" });
+  // .xlsx extension দিয়ে rename
+  const finalPath = req.file.path + ".xlsx";
+  fs.renameSync(req.file.path, finalPath);
+  // DB-তে template path সেভ
+  const { data, error } = await supabase.from("schools")
+    .update({ interview_template: path.basename(finalPath) })
+    .eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
+  if (error) return dbError(res, error, "schools.uploadTemplate");
+  res.json({ template: data.interview_template, message: "টেমপ্লেট আপলোড হয়েছে" });
+}));
+
+// DELETE /api/schools/:id/interview-template — টেমপ্লেট মুছুন
+router.delete("/:id/interview-template", checkPermission("schools", "write"), asyncHandler(async (req, res) => {
+  const { data: school } = await supabase.from("schools").select("interview_template").eq("id", req.params.id).single();
+  if (school?.interview_template) {
+    const p = path.join(uploadDir, school.interview_template);
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+  }
+  await supabase.from("schools").update({ interview_template: null }).eq("id", req.params.id).eq("agency_id", req.user.agency_id);
+  res.json({ success: true });
+}));
+
+// ── Student data → flat object (সব template-এ ব্যবহার হবে) ──
+function studentToFlat(s, i, agencyName, staffName) {
+  const dob = s.dob ? new Date(s.dob) : null;
+  const age = dob ? Math.floor((Date.now() - dob) / 31557600000) : "";
+  const dobStr = s.dob || "";
+  const dobAge = dobStr + (age ? ` (${age})` : "");
+  // Family name / Given name split
+  const parts = (s.name_en || "").trim().split(/\s+/);
+  const familyName = parts.length > 1 ? parts[parts.length - 1] : parts[0] || "";
+  const givenName = parts.length > 1 ? parts.slice(0, -1).join(" ") : "";
+  return {
+    no: i + 1, serial: i + 1,
+    name: s.name_en || "", full_name: s.name_en || "",
+    family_name: familyName, given_name: givenName,
+    name_bn: s.name_bn || "", name_jp: s.name_jp || "",
+    gender: s.gender || "", gender_jp: s.gender === "Male" ? "男性" : s.gender === "Female" ? "女性" : "",
+    dob: dobStr, dob_age: dobAge, age: String(age),
+    nationality: s.nationality || "Bangladeshi",
+    education: s.last_education || "", gpa: s.gpa || "",
+    jp_level: s.jp_level || "", jp_score: s.jp_score || "", jp_exam_type: s.jp_exam_type || "",
+    jp_study_hours: s.jp_study_hours || "", has_jp_cert: s.has_jp_cert ? "Yes" : "No",
+    occupation: s.occupation || "Student",
+    passport_no: s.passport_number || "", phone: s.phone || "", email: s.email || "",
+    address: s.permanent_address || s.current_address || "",
+    intake: s.intake || "", intended_semester: s.intake || "",
+    sponsor: s.sponsor_name || "", sponsor_relation: s.sponsor_relation || "",
+    sponsor_income: s.sponsor_income || "", sponsor_contact: s.sponsor_phone || "",
+    coe_applied: s.coe_number ? "Yes" : "No",
+    goal: s.goal_after_graduation || "Return to home country",
+    goal_jp: s.goal_after_graduation || "帰国",
+    past_visa: s.past_visa || "",
+    // System variables
+    agency_name: agencyName || "", staff_name: staffName || "",
+    today: new Date().toISOString().slice(0, 10),
+  };
+}
+
+// POST /api/schools/:id/interview-list — Excel download (template-based)
 router.post("/:id/interview-list", checkPermission("schools", "write"), asyncHandler(async (req, res) => {
   const { student_ids, format, agency_name, staff_name, columns } = req.body;
   if (!Array.isArray(student_ids) || student_ids.length === 0) {
     return res.status(400).json({ error: "student_ids দিন" });
   }
 
-  // Students data fetch
-  const students = [];
-  for (const sid of student_ids) {
-    const { data } = await supabase.from("students").select("*").eq("id", sid).single();
-    if (data) students.push(data);
+  // Students fetch
+  const { data: studentsRaw } = await supabase.from("students").select("*")
+    .in("id", student_ids).eq("agency_id", req.user.agency_id);
+  const students = (studentsRaw || []).sort((a, b) => student_ids.indexOf(a.id) - student_ids.indexOf(b.id));
+
+  // School fetch
+  const { data: school } = await supabase.from("schools").select("*").eq("id", req.params.id).single();
+  const ExcelJS = require("exceljs");
+
+  // ── Template resolution: school-specific → default → system-generated ──
+  let templatePath = null;
+  // 1. স্কুল-specific template
+  if (school?.interview_template) {
+    const p = path.join(uploadDir, school.interview_template);
+    if (fs.existsSync(p)) templatePath = p;
+  }
+  // 2. Default template (uploads/interview-templates/default.xlsx)
+  if (!templatePath) {
+    const defaultPath = path.join(uploadDir, "default.xlsx");
+    if (fs.existsSync(defaultPath)) templatePath = defaultPath;
   }
 
-  // School info
-  const { data: school } = await supabase.from("schools").select("*").eq("id", req.params.id).single();
+  // ── Template-based export ──
+  if (templatePath) {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(templatePath);
+    const ws = wb.worksheets[0];
+    if (!ws) return res.status(500).json({ error: "টেমপ্লেটে কোনো শীট নেই" });
 
-  // ExcelJS দিয়ে .xlsx generate
-  const ExcelJS = require("exceljs");
+    // Format detect: row-wise or column-wise
+    const isColumnWise = format === "column";
+
+    if (isColumnWise) {
+      // ── Column-wise: প্রতি student = ১টি column ──
+      // Label column (A বা first col) — data columns start from B onward
+      // Scan label column for known keywords → map to student fields
+      const LABEL_MAP = {
+        "full name": "full_name", "name shown on passport": "full_name", "passport name": "full_name",
+        "family name": "family_name", "sir name": "family_name", "氏": "family_name",
+        "given name": "given_name", "first name": "given_name", "名": "given_name",
+        "gender": "gender", "性別": "gender",
+        "date of birth": "dob_age", "出生年月日": "dob_age", "dob": "dob_age", "birth": "dob_age",
+        "nationality": "nationality", "nation or region": "nationality", "citizenship": "nationality",
+        "occupation": "occupation", "職業": "occupation",
+        "education": "education", "most recent institution": "education", "type of school": "education", "最終学歴": "education",
+        "date of graduation": "gpa",
+        "studied japanese": "has_jp_cert", "japanese": "has_jp_cert",
+        "attained level": "jp_level", "jp level": "jp_level", "score": "jp_score",
+        "goal": "goal", "goal following graduation": "goal",
+        "passport": "passport_no", "パスポート": "passport_no",
+        "phone": "phone", "email": "email", "address": "address",
+        "sponsor": "sponsor", "経費支弁者": "sponsor",
+        "intake": "intended_semester", "semester": "intended_semester",
+        "gpa": "gpa",
+        "agent": "agency_name", "エージェント": "agency_name", "行名": "agency_name",
+        "リンクスタッフ": "staff_name", "担当者": "staff_name", "記入者": "staff_name",
+        "学生": "no", "student no": "no",
+      };
+
+      // Scan first column for labels
+      const rowCount = ws.rowCount || 30;
+      const labelCol = 1; // A column
+      const dataStartCol = 2; // B column onward (1st data col may have number headers)
+      // Find actual data start — look for "1" or first number in row
+      let numberRow = -1;
+      for (let r = 1; r <= Math.min(rowCount, 10); r++) {
+        const cell = ws.getCell(r, dataStartCol);
+        if (cell.value && /^[1-9]$/.test(String(cell.value).trim())) { numberRow = r; break; }
+      }
+
+      // Map labels → row numbers
+      const labelRows = {};
+      for (let r = 1; r <= rowCount; r++) {
+        const cellVal = String(ws.getCell(r, labelCol).value || "").toLowerCase().trim();
+        if (!cellVal) continue;
+        for (const [keyword, field] of Object.entries(LABEL_MAP)) {
+          if (cellVal.includes(keyword)) { labelRows[field] = r; break; }
+        }
+      }
+
+      // Fill student data — each student gets a column
+      students.forEach((s, i) => {
+        const flat = studentToFlat(s, i, agency_name, staff_name);
+        const col = dataStartCol + i;
+        // Student number header (যেখানে 1, 2, 3... আছে)
+        if (numberRow > 0) ws.getCell(numberRow, col).value = i + 1;
+        // Fill mapped rows
+        for (const [field, row] of Object.entries(labelRows)) {
+          const val = flat[field] || "";
+          if (val) ws.getCell(row, col).value = val;
+        }
+      });
+
+    } else {
+      // ── Row-wise: প্রতি student = ১টি row ──
+      // Header row detect — look for row with known keywords
+      const HEADER_MAP = {
+        "no": "no", "no.": "no", "ক্রমিক": "no",
+        "family name": "family_name", "氏": "family_name", "sir name": "family_name",
+        "given name": "given_name", "名": "given_name", "first name": "given_name",
+        "name": "full_name", "full name": "full_name", "নাম": "full_name",
+        "gender": "gender", "性別": "gender", "m/f": "gender", "লিঙ্গ": "gender",
+        "date of birth": "dob_age", "生年月日": "dob_age", "age": "dob_age", "birth": "dob_age", "年齢": "dob_age",
+        "education": "education", "最終学歴": "education", "শিক্ষা": "education",
+        "gpa": "gpa",
+        "jp level": "jp_level", "日本語能力": "jp_level", "score": "jp_score",
+        "sponsor": "sponsor", "経費支弁者": "sponsor", "income": "sponsor",
+        "passport": "passport_no", "phone": "phone", "email": "email",
+        "address": "address", "intake": "intended_semester",
+        "coe": "coe_applied", "goal": "goal",
+        "フジ": "", // School-specific column — skip
+      };
+
+      // Find header row
+      let headerRowNum = -1;
+      let colMap = {}; // colIndex → field
+      for (let r = 1; r <= Math.min(ws.rowCount || 10, 10); r++) {
+        const row = ws.getRow(r);
+        let matchCount = 0;
+        const tempMap = {};
+        row.eachCell({ includeEmpty: false }, (cell, colNum) => {
+          const val = String(cell.value || "").toLowerCase().trim();
+          for (const [keyword, field] of Object.entries(HEADER_MAP)) {
+            if (val.includes(keyword) && field) { tempMap[colNum] = field; matchCount++; break; }
+          }
+        });
+        if (matchCount >= 3) { headerRowNum = r; colMap = tempMap; break; }
+      }
+
+      if (headerRowNum === -1) {
+        // Header পাওয়া যায়নি — row 3 assume (default template format)
+        headerRowNum = 3;
+      }
+
+      // Agency name fill (row 1 — 行名)
+      const row1Val = String(ws.getCell(1, 1).value || "").toLowerCase();
+      if (row1Val.includes("agent") || row1Val.includes("行名") || row1Val.includes("agency")) {
+        ws.getCell(1, 2).value = agency_name || "";
+      }
+
+      // Insert student rows after header
+      const dataStartRow = headerRowNum + 1;
+      students.forEach((s, i) => {
+        const flat = studentToFlat(s, i, agency_name, staff_name);
+        const targetRow = dataStartRow + i;
+        // Ensure row exists
+        const row = ws.getRow(targetRow);
+        // Fill using colMap
+        if (Object.keys(colMap).length > 0) {
+          for (const [colStr, field] of Object.entries(colMap)) {
+            const col = parseInt(colStr);
+            row.getCell(col).value = flat[field] || "";
+          }
+        } else {
+          // Default column order (match default template)
+          const defaultOrder = ["no", "family_name", "given_name", "gender", "dob_age", "education", "gpa", "jp_level", "sponsor"];
+          defaultOrder.forEach((field, ci) => {
+            row.getCell(ci + 1).value = flat[field] || "";
+          });
+        }
+        row.commit();
+      });
+    }
+
+    // Send
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="Interview_${school?.name_en || "List"}_${students.length}.xlsx"`);
+    await wb.xlsx.write(res);
+    return res.end();
+  }
+
+  // ── No template — system generated basic export ──
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Interview List");
 
-  // Header info
-  ws.addRow(["Agency", agency_name || "AgencyBook"]);
-  ws.addRow(["School", school?.name_en || ""]);
-  ws.addRow(["Staff", staff_name || ""]);
-  ws.addRow(["Date", new Date().toISOString().slice(0, 10)]);
+  // Header info rows
+  ws.addRow([`行名(Agent Name): ${agency_name || "AgencyBook"}`]);
   ws.addRow([]);
 
-  // Column headers
-  const COL_MAP = {
-    serial: "ক্রমিক", passport: "পাসপোর্ট নং", name: "নাম", gender: "লিঙ্গ",
-    dob: "জন্ম তারিখ (বয়স)", nationality: "জাতীয়তা", guardian: "অভিভাবকের যোগাযোগ",
-    jlpt: "জেএলপিটি", gpa_ssc: "জেপি লেভেল/স্কোর", phone: "ফোন", email: "ইমেইল",
-    address: "ঠিকানা", intake: "ইনটেক সেমিস্টার", coe: "COE আবেদন?",
-    visa_interview_date: "সাইবারনাইফ পার্ট", sponsor: "স্পন্সর (আয়)", sponsor_contact: "স্পন্সর যোগাযোগ",
-    plan_after: "পড়াশোনার পর পরিকল্পনা",
-  };
-  const activeCols = (columns || Object.keys(COL_MAP)).filter(c => COL_MAP[c]);
-  const headerRow = ws.addRow(activeCols.map(c => COL_MAP[c] || c));
-  headerRow.font = { bold: true };
-  headerRow.eachCell(cell => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF22D3EE" } }; cell.font = { bold: true, color: { argb: "FF000000" } }; });
+  // Column headers — default or user-selected
+  const DEFAULT_HEADERS = [
+    { key: "no", label: "No." }, { key: "family_name", label: "Family Name" },
+    { key: "given_name", label: "Given Name" }, { key: "gender", label: "Gender" },
+    { key: "dob_age", label: "Date of Birth(Age)" }, { key: "education", label: "Education" },
+    { key: "gpa", label: "GPA" }, { key: "jp_level", label: "JP Level/Score" },
+    { key: "sponsor", label: "Sponsor (Income)" },
+  ];
+  const activeCols = columns && columns.length > 0
+    ? DEFAULT_HEADERS.filter(h => columns.includes(h.key))
+    : DEFAULT_HEADERS;
 
-  // Student rows
-  students.forEach((s, i) => {
-    const row = {};
-    row.serial = i + 1;
-    row.passport = s.passport_number || "";
-    row.name = s.name_en || "";
-    row.gender = s.gender || "";
-    row.dob = s.dob || "";
-    row.nationality = s.nationality || "Bangladeshi";
-    row.guardian = "";
-    row.jlpt = "";
-    row.gpa_ssc = "";
-    row.phone = s.phone || "";
-    row.email = s.email || "";
-    row.address = s.permanent_address || "";
-    row.intake = s.intake || "";
-    row.coe = "";
-    row.visa_interview_date = "";
-    row.sponsor = "";
-    row.sponsor_contact = "";
-    row.plan_after = "";
-    ws.addRow(activeCols.map(c => row[c] || ""));
+  const headerRow = ws.addRow(activeCols.map(h => h.label));
+  headerRow.font = { bold: true };
+  headerRow.eachCell(cell => {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF90EE90" } };
+    cell.font = { bold: true };
+    cell.border = { bottom: { style: "thin" } };
   });
 
-  // Auto-width
-  ws.columns.forEach(col => { col.width = 18; });
+  // Student data rows
+  students.forEach((s, i) => {
+    const flat = studentToFlat(s, i, agency_name, staff_name);
+    ws.addRow(activeCols.map(h => flat[h.key] || ""));
+  });
 
-  // Send as xlsx
+  // Column width
+  ws.columns.forEach(col => { col.width = 20; });
+
+  // Send
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  res.setHeader("Content-Disposition", `attachment; filename="Interview_List.xlsx"`);
+  res.setHeader("Content-Disposition", `attachment; filename="Interview_${school?.name_en || "List"}_${students.length}.xlsx"`);
   await wb.xlsx.write(res);
   res.end();
 }));
