@@ -151,15 +151,27 @@ router.post("/:id/convert", checkPermission("visitors", "write"), asyncHandler(a
 
   if (vErr) return res.status(404).json({ error: "Visitor পাওয়া যায়নি" });
 
+  // Student ID generate — agency prefix সহ
+  const { generateId } = require("../lib/idGenerator");
+  const agencyId = req.user.agency_id;
+  const studentId = await generateId(agencyId, "student");
+
   const { data: student, error: sErr } = await supabase
     .from("students")
     .insert(encryptSensitiveFields({
-      name_en: visitor.name_en,
+      id: studentId,
+      agency_id: agencyId,
+      name_en: visitor.name || visitor.name_en,
       name_bn: visitor.name_bn,
       phone: visitor.phone,
       email: visitor.email,
+      dob: visitor.dob || null,
+      gender: visitor.gender || null,
+      address: visitor.address || null,
       source: visitor.source,
+      agent_id: visitor.agent_id || null,
       branch: visitor.branch,
+      country: (visitor.interested_countries && visitor.interested_countries[0]) || "Japan",
       status: "ENROLLED",
       ...req.body,
     }))

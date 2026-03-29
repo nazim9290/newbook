@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS students (
   nid TEXT, passport_number TEXT, passport_issue DATE, passport_expiry DATE,
   permanent_address TEXT, current_address TEXT,
   father_name TEXT, father_name_en TEXT, mother_name TEXT, mother_name_en TEXT,
-  status TEXT NOT NULL DEFAULT 'VISITOR',
+  status TEXT NOT NULL DEFAULT 'ENROLLED',
   country TEXT DEFAULT 'Japan',
   school_id UUID REFERENCES schools(id), batch_id UUID REFERENCES batches(id),
   school TEXT, batch TEXT, intake TEXT, visa_type TEXT,

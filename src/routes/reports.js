@@ -91,7 +91,7 @@ router.get("/analytics", auth, asyncHandler(async (req, res) => {
 
   // ── Pipeline funnel — Bengali label যোগ ──
   const STATUS_LABELS = {
-    VISITOR: "দর্শনার্থী", FOLLOW_UP: "ফলোআপ", ENROLLED: "ভর্তি",
+    ENROLLED: "ভর্তি",
     IN_COURSE: "কোর্স চলছে", EXAM_PASSED: "পরীক্ষায় পাস",
     DOC_COLLECTION: "ডক কালেকশন", SCHOOL_INTERVIEW: "ইন্টারভিউ",
     DOC_SUBMITTED: "ডক জমা", DOC_IN_REVIEW: "ডক রিভিউতে",
@@ -132,7 +132,7 @@ router.get("/analytics", auth, asyncHandler(async (req, res) => {
 
   // ── Dropout — pipeline ordered ──
   const PIPELINE_ORDER = [
-    "VISITOR", "FOLLOW_UP", "ENROLLED", "IN_COURSE", "EXAM_PASSED",
+    "ENROLLED", "IN_COURSE", "EXAM_PASSED",
     "DOC_COLLECTION", "SCHOOL_INTERVIEW", "DOC_SUBMITTED",
     "COE_RECEIVED", "VISA_GRANTED", "ARRIVED", "COMPLETED",
   ];
