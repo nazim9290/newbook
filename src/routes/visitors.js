@@ -122,7 +122,12 @@ router.patch("/:id", checkPermission("visitors", "write"), asyncHandler(async (r
     if (DATE_COLS.includes(dbKey) && (val === "" || val === null)) {
       updates[dbKey] = null;
     } else if (val !== undefined) {
-      updates[dbKey] = val;
+      // JSONB fields — array/object → JSON string
+      if (dbKey === "education" && typeof val !== "string") {
+        updates[dbKey] = JSON.stringify(val);
+      } else {
+        updates[dbKey] = val;
+      }
     }
   }
 
