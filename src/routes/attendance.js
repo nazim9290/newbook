@@ -13,9 +13,9 @@ router.get("/", asyncHandler(async (req, res) => {
   if (!date) return res.status(400).json({ error: "তারিখ দিন" });
 
   let query = supabase.from("attendance")
-    .select("*, students(name_en, batch)")
+    .select("*")
     .eq("date", date)
-    .eq("agency_id", req.user.agency_id);  // tenancy enforcement
+    .eq("agency_id", req.user.agency_id);
   if (batch && batch !== "all") query = query.eq("batch_id", batch);
 
   const { data, error } = await query;
@@ -35,7 +35,8 @@ router.post("/save", asyncHandler(async (req, res) => {
     date,
     student_id: r.student_id,
     status: r.status,
-    agency_id: agencyId,  // tenancy enforcement
+    batch_id: req.body.batch_id || null,
+    agency_id: agencyId,
     marked_by: req.user.id,
   }));
 
