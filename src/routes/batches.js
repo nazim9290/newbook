@@ -14,6 +14,19 @@ router.get("/", asyncHandler(async (req, res) => {
   if (branch && branch !== "All") query = query.eq("branch", branch);
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+
+  // প্রতিটি batch-এ enrolled student count যোগ
+  const pool = supabase.pool;
+  for (const batch of (data || [])) {
+    try {
+      const { rows } = await pool.query(
+        "SELECT COUNT(*)::int AS count FROM batch_students WHERE batch_id = $1",
+        [batch.id]
+      );
+      batch.enrolledCount = rows[0]?.count || 0;
+    } catch { batch.enrolledCount = 0; }
+  }
+
   res.json(data);
 }));
 
