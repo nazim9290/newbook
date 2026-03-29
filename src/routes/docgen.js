@@ -172,15 +172,13 @@ router.post("/generate", asyncHandler(async (req, res) => {
     // doc_data (user input) priority, তারপর student profile
     const flat = { ...flattenForDoc(decrypted), ...doc_data };
 
-    // Get template file buffer
+    // Get template file buffer — VPS local
     let templateBuffer;
-    if (fs.existsSync(tmpl.file_url)) {
-      templateBuffer = fs.readFileSync(tmpl.file_url);
+    const tmplPath = tmpl.template_url || tmpl.file_path;
+    if (tmplPath && fs.existsSync(tmplPath)) {
+      templateBuffer = fs.readFileSync(tmplPath);
     } else {
-      // Supabase Storage
-      const { data: dlData, error: dlErr } = await supabase.storage.from("templates").download(tmpl.file_url);
-      if (dlErr || !dlData) return res.status(400).json({ error: "Template file পাওয়া যায়নি" });
-      templateBuffer = Buffer.from(await dlData.arrayBuffer());
+      return res.status(400).json({ error: "Template file পাওয়া যায়নি: " + tmplPath });
     }
 
     // Replace {{placeholders}} in .docx
@@ -260,17 +258,19 @@ router.post("/generate", asyncHandler(async (req, res) => {
 // POST /api/docgen/templates/:id/mapping — placeholder → field mapping save
 // ================================================================
 router.post("/templates/:id/mapping", asyncHandler(async (req, res) => {
-  const { placeholders } = req.body;
-  if (!Array.isArray(placeholders)) return res.status(400).json({ error: "placeholders array দিন" });
+  let { placeholders } = req.body;
+  if (!placeholders) return res.status(400).json({ error: "placeholders দিন" });
+  if (typeof placeholders === "string") try { placeholders = JSON.parse(placeholders); } catch { return res.status(400).json({ error: "Invalid JSON" }); }
+  if (!Array.isArray(placeholders)) placeholders = [];
 
   const { data, error } = await supabase
     .from("doc_templates")
-    .update({ placeholders, total_fields: placeholders.length })
+    .update({ field_mappings: JSON.stringify(placeholders), placeholders: JSON.stringify(placeholders) })
     .eq("id", req.params.id)
     .select()
     .single();
 
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) return res.status(400).json({ error: error.message });
   res.json(data);
 }));
 
@@ -278,10 +278,9 @@ router.post("/templates/:id/mapping", asyncHandler(async (req, res) => {
 // DELETE /api/docgen/templates/:id
 // ================================================================
 router.delete("/templates/:id", asyncHandler(async (req, res) => {
-  const { data: tmpl } = await supabase.from("doc_templates").select("file_url").eq("id", req.params.id).single();
-  if (tmpl?.file_url) {
-    if (fs.existsSync(tmpl.file_url)) try { fs.unlinkSync(tmpl.file_url); } catch {}
-    await supabase.storage.from("templates").remove([tmpl.file_url]);
+  const { data: tmpl } = await supabase.from("doc_templates").select("template_url").eq("id", req.params.id).single();
+  if (tmpl?.template_url && fs.existsSync(tmpl.template_url)) {
+    try { fs.unlinkSync(tmpl.template_url); } catch {}
   }
   const { error } = await supabase.from("doc_templates").delete().eq("id", req.params.id);
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
