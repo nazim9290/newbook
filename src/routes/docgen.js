@@ -134,10 +134,7 @@ router.post("/upload", upload.single("file"), asyncHandler(async (req, res) => {
       .select()
       .single();
 
-    if (dbErr) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
-
-    // Cleanup local
-    if (!upErr) try { fs.unlinkSync(req.file.path); } catch {}
+    if (dbErr) return res.status(400).json({ error: dbErr.message });
 
     res.json({ template: tmpl, placeholders });
   } catch (err) {
