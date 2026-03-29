@@ -72,6 +72,8 @@ router.post("/:id/feedback", asyncHandler(async (req, res) => {
   }).eq("id", req.params.id).select().single();
 
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  // Response-এ feedback parsed array হিসেবে পাঠাও
+  if (data) data.feedback = typeof data.feedback === "string" ? JSON.parse(data.feedback) : (data.feedback || []);
   res.json(data);
 }));
 
@@ -91,6 +93,7 @@ router.patch("/:id/feedback/:index/resolve", asyncHandler(async (req, res) => {
   }).eq("id", req.params.id).select().single();
 
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  if (data) data.feedback = typeof data.feedback === "string" ? JSON.parse(data.feedback) : (data.feedback || []);
   res.json(data);
 }));
 
