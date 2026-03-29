@@ -211,6 +211,19 @@ router.post("/:id/payments", checkPermission("students", "write"), asyncHandler(
   res.status(201).json(data);
 }));
 
+// POST /api/students/:id/exam-result — JLPT/NAT পরীক্ষার ফলাফল save
+router.post("/:id/exam-result", checkPermission("students", "write"), asyncHandler(async (req, res) => {
+  const { exam_type, level, score, result, exam_date } = req.body;
+  if (!exam_type) return res.status(400).json({ error: "পরীক্ষার ধরন দিন" });
+  const { data, error } = await supabase.from("student_jp_exams").insert({
+    student_id: req.params.id,
+    exam_type, level, score: score || null, result: result || null,
+    exam_date: exam_date || null,
+  }).select().single();
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: error.message }); }
+  res.status(201).json(data);
+}));
+
 // POST /api/students/:id/fee-items — add fee item (ফি কাঠামো)
 router.post("/:id/fee-items", checkPermission("students", "write"), asyncHandler(async (req, res) => {
   const { category, label, amount } = req.body;
