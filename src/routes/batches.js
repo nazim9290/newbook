@@ -45,7 +45,11 @@ router.get("/:id", asyncHandler(async (req, res) => {
     .select("*, students(name_en, phone, status)")
     .eq("batch_id", req.params.id);
 
-  res.json({ ...batch, enrollments: enrollments || [] });
+  // Class tests
+  const { data: tests } = await supabase.from("class_tests")
+    .select("*").eq("batch_id", req.params.id).order("date", { ascending: false });
+
+  res.json({ ...batch, enrollments: enrollments || [], tests: tests || [] });
 }));
 
 // POST /api/batches — নতুন ব্যাচ তৈরি
@@ -79,6 +83,28 @@ router.post("/:id/enroll", asyncHandler(async (req, res) => {
     .single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.status(201).json(data);
+}));
+
+// POST /api/batches/:id/tests — ক্লাস টেস্ট যোগ
+router.post("/:id/tests", asyncHandler(async (req, res) => {
+  const { test_name, date, avg_score, scores } = req.body;
+  if (!test_name) return res.status(400).json({ error: "টেস্টের নাম দিন" });
+  const { data, error } = await supabase.from("class_tests").insert({
+    batch_id: req.params.id,
+    test_name, date: date || null,
+    avg_score: avg_score || 0,
+    scores: scores ? JSON.stringify(scores) : "{}",
+  }).select().single();
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: error.message }); }
+  res.status(201).json(data);
+}));
+
+// GET /api/batches/:id/tests — ক্লাস টেস্ট তালিকা
+router.get("/:id/tests", asyncHandler(async (req, res) => {
+  const { data, error } = await supabase.from("class_tests")
+    .select("*").eq("batch_id", req.params.id).order("date", { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
 }));
 
 module.exports = router;
