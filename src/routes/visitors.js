@@ -167,7 +167,7 @@ router.post("/:id/convert", checkPermission("visitors", "write"), asyncHandler(a
       email: visitor.email,
       dob: visitor.dob || null,
       gender: visitor.gender || null,
-      address: visitor.address || null,
+      permanent_address: visitor.address || null,
       source: visitor.source,
       agent_id: visitor.agent_id || null,
       branch: visitor.branch,
