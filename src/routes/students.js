@@ -190,16 +190,52 @@ router.delete("/:id", checkPermission("students", "delete"), asyncHandler(async 
   res.json({ success: true });
 }));
 
-// POST /api/students/:id/payments — add payment
+// POST /api/students/:id/payments — add payment (agency_id সহ)
 router.post("/:id/payments", checkPermission("students", "write"), asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("payments")
-    .insert({ ...req.body, student_id: req.params.id })
+    .insert({
+      ...req.body,
+      student_id: req.params.id,
+      agency_id: req.user.agency_id,
+      date: req.body.date || new Date().toISOString().slice(0, 10),
+    })
     .select()
     .single();
 
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: error.message }); }
   res.status(201).json(data);
+}));
+
+// POST /api/students/:id/fee-items — add fee item (ফি কাঠামো)
+router.post("/:id/fee-items", checkPermission("students", "write"), asyncHandler(async (req, res) => {
+  const { category, label, amount } = req.body;
+  if (!category || !amount) return res.status(400).json({ error: "category ও amount দিন" });
+
+  const { data, error } = await supabase
+    .from("fee_items")
+    .insert({ student_id: req.params.id, category, label: label || category, amount: Number(amount) })
+    .select()
+    .single();
+
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: error.message }); }
+  res.status(201).json(data);
+}));
+
+// GET /api/students/:id/fee-items — student এর ফি কাঠামো
+router.get("/:id/fee-items", checkPermission("students", "read"), asyncHandler(async (req, res) => {
+  const { data, error } = await supabase.from("fee_items")
+    .select("*").eq("student_id", req.params.id).order("created_at");
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+}));
+
+// GET /api/students/:id/payments — student এর payments
+router.get("/:id/payments-list", checkPermission("students", "read"), asyncHandler(async (req, res) => {
+  const { data, error } = await supabase.from("payments")
+    .select("*").eq("student_id", req.params.id).order("date", { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
 }));
 
 // ================================================================
