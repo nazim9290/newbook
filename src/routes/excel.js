@@ -171,12 +171,12 @@ router.post("/templates/:id/mapping", asyncHandler(async (req, res) => {
 
   const { data, error } = await supabase
     .from("excel_templates")
-    .update({ mappings, mapped_fields: mapped.length, total_fields: mappings.length })
+    .update({ mappings: JSON.stringify(mappings), mapped_fields: mapped.length, total_fields: mappings.length })
     .eq("id", req.params.id)
     .select()
     .single();
 
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) return res.status(400).json({ error: error.message });
   res.json(data);
 }));
 
