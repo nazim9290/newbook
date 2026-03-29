@@ -37,7 +37,7 @@ function sanitizeBody(req, res, next) {
       }
       // JSONB fields — array/object → JSON string (PostgreSQL JSONB expects string)
       // শুধু known JSONB field names-এ apply হবে
-      const JSONB_FIELDS = ["fields", "settings", "permissions", "education", "fund_formation", "field_data", "mappings", "scores"];
+      const JSONB_FIELDS = ["fields", "settings", "permissions", "education", "fund_formation", "field_data", "mappings", "scores", "interested_countries"];
       if (Array.isArray(val) && JSONB_FIELDS.includes(key)) {
         req.body[key] = JSON.stringify(val);
       }

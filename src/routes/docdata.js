@@ -88,10 +88,8 @@ router.post("/save", asyncHandler(async (req, res) => {
     agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001",
     student_id,
     doc_type_id,
-    field_data: field_data || {},
-    notes: notes || null,
+    field_data: typeof field_data === "string" ? field_data : JSON.stringify(field_data || {}),
     status: "completed",
-    updated_at: new Date().toISOString(),
   };
 
   // Upsert: student_id + doc_type_id unique
