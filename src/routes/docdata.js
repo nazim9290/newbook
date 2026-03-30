@@ -92,6 +92,11 @@ router.post("/save", asyncHandler(async (req, res) => {
     status: "completed",
   };
 
+  // notes column থাকলে record-এ যোগ করো (DB migration পরে কাজ করবে)
+  if (notes !== undefined && notes !== null) {
+    record.notes = notes;
+  }
+
   // Upsert: student_id + doc_type_id unique
   const { data, error } = await supabase
     .from("document_data")
