@@ -20,6 +20,7 @@ router.get("/", auth, asyncHandler(async (req, res) => {
   const agencyId = req.user.agency_id;
   const { data, error } = await supabase.forAgency("users", agencyId)
     .select("id, name, email, phone, role, branch, is_active, permissions, created_at, updated_at")
+    .neq("role", "super_admin")
     .order("created_at", { ascending: false });
 
   if (error) return res.status(500).json({ error: error.message });
