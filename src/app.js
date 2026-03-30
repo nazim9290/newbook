@@ -107,6 +107,29 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
+// ── Agency self-service — নিজের agency info get/update (owner/admin) ──
+const agencyAuth = require("./middleware/auth");
+const agencySupa = require("./lib/supabase");
+const agencyAsync = require("./lib/asyncHandler");
+app.get("/api/agency/me", agencyAuth, agencyAsync(async (req, res) => {
+  const { data, error } = await agencySupa.from("agencies").select("*").eq("id", req.user.agency_id).single();
+  if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি" });
+  res.json(data);
+}));
+app.patch("/api/agency/me", agencyAuth, agencyAsync(async (req, res) => {
+  const { name, name_bn, phone, email, address, logo_url } = req.body;
+  const updates = {};
+  if (name !== undefined) updates.name = name;
+  if (name_bn !== undefined) updates.name_bn = name_bn;
+  if (phone !== undefined) updates.phone = phone;
+  if (email !== undefined) updates.email = email;
+  if (address !== undefined) updates.address = address;
+  if (logo_url !== undefined) updates.logo_url = logo_url;
+  const { data, error } = await agencySupa.from("agencies").update(updates).eq("id", req.user.agency_id).select().single();
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি" }); }
+  res.json(data);
+}));
+
 // ═══════════════════════════════════════════════════════
 // API Routes — প্রতিটি module আলাদা route file-এ
 // ═══════════════════════════════════════════════════════
