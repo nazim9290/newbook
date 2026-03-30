@@ -69,6 +69,7 @@ router.post("/agencies", asyncHandler(async (req, res) => {
   if (!name || !subdomain || !admin_email || !admin_password) {
     return res.status(400).json({ error: "নাম, subdomain, admin email ও password আবশ্যক" });
   }
+  if (admin_password.length < 8) return res.status(400).json({ error: "Password কমপক্ষে ৮ অক্ষর" });
 
   // Subdomain unique কিনা check
   const { data: existing } = await supabase.from("agencies").select("id").eq("subdomain", subdomain).single();
@@ -103,7 +104,7 @@ router.post("/agencies", asyncHandler(async (req, res) => {
   if (agencyErr) return res.status(500).json({ error: "Agency তৈরি ব্যর্থ" });
 
   // এই agency-র জন্য admin user তৈরি
-  const password_hash = await bcrypt.hash(admin_password, 10);
+  const password_hash = await bcrypt.hash(admin_password, 12);
   const { data: adminUser, error: userErr } = await supabase.from("users")
     .insert({ agency_id: agency.id, name: admin_name || "Admin", email: admin_email, password_hash, role: "owner", branch: "Main" })
     .select().single();

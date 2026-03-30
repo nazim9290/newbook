@@ -100,7 +100,7 @@ router.post("/change-password", asyncHandler(async (req, res) => {
   const valid = await bcrypt.compare(current_password, student.portal_password_hash);
   if (!valid) return res.status(401).json({ error: "পুরানো পাসওয়ার্ড ভুল" });
 
-  const hash = await bcrypt.hash(new_password, 10);
+  const hash = await bcrypt.hash(new_password, 12);
   await supabase.from("students").update({ portal_password_hash: hash }).eq("id", req.student.student_id);
   res.json({ success: true, message: "পাসওয়ার্ড পরিবর্তন হয়েছে" });
 }));

@@ -579,7 +579,7 @@ router.post("/:id/portal-access", checkPermission("students", "write"), asyncHan
 
   // Enable করলে এবং password দিলে hash করে সেট করো
   if (enabled && password) {
-    updates.portal_password_hash = await bcrypt.hash(password, 10);
+    updates.portal_password_hash = await bcrypt.hash(password, 12);
   }
 
   const { data, error } = await supabase.from("students").update(updates).eq("id", req.params.id).select("id, name_en, portal_access").single();
