@@ -58,6 +58,26 @@ router.patch("/:id", auth, asyncHandler(async (req, res) => {
   res.json(data);
 }));
 
+// ── POST /api/users/permissions — role-wise permission matrix সেভ ──
+router.post("/permissions", auth, asyncHandler(async (req, res) => {
+  const { permissions } = req.body;
+  if (!permissions) return res.status(400).json({ error: "permissions দিন" });
+  // Agency settings-এ permission matrix save
+  const { error } = await supabase.from("agencies")
+    .update({ settings: JSON.stringify({ permission_matrix: permissions }) })
+    .eq("id", req.user.agency_id);
+  if (error) return res.status(500).json({ error: error.message });
+  // প্রতিটি user-এর role অনুযায়ী permissions update
+  const { data: users } = await supabase.from("users").select("id, role").eq("agency_id", req.user.agency_id);
+  for (const u of (users || [])) {
+    const rolePerm = permissions[u.role];
+    if (rolePerm) {
+      await supabase.from("users").update({ permissions: JSON.stringify(rolePerm) }).eq("id", u.id);
+    }
+  }
+  res.json({ success: true, message: "পারমিশন সংরক্ষণ হয়েছে" });
+}));
+
 // ── DELETE /api/users/:id — ইউজার মুছে ফেলো ──
 router.delete("/:id", auth, asyncHandler(async (req, res) => {
   // নিজেকে delete করতে পারবে না
