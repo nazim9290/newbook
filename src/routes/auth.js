@@ -111,7 +111,8 @@ router.post("/logout", (req, res) => {
 });
 
 // POST /api/auth/register (admin only — create new staff account)
-router.post("/register", loginLimiter, asyncHandler(async (req, res) => {
+// auth middleware দিয়ে agency_id নেওয়া হয়
+router.post("/register", auth, asyncHandler(async (req, res) => {
   const { name, email, password, role, branch } = req.body;
 
   if (!name || !name.trim()) return res.status(400).json({ error: "নাম দিন" });
@@ -119,11 +120,12 @@ router.post("/register", loginLimiter, asyncHandler(async (req, res) => {
   if (!isValidEmail(email)) return res.status(400).json({ error: "সঠিক email দিন" });
   if (!password || password.length < 8) return res.status(400).json({ error: "Password কমপক্ষে ৮ অক্ষর হতে হবে" });
 
-  const hash = await bcrypt.hash(password, 12); // bcrypt rounds ১২ (stronger)
+  const hash = await bcrypt.hash(password, 12);
+  const agencyId = req.user.agency_id || "a0000000-0000-0000-0000-000000000001";
 
   const { data, error } = await supabase
     .from("users")
-    .insert({ name, email: email.toLowerCase(), password_hash: hash, role: role || "counselor", branch })
+    .insert({ name, email: email.toLowerCase(), password_hash: hash, role: role || "counselor", branch, agency_id: agencyId })
     .select("id, name, email, role, branch")
     .single();
 

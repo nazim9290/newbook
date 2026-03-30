@@ -26,20 +26,30 @@ router.get("/", auth, asyncHandler(async (req, res) => {
   res.json(data || []);
 }));
 
-// ── PATCH /api/users/:id — ইউজার আপডেট (role, branch, is_active) ──
+// ── PATCH /api/users/:id — ইউজার আপডেট (role, branch, is_active, password reset) ──
 router.patch("/:id", auth, asyncHandler(async (req, res) => {
-  const { name, phone, role, branch, is_active, permissions } = req.body;
+  const { name, phone, role, branch, is_active, permissions, password } = req.body;
   const update = {};
   if (name !== undefined) update.name = name;
   if (phone !== undefined) update.phone = phone;
   if (role !== undefined) update.role = role;
   if (branch !== undefined) update.branch = branch;
   if (is_active !== undefined) update.is_active = is_active;
-  if (permissions !== undefined) update.permissions = permissions;
+  if (permissions !== undefined) update.permissions = typeof permissions === "string" ? permissions : JSON.stringify(permissions);
+
+  // ── Password reset by admin ──
+  if (password) {
+    if (password.length < 8) return res.status(400).json({ error: "Password কমপক্ষে ৮ অক্ষর" });
+    const bcrypt = require("bcryptjs");
+    update.password_hash = await bcrypt.hash(password, 12);
+  }
+
+  if (Object.keys(update).length === 0) return res.status(400).json({ error: "কিছু পরিবর্তন করুন" });
 
   const { data, error } = await supabase.from("users")
     .update(update)
     .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id)
     .select("id, name, email, phone, role, branch, is_active, permissions")
     .single();
 
