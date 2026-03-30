@@ -69,6 +69,28 @@ app.use(express.json({ limit: "1mb" }));
 const sanitizeBody = require("./middleware/sanitizeBody");
 app.use(sanitizeBody);
 
+// ── Auto Activity Log — POST/PATCH/DELETE response-এর পর log ──
+const { logActivity } = require("./lib/activityLog");
+app.use((req, res, next) => {
+  if (!["POST", "PATCH", "DELETE"].includes(req.method)) return next();
+  const oldJson = res.json.bind(res);
+  res.json = function (data) {
+    // Response পাঠানোর পর async log — main response block করবে না
+    if (res.statusCode < 400 && req.user?.id) {
+      const path = req.originalUrl.replace(/\/api\//, "").split("/");
+      const mod = path[0] || "unknown";
+      const action = req.method === "POST" ? "create" : req.method === "PATCH" ? "update" : "delete";
+      logActivity({
+        agencyId: req.user.agency_id, userId: req.user.id,
+        action, module: mod, recordId: req.params?.id || data?.id || null,
+        description: `${action} ${mod}`, ip: req.ip,
+      }).catch(() => {});
+    }
+    return oldJson(data);
+  };
+  next();
+});
+
 // ── Global Rate Limiter — প্রতি IP থেকে ১ মিনিটে সর্বোচ্চ ১০০ request ──
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
