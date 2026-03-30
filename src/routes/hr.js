@@ -52,4 +52,55 @@ router.post("/salary", checkPermission("hr", "write"), asyncHandler(async (req, 
   res.status(201).json(data);
 }));
 
+// ══════════════════════════════════════
+// ছুটি (Leave) Management
+// ══════════════════════════════════════
+
+// GET /api/hr/leaves — ছুটির তালিকা
+router.get("/leaves", checkPermission("hr", "read"), asyncHandler(async (req, res) => {
+  const { employee_id, status, month } = req.query;
+  let query = supabase.from("leaves").select("*, employees(name)").eq("agency_id", req.user.agency_id).order("start_date", { ascending: false });
+  if (employee_id) query = query.eq("employee_id", employee_id);
+  if (status && status !== "All") query = query.eq("status", status);
+  if (month) query = query.gte("start_date", `${month}-01`).lte("start_date", `${month}-31`);
+  const { data, error } = await query;
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি" }); }
+  res.json(data || []);
+}));
+
+// POST /api/hr/leaves — নতুন ছুটি আবেদন
+router.post("/leaves", checkPermission("hr", "write"), asyncHandler(async (req, res) => {
+  const { employee_id, type, start_date, end_date, reason } = req.body;
+  if (!employee_id || !start_date || !end_date) return res.status(400).json({ error: "কর্মচারী, শুরু ও শেষ তারিখ দিন" });
+  // দিন সংখ্যা হিসাব
+  const days = Math.max(1, Math.round((new Date(end_date) - new Date(start_date)) / 86400000) + 1);
+  const { data, error } = await supabase.from("leaves").insert({
+    agency_id: req.user.agency_id, employee_id, type: type || "casual",
+    start_date, end_date, days, reason: reason || "", status: "pending",
+  }).select("*, employees(name)").single();
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি" }); }
+  res.status(201).json(data);
+}));
+
+// PATCH /api/hr/leaves/:id — ছুটি অনুমোদন/বাতিল
+router.patch("/leaves/:id", checkPermission("hr", "write"), asyncHandler(async (req, res) => {
+  const updates = {};
+  if (req.body.status) {
+    updates.status = req.body.status;
+    if (req.body.status === "approved") { updates.approved_by = req.user.id; updates.approved_at = new Date().toISOString(); }
+  }
+  if (req.body.notes !== undefined) updates.notes = req.body.notes;
+  const { data, error } = await supabase.from("leaves").update(updates)
+    .eq("id", req.params.id).eq("agency_id", req.user.agency_id).select("*, employees(name)").single();
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি" }); }
+  res.json(data);
+}));
+
+// DELETE /api/hr/leaves/:id — ছুটি মুছুন
+router.delete("/leaves/:id", checkPermission("hr", "delete"), asyncHandler(async (req, res) => {
+  const { error } = await supabase.from("leaves").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি" }); }
+  res.json({ success: true });
+}));
+
 module.exports = router;
