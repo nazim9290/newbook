@@ -67,7 +67,7 @@ router.post("/login", loginLimiter, asyncHandler(async (req, res) => {
   // JSON-এও token পাঠাও (backward compatibility)
   res.json({
     token,
-    user: { id: user.id, name: user.name, email: user.email, role: user.role, branch: user.branch, agency_id: user.agency_id }
+    user: { id: user.id, name: user.name, email: user.email, role: user.role, branch: user.branch, agency_id: user.agency_id, avatar_url: user.avatar_url || null, phone: user.phone || null, created_at: user.created_at }
   });
 }));
 
