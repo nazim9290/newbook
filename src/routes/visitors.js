@@ -16,7 +16,7 @@ router.get("/", checkPermission("visitors", "read"), asyncHandler(async (req, re
   const safePage = Math.max(parseInt(page) || 1, 1);
   const offset = (safePage - 1) * limit;
 
-  let query = supabase.from("visitors").select("*", { count: "exact" });
+  let query = supabase.from("visitors").select("*", { count: "exact" }).eq("agency_id", req.user.agency_id);
 
   if (search) {
     query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
@@ -83,7 +83,7 @@ router.post("/", checkPermission("visitors", "write"), asyncHandler(async (req, 
   };
 
   const { data, error } = await supabase.from("visitors").insert(encryptSensitiveFields(record)).select().single();
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
   // Response-এ frontend format-এ field mapping
   const mapped = { ...data, name_en: data.name, date: data.visit_date, lastFollowUp: data.last_follow_up };
@@ -135,9 +135,10 @@ router.patch("/:id", checkPermission("visitors", "write"), asyncHandler(async (r
     .from("visitors")
     .update(updates)
     .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id)
     .select()
     .single();
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data);
 }));
 
@@ -147,6 +148,7 @@ router.post("/:id/convert", checkPermission("visitors", "write"), asyncHandler(a
     .from("visitors")
     .select("*")
     .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id)
     .single();
 
   if (vErr) return res.status(404).json({ error: "Visitor পাওয়া যায়নি" });
@@ -191,7 +193,7 @@ router.delete("/:id", checkPermission("visitors", "delete"), asyncHandler(async 
     .delete()
     .eq("id", req.params.id)
     .eq("agency_id", req.user.agency_id);
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: error.message }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json({ success: true });
 }));
 

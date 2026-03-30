@@ -51,6 +51,7 @@ router.get("/templates", asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("doc_templates")
     .select("*")
+    .eq("agency_id", req.user.agency_id)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -134,7 +135,7 @@ router.post("/upload", upload.single("file"), asyncHandler(async (req, res) => {
       .select()
       .single();
 
-    if (dbErr) return res.status(400).json({ error: dbErr.message });
+    if (dbErr) { console.error("[DB]", dbErr.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
     res.json({ template: tmpl, placeholders });
   } catch (err) {
@@ -153,7 +154,7 @@ router.post("/generate", asyncHandler(async (req, res) => {
     if (!template_id || !student_id) return res.status(400).json({ error: "template_id ও student_id দিন" });
 
     // Get template
-    const { data: tmpl } = await supabase.from("doc_templates").select("*").eq("id", template_id).single();
+    const { data: tmpl } = await supabase.from("doc_templates").select("*").eq("id", template_id).eq("agency_id", req.user.agency_id).single();
     if (!tmpl) return res.status(404).json({ error: "Template পাওয়া যায়নি" });
 
     // Get student with related data
@@ -267,10 +268,11 @@ router.post("/templates/:id/mapping", asyncHandler(async (req, res) => {
     .from("doc_templates")
     .update({ field_mappings: JSON.stringify(placeholders), placeholders: JSON.stringify(placeholders) })
     .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id)
     .select()
     .single();
 
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data);
 }));
 
@@ -278,11 +280,11 @@ router.post("/templates/:id/mapping", asyncHandler(async (req, res) => {
 // DELETE /api/docgen/templates/:id
 // ================================================================
 router.delete("/templates/:id", asyncHandler(async (req, res) => {
-  const { data: tmpl } = await supabase.from("doc_templates").select("template_url").eq("id", req.params.id).single();
+  const { data: tmpl } = await supabase.from("doc_templates").select("template_url").eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
   if (tmpl?.template_url && fs.existsSync(tmpl.template_url)) {
     try { fs.unlinkSync(tmpl.template_url); } catch {}
   }
-  const { error } = await supabase.from("doc_templates").delete().eq("id", req.params.id);
+  const { error } = await supabase.from("doc_templates").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json({ success: true });
 }));

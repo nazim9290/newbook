@@ -41,7 +41,7 @@ router.post("/", asyncHandler(async (req, res) => {
     phone, email, manager, is_hq: !!is_hq,
   }).select().single();
 
-  if (error) return res.status(400).json({ error: error.message?.includes("unique") ? "এই নামে branch আছে" : "সার্ভার ত্রুটি" });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: error.message?.includes("unique") ? "এই নামে branch আছে" : "সার্ভার ত্রুটি" }); }
   res.status(201).json(data);
 }));
 

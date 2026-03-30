@@ -31,7 +31,7 @@ router.post("/income", checkPermission("accounts", "write"), asyncHandler(async 
   const receiptNo = req.body.receipt_no || await generateId(agencyId, "payment");
   const record = { ...req.body, agency_id: agencyId, receipt_no: receiptNo };
   const { data, error } = await supabase.from("payments").insert(record).select().single();
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.status(201).json(data);
 }));
 
@@ -55,7 +55,7 @@ router.post("/expenses", checkPermission("accounts", "write"), asyncHandler(asyn
   // Remove fields that don't exist in expenses table
   delete record.note; delete record.notes;
   const { data, error } = await supabase.from("expenses").insert(record).select().single();
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.status(201).json(data);
 }));
 
@@ -73,7 +73,7 @@ router.get("/payments", checkPermission("accounts", "read"), asyncHandler(async 
 router.post("/payments", checkPermission("accounts", "write"), asyncHandler(async (req, res) => {
   const record = { ...req.body, agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001" };
   const { data, error } = await supabase.from("payments").insert(record).select().single();
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.status(201).json(data);
 }));
 

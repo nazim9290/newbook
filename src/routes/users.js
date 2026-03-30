@@ -23,7 +23,7 @@ router.get("/", auth, asyncHandler(async (req, res) => {
     .neq("role", "super_admin")
     .order("created_at", { ascending: false });
 
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data || []);
 }));
 
@@ -54,7 +54,7 @@ router.patch("/:id", auth, asyncHandler(async (req, res) => {
     .select("id, name, email, phone, role, branch, is_active, permissions")
     .single();
 
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data);
 }));
 
@@ -66,7 +66,7 @@ router.post("/permissions", auth, asyncHandler(async (req, res) => {
   const { error } = await supabase.from("agencies")
     .update({ settings: JSON.stringify({ permission_matrix: permissions }) })
     .eq("id", req.user.agency_id);
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   // প্রতিটি user-এর role অনুযায়ী permissions update
   const { data: users } = await supabase.from("users").select("id, role").eq("agency_id", req.user.agency_id);
   for (const u of (users || [])) {
@@ -84,8 +84,8 @@ router.delete("/:id", auth, asyncHandler(async (req, res) => {
   if (req.params.id === req.user.id) {
     return res.status(400).json({ error: "নিজের account মুছে ফেলতে পারবেন না" });
   }
-  const { error } = await supabase.from("users").delete().eq("id", req.params.id);
-  if (error) return res.status(500).json({ error: error.message });
+  const { error } = await supabase.from("users").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json({ message: "User মুছে ফেলা হয়েছে" });
 }));
 

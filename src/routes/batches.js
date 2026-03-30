@@ -61,14 +61,14 @@ router.post("/", asyncHandler(async (req, res) => {
     branch: req.body.branch || req.user.branch || "Main",
   };
   const { data, error } = await supabase.from("batches").insert(record).select().single();
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.status(201).json(data);
 }));
 
 // PATCH /api/batches/:id
 router.patch("/:id", asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("batches").update(req.body).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data);
 }));
 
@@ -81,7 +81,7 @@ router.post("/:id/enroll", asyncHandler(async (req, res) => {
     .insert({ batch_id: req.params.id, student_id })
     .select()
     .single();
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.status(201).json(data);
 }));
 
@@ -95,7 +95,7 @@ router.post("/:id/tests", asyncHandler(async (req, res) => {
     avg_score: avg_score || 0,
     scores: scores ? JSON.stringify(scores) : "{}",
   }).select().single();
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: error.message }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.status(201).json(data);
 }));
 
@@ -103,7 +103,7 @@ router.post("/:id/tests", asyncHandler(async (req, res) => {
 router.get("/:id/tests", asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("class_tests")
     .select("*").eq("batch_id", req.params.id).order("date", { ascending: false });
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data || []);
 }));
 

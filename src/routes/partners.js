@@ -25,7 +25,7 @@ router.get("/", auth, asyncHandler(async (req, res) => {
   }
 
   const { data, error } = await q;
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
   // প্রতিটি partner-এর student count ও revenue — join query
   const pool = supabase.pool;
@@ -78,7 +78,7 @@ router.post("/", auth, asyncHandler(async (req, res) => {
     status: "active",
   }).select().single();
 
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.status(201).json(data);
 }));
 
@@ -87,9 +87,10 @@ router.patch("/:id", auth, asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("partner_agencies")
     .update(req.body)
     .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id)
     .select().single();
 
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data);
 }));
 
@@ -97,9 +98,10 @@ router.patch("/:id", auth, asyncHandler(async (req, res) => {
 router.delete("/:id", auth, asyncHandler(async (req, res) => {
   const { error } = await supabase.from("partner_agencies")
     .delete()
-    .eq("id", req.params.id);
+    .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id);
 
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json({ message: "পার্টনার মুছে ফেলা হয়েছে" });
 }));
 
@@ -110,7 +112,7 @@ router.get("/:id/students", auth, asyncHandler(async (req, res) => {
     .eq("partner_id", req.params.id)
     .order("created_at", { ascending: false });
 
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data || []);
 }));
 
@@ -128,7 +130,7 @@ router.post("/:id/students", auth, asyncHandler(async (req, res) => {
     notes: notes || "",
   }).select().single();
 
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.status(201).json(data);
 }));
 

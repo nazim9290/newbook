@@ -25,7 +25,7 @@ router.post("/", asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("communications")
     .insert({ ...req.body, agency_id: req.user.agency_id, logged_by: req.user.id })
     .select().single();
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.status(201).json(data);
 }));
 
@@ -35,7 +35,7 @@ router.delete("/:id", asyncHandler(async (req, res) => {
     .delete()
     .eq("id", req.params.id)
     .eq("agency_id", req.user.agency_id);  // tenancy enforcement
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json({ success: true });
 }));
 

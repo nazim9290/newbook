@@ -23,7 +23,7 @@ router.post("/", asyncHandler(async (req, res) => {
     new_value: new_value ? JSON.stringify(new_value) : null,
     ip_address: req.ip,
   }).select().single();
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: error.message }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.status(201).json(data);
 }));
 
@@ -39,7 +39,7 @@ router.get("/", asyncHandler(async (req, res) => {
   if (record_id) q = q.eq("record_id", record_id);
   if (module) q = q.eq("module", module);
   const { data, error } = await q;
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data || []);
 }));
 

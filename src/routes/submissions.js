@@ -41,7 +41,7 @@ router.post("/", asyncHandler(async (req, res) => {
     status: req.body.status || "submitted",
   };
   const { data, error } = await supabase.from("submissions").insert(record).select("*, students(name_en), schools(name_en)").single();
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.status(201).json(data);
 }));
 
@@ -49,7 +49,7 @@ router.post("/", asyncHandler(async (req, res) => {
 router.patch("/:id", asyncHandler(async (req, res) => {
   const updates = { ...req.body, updated_at: new Date().toISOString() };
   const { data, error } = await supabase.from("submissions").update(updates).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select("*, students(name_en), schools(name_en)").single();
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data);
 }));
 
@@ -59,7 +59,7 @@ router.post("/:id/feedback", asyncHandler(async (req, res) => {
   if (!doc || !issue) return res.status(400).json({ error: "doc ও issue দিন" });
 
   // Get current submission
-  const { data: sub } = await supabase.from("submissions").select("feedback, recheck_count").eq("id", req.params.id).single();
+  const { data: sub } = await supabase.from("submissions").select("feedback, recheck_count").eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
   if (!sub) return res.status(404).json({ error: "Submission পাওয়া যায়নি" });
 
   const existing = typeof sub.feedback === "string" ? JSON.parse(sub.feedback) : (sub.feedback || []);
@@ -69,9 +69,9 @@ router.post("/:id/feedback", asyncHandler(async (req, res) => {
     feedback: JSON.stringify(feedback),
     status: "issues_found",
     recheck_count: (sub.recheck_count || 0) + 1,
-  }).eq("id", req.params.id).select().single();
+  }).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
 
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   // Response-এ feedback parsed array হিসেবে পাঠাও
   if (data) data.feedback = typeof data.feedback === "string" ? JSON.parse(data.feedback) : (data.feedback || []);
   res.json(data);
@@ -79,7 +79,7 @@ router.post("/:id/feedback", asyncHandler(async (req, res) => {
 
 // PATCH /api/submissions/:id/feedback/:index/resolve — mark feedback resolved
 router.patch("/:id/feedback/:index/resolve", asyncHandler(async (req, res) => {
-  const { data: sub } = await supabase.from("submissions").select("feedback").eq("id", req.params.id).single();
+  const { data: sub } = await supabase.from("submissions").select("feedback").eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
   if (!sub) return res.status(404).json({ error: "Submission পাওয়া যায়নি" });
 
   const feedback = typeof sub.feedback === "string" ? JSON.parse(sub.feedback) : [...(sub.feedback || [])];
@@ -90,17 +90,17 @@ router.patch("/:id/feedback/:index/resolve", asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("submissions").update({
     feedback: JSON.stringify(feedback),
     status: allResolved ? "resubmitted" : "issues_found",
-  }).eq("id", req.params.id).select().single();
+  }).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
 
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   if (data) data.feedback = typeof data.feedback === "string" ? JSON.parse(data.feedback) : (data.feedback || []);
   res.json(data);
 }));
 
 // DELETE /api/submissions/:id
 router.delete("/:id", asyncHandler(async (req, res) => {
-  const { error } = await supabase.from("submissions").delete().eq("id", req.params.id);
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
+  const { error } = await supabase.from("submissions").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json({ success: true });
 }));
 

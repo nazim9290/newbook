@@ -19,7 +19,7 @@ router.get("/", checkPermission("students", "read"), asyncHandler(async (req, re
   const offset = (safePage - 1) * limit;
 
   // batch ও school এর নাম সহ fetch করো (join)
-  let query = supabase.from("students").select("*, batches(name), schools(name_en)", { count: "exact" });
+  let query = supabase.from("students").select("*, batches(name), schools(name_en)", { count: "exact" }).eq("agency_id", req.user.agency_id);
 
   if (search) {
     query = query.or(`name_en.ilike.%${search}%,phone.ilike.%${search}%,id.ilike.%${search}%`);
@@ -53,7 +53,7 @@ router.get("/", checkPermission("students", "read"), asyncHandler(async (req, re
 router.get("/:id", checkPermission("students", "read"), asyncHandler(async (req, res) => {
   // Main student record
   const { data: student, error } = await supabase
-    .from("students").select("*").eq("id", req.params.id).single();
+    .from("students").select("*").eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
 
   if (error) return res.status(404).json({ error: "স্টুডেন্ট পাওয়া যায়নি" });
 
@@ -147,6 +147,7 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
     .from("students")
     .update(encrypted)
     .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id)
     .select()
     .single();
 
@@ -185,7 +186,7 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
 
 // DELETE /api/students/:id
 router.delete("/:id", checkPermission("students", "delete"), asyncHandler(async (req, res) => {
-  const { error } = await supabase.from("students").delete().eq("id", req.params.id);
+  const { error } = await supabase.from("students").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "delete", module: "students",
@@ -207,7 +208,7 @@ router.post("/:id/payments", checkPermission("students", "write"), asyncHandler(
     .select()
     .single();
 
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: error.message }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.status(201).json(data);
 }));
 
@@ -220,7 +221,7 @@ router.post("/:id/exam-result", checkPermission("students", "write"), asyncHandl
     exam_type, level, score: score || null, result: result || null,
     exam_date: exam_date || null,
   }).select().single();
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: error.message }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.status(201).json(data);
 }));
 
@@ -235,7 +236,7 @@ router.post("/:id/fee-items", checkPermission("students", "write"), asyncHandler
     .select()
     .single();
 
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: error.message }); }
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.status(201).json(data);
 }));
 
@@ -243,7 +244,7 @@ router.post("/:id/fee-items", checkPermission("students", "write"), asyncHandler
 router.get("/:id/fee-items", checkPermission("students", "read"), asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("fee_items")
     .select("*").eq("student_id", req.params.id).order("created_at");
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data || []);
 }));
 
@@ -251,7 +252,7 @@ router.get("/:id/fee-items", checkPermission("students", "read"), asyncHandler(a
 router.get("/:id/payments-list", checkPermission("students", "read"), asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("payments")
     .select("*").eq("student_id", req.params.id).order("date", { ascending: false });
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data || []);
 }));
 
@@ -582,7 +583,7 @@ router.post("/:id/portal-access", checkPermission("students", "write"), asyncHan
     updates.portal_password_hash = await bcrypt.hash(password, 12);
   }
 
-  const { data, error } = await supabase.from("students").update(updates).eq("id", req.params.id).select("id, name_en, portal_access").single();
+  const { data, error } = await supabase.from("students").update(updates).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select("id, name_en, portal_access").single();
   if (error) return res.status(500).json({ error: "আপডেট ব্যর্থ" });
   res.json(data);
 }));

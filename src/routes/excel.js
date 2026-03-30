@@ -141,6 +141,7 @@ router.get("/templates", asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("excel_templates")
     .select("*")
+    .eq("agency_id", req.user.agency_id)
     .order("created_at", { ascending: false });
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data);
@@ -154,6 +155,7 @@ router.get("/templates/:id", asyncHandler(async (req, res) => {
     .from("excel_templates")
     .select("*")
     .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id)
     .single();
   if (error) return res.status(404).json({ error: "Template পাওয়া যায়নি" });
   res.json(data);
@@ -176,10 +178,11 @@ router.post("/templates/:id/mapping", asyncHandler(async (req, res) => {
     .from("excel_templates")
     .update({ mappings: JSON.stringify(arr), mapped_fields: mapped.length, total_fields: arr.length })
     .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id)
     .select()
     .single();
 
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data);
 }));
 
@@ -199,6 +202,7 @@ router.post("/generate", asyncHandler(async (req, res) => {
       .from("excel_templates")
       .select("*")
       .eq("id", template_id)
+      .eq("agency_id", req.user.agency_id)
       .single();
     if (tErr) return res.status(404).json({ error: "Template পাওয়া যায়নি" });
     if (!tmpl.mappings || !tmpl.mappings.length) return res.status(400).json({ error: "কোনো mapping নেই" });
@@ -209,7 +213,7 @@ router.post("/generate", asyncHandler(async (req, res) => {
       .select("*")
       .in("id", student_ids)
       .eq("agency_id", req.user.agency_id);
-    if (sErr) return res.status(500).json({ error: sErr.message });
+    if (sErr) { console.error("[DB]", sErr.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
     // Template file: Supabase storage থেকে download
     const templateBuffer = await getTemplateBuffer(tmpl.template_url);
@@ -343,14 +347,14 @@ router.post("/re-parse/:id", asyncHandler(async (req, res) => {
 // DELETE /api/excel/templates/:id
 // ================================================================
 router.delete("/templates/:id", asyncHandler(async (req, res) => {
-  const { data: tmpl } = await supabase.from("excel_templates").select("template_url").eq("id", req.params.id).single();
+  const { data: tmpl } = await supabase.from("excel_templates").select("template_url").eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
   if (tmpl && tmpl.template_url) {
     // Delete from local
     if (fs.existsSync(tmpl.template_url)) fs.unlinkSync(tmpl.template_url);
     // Delete from Supabase Storage
     await supabase.storage.from("templates").remove([tmpl.template_url]);
   }
-  const { error } = await supabase.from("excel_templates").delete().eq("id", req.params.id);
+  const { error } = await supabase.from("excel_templates").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json({ success: true });
 }));

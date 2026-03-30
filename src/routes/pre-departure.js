@@ -101,7 +101,7 @@ router.post("/:studentId", auth, asyncHandler(async (req, res) => {
     notes: body.notes || "",
   }, { onConflict: "student_id" }).select().single();
 
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data);
 }));
 

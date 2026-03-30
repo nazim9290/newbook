@@ -20,12 +20,7 @@ function dbError(res, error, context = "", status = 400) {
   const msg = error?.message || "Unknown error";
   console.error(`[DB Error] ${context}:`, msg);
 
-  // Development-এ real error message দেখাই — debug করতে সুবিধা
-  if (isDev) {
-    return res.status(status).json({ error: msg, context });
-  }
-
-  // Production-এ generic message
+  // Client-এ কখনো raw DB error পাঠানো যাবে না — শুধু generic message
   return res.status(status).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 }
 
