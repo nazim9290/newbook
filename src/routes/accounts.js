@@ -19,7 +19,7 @@ router.get("/income", checkPermission("accounts", "read"), asyncHandler(async (r
   // payments → income format mapping
   const mapped = (data || []).map(p => ({
     ...p,
-    date: p.created_at?.slice(0, 10) || "",
+    date: p.created_at ? (p.created_at instanceof Date ? p.created_at.toISOString().slice(0, 10) : String(p.created_at).slice(0, 10)) : "",
     studentName: p.students?.name_en || p.student_id || "—",
   }));
   res.json(mapped);
@@ -48,7 +48,12 @@ router.get("/expenses", checkPermission("accounts", "read"), asyncHandler(async 
 
 // POST /api/accounts/expenses
 router.post("/expenses", checkPermission("accounts", "write"), asyncHandler(async (req, res) => {
-  const record = { ...req.body, agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001" };
+  const { note, notes, ...rest } = req.body;
+  const record = { ...rest, description: note || notes || rest.description || null, agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001" };
+  // Empty string date → null
+  if (record.date === "") record.date = null;
+  // Remove fields that don't exist in expenses table
+  delete record.note; delete record.notes;
   const { data, error } = await supabase.from("expenses").insert(record).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: process.env.NODE_ENV !== "production" ? error.message : "সার্ভার ত্রুটি" }); }
   res.status(201).json(data);
