@@ -7,6 +7,9 @@
  * সমর্থিত ডকুমেন্ট ধরন:
  *   1. Birth Certificate (জন্ম নিবন্ধন) — Paurashava, City Corp, Union Parishad
  *   2. SSC/HSC Certificate (একাডেমিক ট্রান্সক্রিপ্ট) — সব বোর্ড
+ *   3. TIN Certificate (টিআইএন সনদ) — sponsor document
+ *   4. Income Tax Certificate (আয়কর সনদ) — sponsor document
+ *   5. Annual Income Certificate (বার্ষিক আয়ের সনদ) — sponsor document
  *
  * OCR text থেকে auto-detect করে কোন parser ব্যবহার করবে।
  *
@@ -57,6 +60,9 @@ const upload = multer({
  * সমর্থিত ডকুমেন্ট:
  *   - Birth Certificate (জন্ম নিবন্ধন)
  *   - SSC/HSC Certificate (একাডেমিক ট্রান্সক্রিপ্ট)
+ *   - TIN Certificate (টিআইএন সনদ)
+ *   - Income Tax Certificate (আয়কর সনদ)
+ *   - Annual Income Certificate (বার্ষিক আয়ের সনদ)
  *
  * Request: multipart/form-data, field "file" (JPEG/PNG/WebP/PDF)
  * Response: { success, raw_text, doc_type, extracted_fields, confidence }
@@ -135,10 +141,23 @@ router.post("/scan", upload.single("file"), async (req, res) => {
     }
 
     // ── ডকুমেন্টের ধরন auto-detect করে সঠিক parser কল করো ──
+    // Detection order: সবচেয়ে specific আগে — sponsor docs → birth cert → academic → fallback
     let fields;
     let detectedDocType = "unknown";
 
-    if (/birth\s*(registration|certificate)/i.test(fullText) || /জন্ম নিবন্ধন/.test(fullText)) {
+    if ((/TIN|Taxpayer[\s\S]*?Identification[\s\S]*?Number/i.test(fullText)) && !/birth/i.test(fullText)) {
+      // টিআইএন সনদ — sponsor document
+      detectedDocType = "tin_certificate";
+      fields = parseSponsorDocument(fullText, "tin");
+    } else if (/Income\s*Tax\s*Certificate/i.test(fullText)) {
+      // আয়কর সনদ — sponsor document
+      detectedDocType = "income_tax_certificate";
+      fields = parseSponsorDocument(fullText, "income_tax");
+    } else if (/Annual\s*In[oc]ome\s*Certificate/i.test(fullText)) {
+      // বার্ষিক আয়ের সনদ — sponsor document
+      detectedDocType = "annual_income_certificate";
+      fields = parseSponsorDocument(fullText, "annual_income");
+    } else if (/birth\s*(registration|certificate)/i.test(fullText) || /জন্ম নিবন্ধন/.test(fullText)) {
       // জন্ম নিবন্ধন সনদ
       detectedDocType = "birth_certificate";
       fields = parseBirthCertificate(fullText);
@@ -150,12 +169,17 @@ router.post("/scan", upload.single("file"), async (req, res) => {
       // অচেনা ডকুমেন্ট — সব parser চেষ্টা করে সবচেয়ে ভালো result রিটার্ন
       const birthFields = parseBirthCertificate(fullText);
       const academicFields = parseAcademicTranscript(fullText);
+      const sponsorFields = parseSponsorDocument(fullText, "tin");
 
       // কোন parser বেশি field extract করতে পেরেছে সেটা ব্যবহার করো
       const birthCount = Object.keys(birthFields).filter(k => !k.startsWith("_")).length;
       const academicCount = Object.keys(academicFields).filter(k => !k.startsWith("_")).length;
+      const sponsorCount = Object.keys(sponsorFields).filter(k => !k.startsWith("_")).length;
 
-      if (academicCount > birthCount) {
+      if (sponsorCount > academicCount && sponsorCount > birthCount) {
+        detectedDocType = "tin_certificate";
+        fields = sponsorFields;
+      } else if (academicCount > birthCount) {
         detectedDocType = "academic_transcript";
         fields = academicFields;
       } else {
@@ -446,6 +470,139 @@ function parseAcademicTranscript(text) {
   const keyFields = ["name_en", "roll_no", "gpa", "exam_year"];
   const found = keyFields.filter(k => fields[k]).length;
   fields._confidence = found >= 3 ? "high" : found >= 2 ? "medium" : "low";
+
+  return fields;
+}
+
+// ═══════════════════════════════════════════════════════════
+// parseSponsorDocument — Sponsor ডকুমেন্ট (TIN/Income Tax/Annual Income) parse
+// ═══════════════════════════════════════════════════════════
+//
+// তিন ধরনের sponsor ডকুমেন্ট handle করে:
+//   1. TIN Certificate (টিআইএন সনদ)
+//   2. Income Tax Certificate (আয়কর সনদ)
+//   3. Annual Income Certificate (বার্ষিক আয়ের সনদ)
+//
+// শুধু English text extract করে — Japanese (_jp) fields ম্যানুয়াল এন্ট্রি।
+
+/**
+ * OCR text থেকে sponsor document-এর fields parse করো
+ * @param {string} text — Google Vision থেকে পাওয়া raw text
+ * @param {string} type — "tin" | "income_tax" | "annual_income"
+ * @returns {object} — parsed fields with _confidence score
+ */
+function parseSponsorDocument(text, type) {
+  const fields = {};
+
+  // ── TIN / e-TIN নম্বর — ১২ ডিজিট ──
+  const tinMatch = text.match(/(?:TIN|e-TIN|eTIN)\s*[:\-]?\s*(\d{12})/i);
+  if (tinMatch) {
+    fields.tin_number = tinMatch[1];
+    fields.etin = tinMatch[1];
+  }
+
+  // ── নাম — "Name Mr/Mrs" বা "Name :" pattern ──
+  const nameMatch = text.match(/(?:Name\s*(?:Mr\/Mrs\/M\/S)?)\s*[:\-]\s*([A-Za-z\s.]+?)(?:\n|$)/im);
+  if (nameMatch) fields.name_en = nameMatch[1].trim();
+
+  // ── পিতা/স্বামীর নাম ──
+  const fatherMatch = text.match(/Father['\u2018\u2019']?s?(?:\/Husband['\u2018\u2019']?s?)?\s*Name\s*[:\-]\s*([A-Za-z\s.]+?)(?:\n|$)/im);
+  if (fatherMatch) fields.father_name = fatherMatch[1].trim();
+
+  // ── মাতার নাম ──
+  const motherMatch = text.match(/Mother['\u2018\u2019']?s?\s*Name\s*[:\-]\s*([A-Za-z\s.]+?)(?:\n|$)/im);
+  if (motherMatch) fields.mother_name = motherMatch[1].trim();
+
+  // ── বর্তমান/Present ঠিকানা ──
+  const currentAddrMatch = text.match(/(?:Current|Present)\s*Address\s*[:\-]\s*(.+?)(?:\n(?:\d|[A-Z])|$)/ims);
+  if (currentAddrMatch) {
+    fields.current_address = currentAddrMatch[1].replace(/\n/g, ", ").replace(/\s+/g, " ").trim();
+    fields.present_address = fields.current_address;
+  }
+
+  // ── স্থায়ী ঠিকানা ──
+  const permAddrMatch = text.match(/Permanent\s*Address(?:\/Registered)?\s*[:\-]\s*(.+?)(?:\n(?:\d|[A-Z])|$)/ims);
+  if (permAddrMatch) {
+    fields.permanent_address = permAddrMatch[1].replace(/\n/g, ", ").replace(/\s+/g, " ").trim();
+  }
+
+  // ── কর সার্কেল ──
+  const circleMatch = text.match(/(?:Taxes?\s*)?Circle[:\-\s]*(\d+)/i);
+  if (circleMatch) fields.taxes_circle = circleMatch[1];
+
+  // ── কর জোন ──
+  const zoneMatch = text.match(/(?:Taxes?\s*)?Zone[:\-\s]*(\d+)/i);
+  if (zoneMatch) fields.taxes_zone = zoneMatch[1];
+
+  // ── স্ট্যাটাস — Individual/Company/Firm ──
+  const statusMatch = text.match(/Status\s*[:\-]\s*(Individual|Company|Firm)/i);
+  if (statusMatch) fields.status = statusMatch[1];
+
+  // ═══════════════════════════════════════════════════════
+  // TIN-specific fields — ইস্যু তারিখ, পূর্বের TIN
+  // ═══════════════════════════════════════════════════════
+  if (type === "tin") {
+    // ইস্যু তারিখ — "Date : January 15, 2023" pattern
+    const dateMatch = text.match(/Date\s*[:\-]\s*(\w+\s+\d{1,2},?\s*\d{4})/i);
+    if (dateMatch) fields.issue_date = dateMatch[1].trim();
+
+    // পূর্বের TIN নম্বর
+    const prevTinMatch = text.match(/Previous\s*TIN\s*[:\-]\s*(.+?)(?:\n|$)/i);
+    if (prevTinMatch) fields.previous_tin = prevTinMatch[1].trim();
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // Income Tax-specific — বছরভিত্তিক কর পরিশোধের তথ্য
+  // ═══════════════════════════════════════════════════════
+  if (type === "income_tax") {
+    // Pattern: "for the years of 2021-2022 paid Tk. 355,181"
+    const taxPattern = /(\d{4}[-\u2013]\d{4}).*?(?:paid\s*)?Tk\.?\s*([\d,]+)/gi;
+    let match;
+    let idx = 1;
+    while ((match = taxPattern.exec(text)) !== null) {
+      fields[`Member${idx}_Year`] = match[1];
+      fields[`Member${idx}_Amount`] = match[2].replace(/,/g, "");
+      idx++;
+    }
+
+    // ব্যবসা শনাক্তকরণ নম্বর
+    const binMatch = text.match(/(?:Business\s*Identification|BIN)\s*(?:Number|No\.?)?\s*[:\-]\s*([\w\-]+)/i);
+    if (binMatch) fields.business_id = binMatch[1].trim();
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // Annual Income-specific — বছরভিত্তিক আয়ের টেবিল
+  // ═══════════════════════════════════════════════════════
+  if (type === "annual_income") {
+    // Pattern: "01  Business (2021-2022)  2,367,876 Tk."
+    const incomePattern = /\d+\s+([\w\s]+?)\s*\((\d{4}[-\u2013]\d{4})\)\s*([\d,]+)/gi;
+    let match;
+    let idx = 1;
+    while ((match = incomePattern.exec(text)) !== null) {
+      fields[`Member${idx}_Source`] = match[1].trim();
+      fields[`Member${idx}_Year`] = match[2];
+      fields[`Member${idx}_Amount`] = match[3].replace(/,/g, "");
+      idx++;
+    }
+
+    // Fallback — "Assessment of the Year 2021-2022, 2022-2023" থেকে শুধু year extract
+    const yearsMatch = text.match(/(?:Assessment|Year)[^\n]*?((?:\d{4}[-\u2013]\d{4}[,\s]*)+)/i);
+    if (yearsMatch && !fields.Member1_Year) {
+      const years = yearsMatch[1].match(/\d{4}[-\u2013]\d{4}/g) || [];
+      years.forEach((y, i) => {
+        if (!fields[`Member${i + 1}_Year`]) fields[`Member${i + 1}_Year`] = y;
+      });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // Confidence score — key fields কতগুলো পাওয়া গেছে
+  // ═══════════════════════════════════════════════════════
+  const keyFields = type === "tin"
+    ? ["tin_number", "name_en"]
+    : ["name_en", "Member1_Amount"];
+  const found = keyFields.filter(k => fields[k]).length;
+  fields._confidence = found >= 2 ? "high" : found >= 1 ? "medium" : "low";
 
   return fields;
 }
