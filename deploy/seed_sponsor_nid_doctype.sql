@@ -14,7 +14,6 @@ SELECT
     { "key": "section_nid", "label_en": "NID Details", "type": "section_header" },
     { "key": "nid_format", "label_en": "NID Format", "type": "select", "options": ["Old (Laminated)", "Smart Card"] },
     { "key": "nid_number", "label_en": "NID Number", "type": "text", "required": true },
-    { "key": "pin_number", "label_en": "PIN Number (Smart Card)", "type": "text", "condition": { "when": "nid_format", "equals": "Smart Card" } },
 
     { "key": "section_personal", "label_en": "Personal Information", "type": "section_header" },
     { "key": "name_en", "label_en": "Name (English)", "type": "text", "required": true },
@@ -28,8 +27,7 @@ SELECT
     { "key": "address", "label_en": "Permanent Address", "type": "text" },
 
     { "key": "section_issue", "label_en": "Issue Details", "type": "section_header" },
-    { "key": "issue_date", "label_en": "Issue Date", "type": "date" },
-    { "key": "mrz_line", "label_en": "MRZ Line (Smart Card back)", "type": "text", "condition": { "when": "nid_format", "equals": "Smart Card" } }
+    { "key": "issue_date", "label_en": "Issue Date", "type": "date" }
   ]'::jsonb,
   true,
   8

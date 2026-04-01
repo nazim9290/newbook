@@ -142,10 +142,9 @@ const DOC_CONFIGS = [
       { key: "birth_place", patterns: [/Place\s*of\s*Birth\s*[:\-]?\s*([A-Z]+)/i] },
       { key: "address", patterns: P.permAddr },
       { key: "issue_date", patterns: [/Issue\s*Date\s*[:\-]?\s*(\d{1,2}\s*\w+\s*\d{4})/i], type: "date" },
-      { key: "mrz_line", patterns: [/(I<BGD[\d\w<]+)/] },
     ],
     postProcess: (fields, text) => {
-      fields.nid_format = /I<BGD|Place\s*of\s*Birth/i.test(text) ? "Smart Card" : "Old (Laminated)";
+      fields.nid_format = /Place\s*of\s*Birth/i.test(text) ? "Smart Card" : "Old (Laminated)";
       // NID from MRZ fallback
       if (!fields.nid_number) {
         const m = text.match(/I<BGD(\d{10,})/);
