@@ -127,7 +127,46 @@ const P = {
 };
 
 const DOC_CONFIGS = [
-  // ── 0. Family Relation Certificate ──
+  // ── 0. Passport (Bangladesh MRP) ──
+  {
+    id: "passport",
+    detect: /PASSPORT|PEOPLE['']?S\s*REPUBLIC\s*OF\s*BANGLADESH|P<BGD/i,
+    fields: [
+      { key: "passport_number", patterns: [/Passport\s*(?:No|Number)\s*[:\-]?\s*([A-Z]\d{7,8})/i, /\b([A-Z]\d{7,8})\b/] },
+      { key: "type", patterns: [/Type\s*[:\-]?\s*([PDS])\b/i] },
+      { key: "country_code", patterns: [/Country\s*Code\s*[:\-]?\s*([A-Z]{3})/i] },
+      { key: "surname", patterns: [/Surname\s*[:\-]?\s*([A-Z]+)/i] },
+      { key: "given_name", patterns: [/Given\s*Name[s]?\s*[:\-]?\s*([A-Z]+)/i] },
+      { key: "nationality", patterns: [/Nationality\s*[:\-]?\s*([A-Z]+)/i] },
+      { key: "personal_no", patterns: [/Personal\s*(?:No|Number)\s*[:\-]?\s*(\d{10,})/i] },
+      { key: "dob", patterns: [/Date\s*of\s*Birth\s*[:\-]?\s*(\d{1,2}\s*\w{3,}\s*\d{4})/i], type: "date" },
+      { key: "sex", patterns: [/Sex\s*[:\-]?\s*([MF])\b/i] },
+      { key: "birth_place", patterns: [/Place\s*of\s*Birth\s*[:\-]?\s*([A-Z]+)/i] },
+      { key: "date_of_issue", patterns: [/Date\s*of\s*Issue\s*[:\-]?\s*(\d{1,2}\s*\w{3,}\s*\d{4})/i], type: "date" },
+      { key: "date_of_expiry", patterns: [/Date\s*of\s*Expiry\s*[:\-]?\s*(\d{1,2}\s*\w{3,}\s*\d{4})/i], type: "date" },
+      { key: "issuing_authority", patterns: [/Issuing\s*Authority\s*[:\-]?\s*(.+?)(?:\n|$)/im] },
+      { key: "father_name", patterns: [/Father['']?s?\s*Name\s*[:\-]?\s*([A-Z][A-Za-z\s]+?)(?:\n|$)/im] },
+      { key: "mother_name", patterns: [/Mother['']?s?\s*Name\s*[:\-]?\s*([A-Z][A-Za-z\s]+?)(?:\n|$)/im] },
+      { key: "permanent_address", patterns: [/Permanent\s*Address\s*[:\-]?\s*(.+?)(?:\nEmergency|\nTelephone|$)/ims] },
+      { key: "emergency_name", patterns: [/Emergency[\s\S]*?Name\s*[:\-]?\s*([A-Z][A-Za-z\s]+?)(?:\n|$)/im] },
+      { key: "emergency_relationship", patterns: [/Relationship\s*[:\-]?\s*([A-Z]+)/i] },
+      { key: "emergency_address", patterns: [/Emergency[\s\S]*?Address\s*[:\-]?\s*(.+?)(?:\nTelephone|$)/ims] },
+      { key: "emergency_phone", patterns: [/Telephone\s*(?:No)?\.?\s*[:\-]?\s*(\+?\d[\d\s\-]+)/i] },
+      { key: "previous_passport_no", patterns: [/Previous\s*Passport\s*(?:No)?\.?\s*[:\-]?\s*([A-Z]?\d{6,})/i] },
+    ],
+    postProcess: (fields, text) => {
+      // MRZ থেকে passport number extract (fallback)
+      if (!fields.passport_number) {
+        const mrz = text.match(/P<BGD([A-Z]+)<<([A-Z]+)/);
+        if (mrz) { fields.surname = mrz[1]; fields.given_name = mrz[2]; }
+        const mrzNum = text.match(/([A-Z]\d{7,8})BGD/);
+        if (mrzNum) fields.passport_number = mrzNum[1];
+      }
+    },
+    confidence: ["passport_number", "surname", "given_name", "dob"],
+  },
+
+  // ── 1. Family Relation Certificate ──
   {
     id: "family_relation_certificate",
     detect: /Family\s*Relation\s*Certificate/i,
