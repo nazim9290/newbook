@@ -1,8 +1,7 @@
--- জন্ম নিবন্ধন (Birth Certificate) ডকুমেন্ট টাইপ — কন্ডিশনাল ফিল্ড সহ
--- ৩ ধরন: পৌরসভা, সিটি কর্পোরেশন, ইউনিয়ন পরিষদ
--- পৌরসভায় বাংলা ফিল্ড ইংরেজির পাশে বসবে (2-column grid)
+-- Birth Certificate doc type — 3 conditional template types
+-- Paurashava, City Corporation, Union Parishad
+-- All fields in English only
 
--- আগের Birth Certificate doc_type মুছে নতুন করে insert
 DELETE FROM doc_types WHERE name = 'Birth Certificate';
 
 INSERT INTO doc_types (id, agency_id, name, name_bn, category, fields, is_active, sort_order)
@@ -19,18 +18,19 @@ SELECT
       "label_en": "Certificate Type",
       "type": "select",
       "required": true,
-      "options": ["পৌরসভা (Paurashava)", "সিটি কর্পোরেশন (City Corporation)", "ইউনিয়ন পরিষদ (Union Parishad)"]
+      "options": ["Paurashava", "City Corporation", "Union Parishad"]
     },
 
     {
       "key": "section_identity",
-      "label": "পরিচয় তথ্য",
+      "label": "পরিচয়",
+      "label_en": "Identity",
       "type": "section_header"
     },
     {
       "key": "birth_reg_no",
-      "label": "জন্ম নিবন্ধন নম্বর (১৭ সংখ্যা)",
-      "label_en": "Birth Registration Number",
+      "label": "জন্ম নিবন্ধন নম্বর",
+      "label_en": "Birth Registration Number (17 digits)",
       "type": "text",
       "required": true
     },
@@ -39,27 +39,21 @@ SELECT
       "label": "রেজিস্টার নম্বর",
       "label_en": "Register Number",
       "type": "text",
-      "condition": { "when": "template_type", "not_equals": "পৌরসভা (Paurashava)" }
+      "condition": { "when": "template_type", "not_equals": "Paurashava" }
     },
 
     {
       "key": "section_personal",
-      "label": "ব্যক্তিগত তথ্য",
+      "label": "ব্যক্তিগত",
+      "label_en": "Personal Information",
       "type": "section_header"
     },
     {
       "key": "name_en",
-      "label": "নাম (ইংরেজি)",
-      "label_en": "Name (English)",
+      "label": "নাম",
+      "label_en": "Full Name",
       "type": "text",
       "required": true
-    },
-    {
-      "key": "name_bn",
-      "label": "নাম (বাংলা)",
-      "label_en": "Name (Bangla)",
-      "type": "text",
-      "condition": { "when": "template_type", "equals": "পৌরসভা (Paurashava)" }
     },
     {
       "key": "dob",
@@ -70,7 +64,7 @@ SELECT
     },
     {
       "key": "dob_in_word",
-      "label": "জন্ম তারিখ (কথায়)",
+      "label": "জন্ম তারিখ কথায়",
       "label_en": "Date of Birth in Words",
       "type": "text"
     },
@@ -90,22 +84,16 @@ SELECT
 
     {
       "key": "section_parents",
-      "label": "পিতা-মাতার তথ্য",
+      "label": "পিতা-মাতা",
+      "label_en": "Parents",
       "type": "section_header"
     },
     {
       "key": "father_name",
-      "label": "পিতার নাম (ইংরেজি)",
-      "label_en": "Father''s Name (English)",
+      "label": "পিতার নাম",
+      "label_en": "Father''s Name",
       "type": "text",
       "required": true
-    },
-    {
-      "key": "father_name_bn",
-      "label": "পিতার নাম (বাংলা)",
-      "label_en": "Father''s Name (Bangla)",
-      "type": "text",
-      "condition": { "when": "template_type", "equals": "পৌরসভা (Paurashava)" }
     },
     {
       "key": "father_nationality",
@@ -115,17 +103,10 @@ SELECT
     },
     {
       "key": "mother_name",
-      "label": "মাতার নাম (ইংরেজি)",
-      "label_en": "Mother''s Name (English)",
+      "label": "মাতার নাম",
+      "label_en": "Mother''s Name",
       "type": "text",
       "required": true
-    },
-    {
-      "key": "mother_name_bn",
-      "label": "মাতার নাম (বাংলা)",
-      "label_en": "Mother''s Name (Bangla)",
-      "type": "text",
-      "condition": { "when": "template_type", "equals": "পৌরসভা (Paurashava)" }
     },
     {
       "key": "mother_nationality",
@@ -136,21 +117,15 @@ SELECT
 
     {
       "key": "section_address",
-      "label": "ঠিকানা ও নিবন্ধন",
+      "label": "ঠিকানা",
+      "label_en": "Address & Registration",
       "type": "section_header"
     },
     {
       "key": "permanent_address",
-      "label": "স্থায়ী ঠিকানা (ইংরেজি)",
-      "label_en": "Permanent Address (English)",
+      "label": "স্থায়ী ঠিকানা",
+      "label_en": "Permanent Address",
       "type": "text"
-    },
-    {
-      "key": "permanent_address_bn",
-      "label": "স্থায়ী ঠিকানা (বাংলা)",
-      "label_en": "Permanent Address (Bangla)",
-      "type": "text",
-      "condition": { "when": "template_type", "equals": "পৌরসভা (Paurashava)" }
     },
     {
       "key": "reg_date",
@@ -167,7 +142,8 @@ SELECT
 
     {
       "key": "section_authority",
-      "label": "কর্তৃপক্ষের তথ্য",
+      "label": "কর্তৃপক্ষ",
+      "label_en": "Issuing Authority",
       "type": "section_header"
     },
     {
@@ -175,42 +151,42 @@ SELECT
       "label": "পৌরসভার নাম",
       "label_en": "Paurashava Name",
       "type": "text",
-      "condition": { "when": "template_type", "equals": "পৌরসভা (Paurashava)" }
+      "condition": { "when": "template_type", "equals": "Paurashava" }
     },
     {
       "key": "zone",
-      "label": "জোন নম্বর",
+      "label": "জোন",
       "label_en": "Zone",
       "type": "text",
-      "condition": { "when": "template_type", "equals": "সিটি কর্পোরেশন (City Corporation)" }
+      "condition": { "when": "template_type", "equals": "City Corporation" }
     },
     {
       "key": "city_corp_name",
-      "label": "সিটি কর্পোরেশনের নাম",
+      "label": "সিটি কর্পোরেশন",
       "label_en": "City Corporation Name",
       "type": "text",
-      "condition": { "when": "template_type", "equals": "সিটি কর্পোরেশন (City Corporation)" }
+      "condition": { "when": "template_type", "equals": "City Corporation" }
     },
     {
       "key": "union_name",
-      "label": "ইউনিয়ন পরিষদের নাম",
+      "label": "ইউনিয়ন পরিষদ",
       "label_en": "Union Parishad Name",
       "type": "text",
-      "condition": { "when": "template_type", "equals": "ইউনিয়ন পরিষদ (Union Parishad)" }
+      "condition": { "when": "template_type", "equals": "Union Parishad" }
     },
     {
       "key": "upazila_name",
-      "label": "উপজেলার নাম",
+      "label": "উপজেলা",
       "label_en": "Upazila Name",
       "type": "text",
-      "condition": { "when": "template_type", "equals": "ইউনিয়ন পরিষদ (Union Parishad)" }
+      "condition": { "when": "template_type", "equals": "Union Parishad" }
     },
     {
       "key": "district_name",
-      "label": "জেলার নাম",
+      "label": "জেলা",
       "label_en": "District Name",
       "type": "text",
-      "condition": { "when": "template_type", "equals": "ইউনিয়ন পরিষদ (Union Parishad)" }
+      "condition": { "when": "template_type", "equals": "Union Parishad" }
     }
   ]'::jsonb,
   true,
