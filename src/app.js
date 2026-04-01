@@ -152,10 +152,11 @@ app.get("/api/agency/me", agencyAuth, agencyAsync(async (req, res) => {
   res.json(data);
 }));
 app.patch("/api/agency/me", agencyAuth, agencyAsync(async (req, res) => {
-  const { name, name_bn, phone, email, address, logo_url } = req.body;
+  const { name, name_bn, branch, phone, email, address, logo_url } = req.body;
   const updates = {};
   if (name !== undefined) updates.name = name;
   if (name_bn !== undefined) updates.name_bn = name_bn;
+  if (branch !== undefined) updates.branch = branch;
   if (phone !== undefined) updates.phone = phone;
   if (email !== undefined) updates.email = email;
   if (address !== undefined) updates.address = address;
