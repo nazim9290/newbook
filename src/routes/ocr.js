@@ -127,6 +127,27 @@ const P = {
 };
 
 const DOC_CONFIGS = [
+  // ── 0. Family Relation Certificate ──
+  {
+    id: "family_relation_certificate",
+    detect: /Family\s*Relation\s*Certificate/i,
+    fields: [
+      { key: "certificate_no", patterns: [/(?:স্মারক|memo|ref)\s*(?:নং|no)?[:\-\s]*([\w\-\/:.]+\d{2,})/i] },
+      { key: "issue_date", patterns: [/(?:তারিখ|Date)[:\-\s]*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i], type: "date" },
+      { key: "issuing_authority", patterns: [/([\w\s]+Union\s*Parishad|[\w\s]+Paurashava|[\w\s]+City\s*Corporation)/i] },
+      { key: "applicant_name", patterns: [/family\s*of\s+([A-Z][A-Za-z\s.]+?)(?:,|\.|Father)/i] },
+      { key: "father_name", patterns: [/Father['']?s?\s*Name[:\-\s]*([A-Z][A-Za-z\s.]+?)(?:,|\.|Mother)/i] },
+      { key: "mother_name", patterns: [/Mother['']?s?\s*Name[:\-]?\s*([A-Z][A-Za-z\s.]+?)(?:,|\.|Vill)/i] },
+      { key: "village", patterns: [/Vill[:\s]*([\w\s]+?)(?:,|P\.?o|$)/im] },
+      { key: "post_office", patterns: [/P\.?o\.?[:\s]*([\w\s]+?)(?:,|P\.?s|$)/im] },
+      { key: "police_station", patterns: [/P\.?s[:\s.]*([\w\s]+?)(?:,|Dist|Sadar|$)/im] },
+      { key: "district", patterns: [/Dist[:\s.]*([\w\s]+?)(?:,|\.|$)/im] },
+      // Family members table — "01 SIFAT SHEIKH MYSELF 07-10-2001"
+      { key: "members", type: "table", pattern: /\d{1,2}\s+([A-Z][A-Za-z\s.]+?)\s+(MYSELF|FATHER|MOTHER|BROTHER|SISTER|SPOUSE|SON|DAUGHTER|UNCLE|AUNT)\s+(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/gi, columns: ["Name", "Relation", "DOB"] },
+    ],
+    confidence: ["applicant_name", "father_name"],
+  },
+
   // ── 1. National ID Card (Old + Smart Card) ──
   {
     id: "sponsor_nid",
