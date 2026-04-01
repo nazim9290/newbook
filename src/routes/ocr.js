@@ -1,8 +1,14 @@
 /**
- * ocr.js — Birth Certificate OCR Route (জন্ম নিবন্ধন স্ক্যান)
+ * ocr.js — Document OCR Route (ডকুমেন্ট স্ক্যান)
  *
- * Google Cloud Vision API ব্যবহার করে birth certificate image থেকে
+ * Google Cloud Vision API ব্যবহার করে document image থেকে
  * English text extract করে structured fields-এ parse করে।
+ *
+ * সমর্থিত ডকুমেন্ট ধরন:
+ *   1. Birth Certificate (জন্ম নিবন্ধন) — Paurashava, City Corp, Union Parishad
+ *   2. SSC/HSC Certificate (একাডেমিক ট্রান্সক্রিপ্ট) — সব বোর্ড
+ *
+ * OCR text থেকে auto-detect করে কোন parser ব্যবহার করবে।
  *
  * Environment Variable প্রয়োজন:
  *   GOOGLE_VISION_API_KEY — Google Cloud Console থেকে API key নিতে হবে
@@ -10,10 +16,8 @@
  *
  * Endpoint:
  *   POST /api/ocr/scan — multipart/form-data, field name: "file"
- *   Optional query: ?doc_type=birth_certificate (ভবিষ্যতে অন্য doc type support করা যাবে)
  *
  * Supported formats: JPEG, PNG, WebP, PDF (max 10MB)
- * Supported templates: Paurashava, City Corporation, Union Parishad
  */
 
 const express = require("express");
@@ -48,10 +52,14 @@ const upload = multer({
 
 /**
  * POST /api/ocr/scan
- * Birth certificate image upload → Google Vision OCR → structured fields extract
+ * ডকুমেন্ট image upload → Google Vision OCR → auto-detect doc type → structured fields extract
+ *
+ * সমর্থিত ডকুমেন্ট:
+ *   - Birth Certificate (জন্ম নিবন্ধন)
+ *   - SSC/HSC Certificate (একাডেমিক ট্রান্সক্রিপ্ট)
  *
  * Request: multipart/form-data, field "file" (JPEG/PNG/WebP/PDF)
- * Response: { success, raw_text, extracted_fields, confidence }
+ * Response: { success, raw_text, doc_type, extracted_fields, confidence }
  */
 router.post("/scan", upload.single("file"), async (req, res) => {
   // ফাইল না পেলে error
@@ -108,12 +116,40 @@ router.post("/scan", upload.single("file"), async (req, res) => {
       });
     }
 
-    // ── Birth certificate fields parse করো ──
-    const fields = parseBirthCertificate(fullText);
+    // ── ডকুমেন্টের ধরন auto-detect করে সঠিক parser কল করো ──
+    let fields;
+    let detectedDocType = "unknown";
+
+    if (/birth\s*(registration|certificate)/i.test(fullText) || /জন্ম নিবন্ধন/.test(fullText)) {
+      // জন্ম নিবন্ধন সনদ
+      detectedDocType = "birth_certificate";
+      fields = parseBirthCertificate(fullText);
+    } else if (/secondary\s*certificate|SSC|HSC|intermediate/i.test(fullText) || /academic\s*transcript/i.test(fullText)) {
+      // একাডেমিক ট্রান্সক্রিপ্ট — SSC বা HSC
+      detectedDocType = "academic_transcript";
+      fields = parseAcademicTranscript(fullText);
+    } else {
+      // অচেনা ডকুমেন্ট — সব parser চেষ্টা করে সবচেয়ে ভালো result রিটার্ন
+      const birthFields = parseBirthCertificate(fullText);
+      const academicFields = parseAcademicTranscript(fullText);
+
+      // কোন parser বেশি field extract করতে পেরেছে সেটা ব্যবহার করো
+      const birthCount = Object.keys(birthFields).filter(k => !k.startsWith("_")).length;
+      const academicCount = Object.keys(academicFields).filter(k => !k.startsWith("_")).length;
+
+      if (academicCount > birthCount) {
+        detectedDocType = "academic_transcript";
+        fields = academicFields;
+      } else {
+        detectedDocType = "birth_certificate";
+        fields = birthFields;
+      }
+    }
 
     res.json({
       success: true,
       raw_text: fullText,
+      doc_type: detectedDocType,
       extracted_fields: fields,
       confidence: fields._confidence || "medium"
     });
@@ -263,6 +299,135 @@ function parseBirthCertificate(text) {
   const keyFields = ["birth_reg_no", "name_en", "dob", "father_name", "mother_name"];
   const found = keyFields.filter(k => fields[k]).length;
   fields._confidence = found >= 4 ? "high" : found >= 2 ? "medium" : "low";
+
+  return fields;
+}
+
+// ═══════════════════════════════════════════════════════════
+// parseAcademicTranscript — SSC/HSC সার্টিফিকেট থেকে fields extract
+// ═══════════════════════════════════════════════════════════
+//
+// বাংলাদেশের শিক্ষা বোর্ডের SSC ও HSC সার্টিফিকেট parse করে।
+// বোর্ডের নাম, পরীক্ষার বছর, শিক্ষার্থীর তথ্য, রেজাল্ট,
+// এবং বিষয়ভিত্তিক গ্রেড ও পয়েন্ট extract করে।
+//
+// শুধু English text extract করে — Bengali text ignore করে।
+
+/**
+ * OCR text থেকে SSC/HSC সার্টিফিকেটের fields parse করো
+ * @param {string} text — Google Vision থেকে পাওয়া raw text
+ * @returns {object} — parsed fields with _confidence ও _exam_type
+ */
+function parseAcademicTranscript(text) {
+  const fields = {};
+
+  // ── পরীক্ষার ধরন detect — SSC নাকি HSC ──
+  if (/higher\s*secondary/i.test(text) || /HSC/i.test(text)) {
+    fields._exam_type = "HSC";
+  } else if (/secondary\s*school/i.test(text) || /SSC/i.test(text)) {
+    fields._exam_type = "SSC";
+  }
+
+  // ── বোর্ডের নাম — "Board of Intermediate and Secondary Education, Dhaka" ──
+  const boardMatch = text.match(/Board\s*of\s*([\w\s&]+?),\s*([\w]+)/i);
+  if (boardMatch) fields.board_name = boardMatch[0].trim();
+
+  // ── পরীক্ষার বছর — "Examination, 2021" বা "Examination in ... 2021" ──
+  const yearMatch = text.match(/Examination[,\s]*(\d{4})/i);
+  if (yearMatch) fields.exam_year = yearMatch[1];
+
+  // ── সিরিয়াল নম্বর — "Serial No. DBHT 21 0163916" ──
+  const serialMatch = text.match(/Serial\s*No\.?\s*:?\s*([\w\s]+\d{5,})/i);
+  if (serialMatch) fields.serial_no = serialMatch[1].trim();
+
+  // ── শিক্ষার্থীর নাম — "Name of Student : Rakib Miah" বা "Name:" ──
+  const nameMatch = text.match(/Name\s*(?:of\s*Student)?\s*[:\-]\s*([A-Za-z\s.]+?)(?:\n|$)/im);
+  if (nameMatch) fields.name_en = nameMatch[1].trim();
+
+  // ── পিতার নাম ──
+  const fatherMatch = text.match(/Father[''\u2019]?s?\s*Name\s*[:\-]\s*([A-Za-z\s.]+?)(?:\n|$)/im);
+  if (fatherMatch) fields.father_name = fatherMatch[1].trim();
+
+  // ── মাতার নাম ──
+  const motherMatch = text.match(/Mother[''\u2019]?s?\s*Name\s*[:\-]\s*([A-Za-z\s.]+?)(?:\n|$)/im);
+  if (motherMatch) fields.mother_name = motherMatch[1].trim();
+
+  // ── প্রতিষ্ঠানের নাম — "Name of Institution : ..." ──
+  const instMatch = text.match(/(?:Name\s*of\s*)?Institution\s*[:\-]\s*(.+?)(?:\n|$)/im);
+  if (instMatch) fields.institution = instMatch[1].trim();
+
+  // ── পরীক্ষার কেন্দ্র ──
+  const centreMatch = text.match(/(?:Name\s*of\s*)?Centre\s*[:\-]\s*(.+?)(?:\n|$)/im);
+  if (centreMatch) fields.centre = centreMatch[1].trim();
+
+  // ── রোল নম্বর — "Roll No. : 13 52 17" ──
+  const rollMatch = text.match(/Roll\s*No\.?\s*[:\-]?\s*([\d\s]+?)(?:\n|Registration|$)/im);
+  if (rollMatch) fields.roll_no = rollMatch[1].trim();
+
+  // ── রেজিস্ট্রেশন নম্বর — "Registration No. : 1610737002/2019-20" ──
+  const regMatch = text.match(/Registration\s*No\.?\s*[:\-]?\s*([\d\/\-]+)/im);
+  if (regMatch) fields.registration_no = regMatch[1].trim();
+
+  // ── গ্রুপ/বিভাগ — Science, Commerce, Arts/Humanities ──
+  const groupMatch = text.match(/Group\s*[:\-]?\s*(Science|Commerce|Arts|Humanities)/im);
+  if (groupMatch) fields.group = groupMatch[1].trim();
+
+  // ── শিক্ষার্থীর ধরন — Regular, Irregular, Private ──
+  const typeMatch = text.match(/Type\s*(?:of\s*Student)?\s*[:\-]?\s*(Regular|Irregular|Private)/im);
+  if (typeMatch) fields.student_type = typeMatch[1].trim();
+
+  // ── GPA extract — "4.58" বা "5.00" pattern ──
+  // প্রথমে explicit GPA label চেক করো
+  const gpaExplicit = text.match(/G\.?P\.?A\.?\s*[:\-]?\s*(\d\.\d{2})/i);
+  if (gpaExplicit) {
+    fields.gpa = gpaExplicit[1];
+  }
+
+  // সব \d.\dd pattern বের করো — প্রথমটা additional ছাড়া, দ্বিতীয়টা additional সহ
+  const gpaMatches = text.match(/\b(\d\.\d{2})\b/g);
+  if (gpaMatches && gpaMatches.length >= 1) {
+    if (!fields.gpa) fields.gpa = gpaMatches[0];
+    if (gpaMatches.length >= 2 && gpaMatches[1] !== gpaMatches[0]) {
+      fields.gpa_with_additional = gpaMatches[1];
+    }
+  }
+
+  // ── ফলাফল প্রকাশের তারিখ — "13 February, 2022" ──
+  const dateMatch = text.match(/(?:Date\s*of\s*Publication|Date\s*of\s*Results?)\s*[:\-]?\s*(\d{1,2}\s+\w+,?\s*\d{4})/im);
+  if (dateMatch) fields.result_date = dateMatch[1].trim();
+
+  // ═══════════════════════════════════════════════════════
+  // বিষয়ভিত্তিক ফলাফল — টেবিল row parse
+  // ═══════════════════════════════════════════════════════
+  // Pattern: "1  Bangla  A  4" বা "English  A-  3.5"
+  const subjectPattern = /\d?\s*([\w\s&]+?)\s+(A\+|A\-?|B\+?|C\+?|D|F)\s+(\d\.?\d*)/g;
+  const subjects = [];
+  let match;
+  while ((match = subjectPattern.exec(text)) !== null) {
+    const subjectName = match[1].trim();
+    // ভুল match ফিল্টার — subject name ২ অক্ষরের বেশি এবং ৫০ এর কম হতে হবে
+    if (subjectName.length > 2 && subjectName.length < 50 && !/GPA|Point|Grade|Name|Subject/i.test(subjectName)) {
+      subjects.push({
+        Subject: subjectName,
+        Grade: match[2],
+        Point: match[3]
+      });
+    }
+  }
+
+  // বিষয়গুলো flattened Member-style fields-এ store — existing pattern compatible
+  subjects.forEach((s, i) => {
+    fields[`Member${i + 1}_Subject`] = s.Subject;
+    fields[`Member${i + 1}_Grade`] = s.Grade;
+    fields[`Member${i + 1}_Point`] = s.Point;
+  });
+
+  // ═══════════════════════════════════════════════════════
+  // Confidence score — key fields কতগুলো পাওয়া গেছে
+  // ═══════════════════════════════════════════════════════
+  const keyFields = ["name_en", "roll_no", "gpa", "exam_year"];
+  const found = keyFields.filter(k => fields[k]).length;
+  fields._confidence = found >= 3 ? "high" : found >= 2 ? "medium" : "low";
 
   return fields;
 }
