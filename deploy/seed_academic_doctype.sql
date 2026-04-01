@@ -158,10 +158,11 @@ SELECT
               "Arts/Humanities": ["Bangla", "English", "Mathematics", "History of Bangladesh", "Geography & Environment", "Civics & Citizenship", "ICT", "Economics", "Religious Studies"]
             },
             "default": ["Bangla", "English", "Mathematics", "ICT"]
-          }
+          },
+          "allow_custom": true
         },
         { "key": "Grade", "label": "গ্রেড", "label_en": "Letter Grade", "type": "select", "options": ["A+", "A", "A-", "B", "C", "D", "F"] },
-        { "key": "Point", "label": "পয়েন্ট", "label_en": "Grade Point", "type": "select", "options": ["5", "4", "3.5", "3", "2", "1", "0"] }
+        { "key": "Point", "label": "পয়েন্ট", "label_en": "Grade Point", "type": "text" }
       ]
     }
   ]'::jsonb,
@@ -327,7 +328,7 @@ SELECT
           }
         },
         { "key": "Grade", "label": "গ্রেড", "label_en": "Letter Grade", "type": "select", "options": ["A+", "A", "A-", "B", "C", "D", "F"] },
-        { "key": "Point", "label": "পয়েন্ট", "label_en": "Grade Point", "type": "select", "options": ["5", "4", "3.5", "3", "2", "1", "0"] }
+        { "key": "Point", "label": "পয়েন্ট", "label_en": "Grade Point", "type": "text" }
       ]
     }
   ]'::jsonb,
