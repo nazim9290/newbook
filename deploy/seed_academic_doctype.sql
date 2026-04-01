@@ -145,9 +145,23 @@ SELECT
       "label_en": "Subject Results",
       "type": "repeatable",
       "subfields": [
-        { "key": "Subject", "label": "বিষয়", "label_en": "Subject Name", "type": "text" },
-        { "key": "Grade", "label": "গ্রেড", "label_en": "Letter Grade", "type": "text" },
-        { "key": "Point", "label": "পয়েন্ট", "label_en": "Grade Point", "type": "text" }
+        {
+          "key": "Subject",
+          "label": "বিষয়",
+          "label_en": "Subject Name",
+          "type": "select",
+          "conditional_options": {
+            "when": "group",
+            "values": {
+              "Science": ["Bangla", "English", "Mathematics", "Physics", "Chemistry", "Biology", "ICT", "Higher Mathematics", "Religious Studies"],
+              "Commerce": ["Bangla", "English", "Mathematics", "Accounting", "Business Entrepreneurship", "Finance & Banking", "ICT", "Economics", "Religious Studies"],
+              "Arts/Humanities": ["Bangla", "English", "Mathematics", "History of Bangladesh", "Geography & Environment", "Civics & Citizenship", "ICT", "Economics", "Religious Studies"]
+            },
+            "default": ["Bangla", "English", "Mathematics", "ICT"]
+          }
+        },
+        { "key": "Grade", "label": "গ্রেড", "label_en": "Letter Grade", "type": "select", "options": ["A+", "A", "A-", "B", "C", "D", "F"] },
+        { "key": "Point", "label": "পয়েন্ট", "label_en": "Grade Point", "type": "select", "options": ["5", "4", "3.5", "3", "2", "1", "0"] }
       ]
     }
   ]'::jsonb,
@@ -297,9 +311,23 @@ SELECT
       "label_en": "Subject Results",
       "type": "repeatable",
       "subfields": [
-        { "key": "Subject", "label": "বিষয়", "label_en": "Subject Name", "type": "text" },
-        { "key": "Grade", "label": "গ্রেড", "label_en": "Letter Grade", "type": "text" },
-        { "key": "Point", "label": "পয়েন্ট", "label_en": "Grade Point", "type": "text" }
+        {
+          "key": "Subject",
+          "label": "বিষয়",
+          "label_en": "Subject Name",
+          "type": "select",
+          "conditional_options": {
+            "when": "group",
+            "values": {
+              "Science": ["Bangla", "English", "Physics", "Chemistry", "Biology", "ICT", "Higher Mathematics"],
+              "Commerce": ["Bangla", "English", "Accounting", "Business Organization & Management", "Finance Banking & Insurance", "Production Management & Marketing", "ICT", "Economics"],
+              "Arts/Humanities": ["Bangla", "English", "History", "Civics & Good Governance", "Economics", "Social Work", "ICT", "Psychology"]
+            },
+            "default": ["Bangla", "English", "ICT"]
+          }
+        },
+        { "key": "Grade", "label": "গ্রেড", "label_en": "Letter Grade", "type": "select", "options": ["A+", "A", "A-", "B", "C", "D", "F"] },
+        { "key": "Point", "label": "পয়েন্ট", "label_en": "Grade Point", "type": "select", "options": ["5", "4", "3.5", "3", "2", "1", "0"] }
       ]
     }
   ]'::jsonb,
