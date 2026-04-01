@@ -15,16 +15,21 @@ router.get("/", asyncHandler(async (req, res) => {
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
-  // প্রতিটি batch-এ enrolled student count যোগ
-  const pool = supabase.pool;
-  for (const batch of (data || [])) {
+  // একটি query-তে সব batch-এর student count আনা (N+1 সমস্যা সমাধান)
+  if (data && data.length > 0) {
     try {
-      const { rows } = await pool.query(
-        "SELECT COUNT(*)::int AS count FROM batch_students WHERE batch_id = $1",
-        [batch.id]
+      const pool = supabase.pool;
+      const batchIds = data.map(b => b.id);
+      const { rows: counts } = await pool.query(
+        `SELECT batch_id, COUNT(*)::int AS count
+         FROM batch_students
+         WHERE batch_id = ANY($1)
+         GROUP BY batch_id`,
+        [batchIds]
       );
-      batch.enrolledCount = rows[0]?.count || 0;
-    } catch { batch.enrolledCount = 0; }
+      const countMap = Object.fromEntries(counts.map(r => [r.batch_id, r.count]));
+      data.forEach(b => b.enrolledCount = countMap[b.id] || 0);
+    } catch { data.forEach(b => b.enrolledCount = 0); }
   }
 
   res.json(data);

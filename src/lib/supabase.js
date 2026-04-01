@@ -20,11 +20,27 @@ const fs = require("fs");
 // ── PostgreSQL Connection Pool ──
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 20,
+  max: 50,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
   statement_timeout: 30000,  // ৩০ সেকেন্ডের বেশি query বন্ধ হবে
 });
+
+// পুল মনিটরিং
+pool.on("connect", () => {
+  console.log(`[DB Pool] Connected — total: ${pool.totalCount}, idle: ${pool.idleCount}, waiting: ${pool.waitingCount}`);
+});
+
+// ── Slow Query Logger — ৩ সেকেন্ডের বেশি সময় নিলে console-এ warning দেয় ──
+async function timedQuery(queryText, params) {
+  const start = Date.now();
+  const result = await pool.query(queryText, params);
+  const duration = Date.now() - start;
+  if (duration > 3000) {
+    console.warn(`[SLOW QUERY] ${duration}ms:`, queryText.substring(0, 200));
+  }
+  return result;
+}
 
 pool.on("error", (err) => {
   console.error("[DB] Pool error:", err.message);
@@ -229,7 +245,7 @@ class QueryBuilder {
     if (this._offsetVal !== null) { limitSQL += " OFFSET $" + idx++; params.push(this._offsetVal); }
 
     var sql = "SELECT " + colExpr + joinCols + ' FROM "' + t + '"' + joinSQL + w.sql + orderSQL + limitSQL;
-    var result = await pool.query(sql, params);
+    var result = await timedQuery(sql, params);
     var data = result.rows;
 
     // Nest join columns
@@ -241,7 +257,7 @@ class QueryBuilder {
     var count = null;
     if (this._countMode === "exact") {
       var cw = this._buildWhere(1);
-      var countRes = await pool.query('SELECT COUNT(*)::int FROM "' + t + '"' + joinSQL + cw.sql, cw.params);
+      var countRes = await timedQuery('SELECT COUNT(*)::int FROM "' + t + '"' + joinSQL + cw.sql, cw.params);
       count = countRes.rows[0].count;
     }
 
@@ -261,7 +277,7 @@ class QueryBuilder {
       var vals = cols.map(function(c) { return row[c] !== undefined ? row[c] : null; });
       var ph = cols.map(function(_, i) { return "$" + (i + 1); }).join(", ");
       var sql = 'INSERT INTO "' + this._table + '" (' + cols.join(", ") + ") VALUES (" + ph + ") RETURNING *";
-      var result = await pool.query(sql, vals);
+      var result = await timedQuery(sql, vals);
       results.push(result.rows[0]);
     }
 
@@ -287,7 +303,7 @@ class QueryBuilder {
     vals = vals.concat(w.params);
 
     var sql = 'UPDATE "' + this._table + '" SET ' + setClauses + w.sql + " RETURNING *";
-    var result = await pool.query(sql, vals);
+    var result = await timedQuery(sql, vals);
 
     if (this._single) return { data: result.rows[0] || null, error: null };
     return { data: result.rows, error: null };
@@ -297,7 +313,7 @@ class QueryBuilder {
   async _execDelete() {
     var w = this._buildWhere(1);
     var sql = 'DELETE FROM "' + this._table + '"' + w.sql;
-    await pool.query(sql, w.params);
+    await timedQuery(sql, w.params);
     return { data: null, error: null };
   }
 
@@ -319,7 +335,7 @@ class QueryBuilder {
       var sql = 'INSERT INTO "' + this._table + '" (' + cols.join(", ") + ") VALUES (" + ph + ")" +
         (updateSet ? " ON CONFLICT (" + conflictCols + ") DO UPDATE SET " + updateSet : " ON CONFLICT (" + conflictCols + ") DO NOTHING") +
         " RETURNING *";
-      var result = await pool.query(sql, vals);
+      var result = await timedQuery(sql, vals);
       results.push(result.rows[0]);
     }
 

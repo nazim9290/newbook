@@ -10,10 +10,17 @@ const router = express.Router();
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const supabase = require("../lib/supabase");
+const cache = require("../lib/cache");
 
 // ── GET /api/reports/analytics — সব analytics data ──
 router.get("/analytics", auth, asyncHandler(async (req, res) => {
   const agencyId = req.user.agency_id;
+
+  // ক্যাশ চেক — hit হলে DB query skip
+  const cacheKey = `reports:${agencyId}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return res.json(cached);
+
   const pool = supabase.pool;
 
   const [
@@ -173,7 +180,8 @@ router.get("/analytics", auth, asyncHandler(async (req, res) => {
   const costPerStudent = arrived > 0 ? Math.round(Number(expenseRes.rows[0].total) / arrived) : 0;
   const dropoutRate = totalStudents > 0 ? Math.round((cancelledCount / totalStudents) * 100) : 0;
 
-  res.json({
+  // ক্যাশে সেট — ৫ মিনিট TTL
+  const result = {
     kpi: {
       overallConversion,
       costPerStudent,
@@ -186,7 +194,9 @@ router.get("/analytics", auth, asyncHandler(async (req, res) => {
     sourceAnalysis,
     countryStats,
     dropoutAnalysis,
-  });
+  };
+  cache.set(cacheKey, result, 300); // ৫ মিনিট ক্যাশ
+  res.json(result);
 }));
 
 module.exports = router;

@@ -108,22 +108,31 @@ router.get("/branches", auth, asyncHandler(async (req, res) => {
       ORDER BY branch
     `, [agencyId]);
 
-    // প্রতিটি branch-এর user ও student count
-    const branches = [];
-    for (const r of branchRows) {
-      const { rows: stats } = await pool.query(`
-        SELECT
-          (SELECT COUNT(*)::int FROM users WHERE agency_id = $1 AND branch = $2) AS user_count,
-          (SELECT COUNT(*)::int FROM students WHERE agency_id = $1 AND branch = $2) AS student_count,
-          (SELECT COUNT(*)::int FROM employees WHERE agency_id = $1 AND branch = $2) AS employee_count
-      `, [agencyId, r.branch]);
-      branches.push({
-        name: r.branch,
-        userCount: stats[0]?.user_count || 0,
-        studentCount: stats[0]?.student_count || 0,
-        employeeCount: stats[0]?.employee_count || 0,
-      });
-    }
+    // একটি query-তে সব branch-এর user/student/employee count আনা (N+1 সমস্যা সমাধান)
+    const branchNames = branchRows.map(r => r.branch);
+    const [userRes, studentRes, empRes] = await Promise.all([
+      pool.query(
+        `SELECT branch, COUNT(*)::int AS count FROM users WHERE agency_id = $1 AND branch = ANY($2) GROUP BY branch`,
+        [agencyId, branchNames]
+      ),
+      pool.query(
+        `SELECT branch, COUNT(*)::int AS count FROM students WHERE agency_id = $1 AND branch = ANY($2) GROUP BY branch`,
+        [agencyId, branchNames]
+      ),
+      pool.query(
+        `SELECT branch, COUNT(*)::int AS count FROM employees WHERE agency_id = $1 AND branch = ANY($2) GROUP BY branch`,
+        [agencyId, branchNames]
+      ),
+    ]);
+    const userMap = Object.fromEntries(userRes.rows.map(r => [r.branch, r.count]));
+    const studentMap = Object.fromEntries(studentRes.rows.map(r => [r.branch, r.count]));
+    const empMap = Object.fromEntries(empRes.rows.map(r => [r.branch, r.count]));
+    const branches = branchNames.map(name => ({
+      name,
+      userCount: userMap[name] || 0,
+      studentCount: studentMap[name] || 0,
+      employeeCount: empMap[name] || 0,
+    }));
 
     res.json(branches);
   } catch (err) {

@@ -10,10 +10,17 @@ const router = express.Router();
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const supabase = require("../lib/supabase");
+const cache = require("../lib/cache");
 
 // ── GET /api/dashboard/stats — সব dashboard stats একসাথে ──
 router.get("/stats", auth, asyncHandler(async (req, res) => {
   const agencyId = req.user.agency_id;
+
+  // ক্যাশ চেক — hit হলে DB query skip
+  const cacheKey = `dashboard:${agencyId}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return res.json(cached);
+
   const pool = supabase.pool;
 
   // সব query parallel-এ চলবে
@@ -151,7 +158,8 @@ router.get("/stats", auth, asyncHandler(async (req, res) => {
     alerts.push({ type: "info", icon: "📄", text: `${coeReceived.count}টি COE পাওয়া গেছে — ভিসা আবেদন করুন`, time: "action needed" });
   }
 
-  res.json({
+  // ক্যাশে সেট — ৫ মিনিট TTL
+  const result = {
     students: {
       total: studentCountRes.rows[0].total,
       active: studentCountRes.rows[0].active,
@@ -174,7 +182,9 @@ router.get("/stats", auth, asyncHandler(async (req, res) => {
     recentVisitors: recentVisitorsRes.rows,
     upcomingTasks: upcomingTasksRes.rows,
     alerts,
-  });
+  };
+  cache.set(cacheKey, result, 300); // ৫ মিনিট ক্যাশ
+  res.json(result);
 }));
 
 module.exports = router;

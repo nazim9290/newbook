@@ -5,6 +5,7 @@ const asyncHandler = require("../lib/asyncHandler");
 const { encryptSensitiveFields, decryptMany } = require("../lib/crypto");
 const { checkPermission } = require("../middleware/checkPermission");
 const { generateId } = require("../lib/idGenerator");
+const cache = require("../lib/cache");
 
 const router = express.Router();
 router.use(auth);
@@ -85,6 +86,9 @@ router.post("/", checkPermission("visitors", "write"), asyncHandler(async (req, 
   const { data, error } = await supabase.from("visitors").insert(encryptSensitiveFields(record)).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
+  // ক্যাশ invalidate — নতুন visitor যোগে dashboard counts বদলায়
+  cache.invalidate(req.user.agency_id);
+
   // Response-এ frontend format-এ field mapping
   const mapped = { ...data, name_en: data.name, date: data.visit_date, lastFollowUp: data.last_follow_up };
   res.status(201).json(mapped);
@@ -139,6 +143,10 @@ router.patch("/:id", checkPermission("visitors", "write"), asyncHandler(async (r
     .select()
     .single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // ক্যাশ invalidate — visitor status বদলে dashboard refresh দরকার
+  cache.invalidate(req.user.agency_id);
+
   res.json(data);
 }));
 
@@ -184,6 +192,9 @@ router.post("/:id/convert", checkPermission("visitors", "write"), asyncHandler(a
 
   await supabase.from("visitors").update({ status: "converted", converted_student_id: student.id }).eq("id", req.params.id);
 
+  // ক্যাশ invalidate — visitor→student convert এ সব count বদলায়
+  cache.invalidate(req.user.agency_id);
+
   res.status(201).json(student);
 }));
 
@@ -194,6 +205,10 @@ router.delete("/:id", checkPermission("visitors", "delete"), asyncHandler(async 
     .eq("id", req.params.id)
     .eq("agency_id", req.user.agency_id);
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // ক্যাশ invalidate — visitor delete এ count বদলায়
+  cache.invalidate(req.user.agency_id);
+
   res.json({ success: true });
 }));
 

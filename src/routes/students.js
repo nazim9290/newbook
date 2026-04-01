@@ -7,6 +7,7 @@ const { encryptSensitiveFields, decryptSensitiveFields, decryptMany } = require(
 const { checkPermission } = require("../middleware/checkPermission");
 const { logActivity } = require("../lib/activityLog");
 const { generateId } = require("../lib/idGenerator");
+const cache = require("../lib/cache");
 
 const router = express.Router();
 router.use(auth);
@@ -125,6 +126,9 @@ router.post("/", checkPermission("students", "write"), asyncHandler(async (req, 
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "students",
     recordId: data.id, description: `নতুন স্টুডেন্ট: ${data.name_en}`, ip: req.ip });
 
+  // ক্যাশ invalidate — dashboard ও reports refresh হবে
+  cache.invalidate(agencyId);
+
   res.status(201).json(decryptSensitiveFields(data));
 }));
 
@@ -181,6 +185,9 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
     }
   }
 
+  // ক্যাশ invalidate — student update-এ dashboard/reports পুরনো হয়ে যায়
+  cache.invalidate(req.user.agency_id);
+
   res.json(decryptSensitiveFields(data));
 }));
 
@@ -191,6 +198,9 @@ router.delete("/:id", checkPermission("students", "delete"), asyncHandler(async 
 
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "delete", module: "students",
     recordId: req.params.id, description: `স্টুডেন্ট মুছে ফেলা: ${req.params.id}`, ip: req.ip });
+
+  // ক্যাশ invalidate — student delete হলে counts বদলায়
+  cache.invalidate(req.user.agency_id);
 
   res.json({ success: true });
 }));
@@ -209,6 +219,10 @@ router.post("/:id/payments", checkPermission("students", "write"), asyncHandler(
     .single();
 
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // ক্যাশ invalidate — payment যোগে revenue বদলায়
+  cache.invalidate(req.user.agency_id);
+
   res.status(201).json(data);
 }));
 
@@ -401,6 +415,9 @@ router.post("/import", checkPermission("students", "write"), asyncHandler(async 
     results.success = data.length;
   }
 
+  // ক্যাশ invalidate — bulk import এ student count বদলায়
+  if (results.success > 0) cache.invalidate(agencyId);
+
   res.json({
     message: `${results.success} জন import সফল, ${results.failed} জন ব্যর্থ`,
     ...results,
@@ -563,6 +580,9 @@ router.post("/import/mapped", checkPermission("students", "write"), importUpload
     // Cleanup
     const fs = require("fs");
     try { fs.unlinkSync(req.file.path); } catch {}
+
+    // ক্যাশ invalidate — mapped import এ student count বদলায়
+    if (results.success > 0) cache.invalidate(agencyId);
 
     res.json({ message: `${results.success} জন student import সফল, ${results.failed} জন ব্যর্থ`, ...results, total: records.length });
   } catch (err) {

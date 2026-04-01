@@ -32,12 +32,26 @@ router.get("/agencies", asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("agencies").select("*").order("created_at", { ascending: false });
   if (error) return res.status(500).json({ error: "লোড ব্যর্থ" });
 
-  // প্রতিটি agency-র student/user count বের করো
-  for (const agency of data) {
-    const { data: students } = await supabase.from("students").select("id").eq("agency_id", agency.id);
-    const { data: users } = await supabase.from("users").select("id").eq("agency_id", agency.id);
-    agency.studentCount = (students || []).length;
-    agency.userCount = (users || []).length;
+  // একটি query-তে সব agency-র student/user count আনা (N+1 সমস্যা সমাধান)
+  if (data && data.length > 0) {
+    const pool = supabase.pool;
+    const agencyIds = data.map(a => a.id);
+    const [studentRes, userRes] = await Promise.all([
+      pool.query(
+        `SELECT agency_id, COUNT(*)::int AS count FROM students WHERE agency_id = ANY($1) GROUP BY agency_id`,
+        [agencyIds]
+      ),
+      pool.query(
+        `SELECT agency_id, COUNT(*)::int AS count FROM users WHERE agency_id = ANY($1) GROUP BY agency_id`,
+        [agencyIds]
+      ),
+    ]);
+    const studentMap = Object.fromEntries(studentRes.rows.map(r => [r.agency_id, r.count]));
+    const userMap = Object.fromEntries(userRes.rows.map(r => [r.agency_id, r.count]));
+    data.forEach(a => {
+      a.studentCount = studentMap[a.id] || 0;
+      a.userCount = userMap[a.id] || 0;
+    });
   }
 
   res.json(data);

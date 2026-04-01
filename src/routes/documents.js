@@ -8,15 +8,32 @@ const { checkPermission } = require("../middleware/checkPermission");
 const router = express.Router();
 router.use(auth);
 
-// GET /api/documents?student_id=xxx
+// GET /api/documents?student_id=xxx&page=1&limit=50
 router.get("/", checkPermission("documents", "read"), asyncHandler(async (req, res) => {
   const { student_id, status } = req.query;
-  let query = supabase.from("documents").select("*, students(name_en)").eq("agency_id", req.user.agency_id).order("updated_at", { ascending: false });
+
+  // পেজিনেশন প্যারামিটার — ডিফল্ট page=1, limit=50, সর্বোচ্চ ৫০০
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(parseInt(req.query.limit) || 50, 500);
+  const offset = (page - 1) * limit;
+
+  // মোট রেকর্ড সংখ্যা বের করতে count query
+  let countQuery = supabase.from("documents").select("*", { count: "exact" }).eq("agency_id", req.user.agency_id);
+  if (student_id) countQuery = countQuery.eq("student_id", student_id);
+  if (status && status !== "All") countQuery = countQuery.eq("status", status);
+  countQuery = countQuery.limit(0); // শুধু count দরকার, data না
+  const { count: total, error: countError } = await countQuery;
+  if (countError) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+
+  // পেজিনেটেড ডেটা query
+  let query = supabase.from("documents").select("*, students(name_en)").eq("agency_id", req.user.agency_id).order("updated_at", { ascending: false }).range(offset, offset + limit - 1);
   if (student_id) query = query.eq("student_id", student_id);
   if (status && status !== "All") query = query.eq("status", status);
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
-  res.json(data);
+
+  // পেজিনেশন সহ response
+  res.json({ data, total: total || 0, page, limit });
 }));
 
 // POST /api/documents

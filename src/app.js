@@ -91,20 +91,55 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── Global Rate Limiter — প্রতি IP থেকে ১ মিনিটে সর্বোচ্চ ১০০ request ──
+// ── রেট লিমিট — প্রতি ইউজার ভিত্তিক (অফিস নেটওয়ার্কে সমস্যা হবে না) ──
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
-  message: { error: "অনেক বেশি request — ১ মিনিট পরে চেষ্টা করুন" },
+  max: 300, // ৩০০ req/min/user — CRM-এর জন্য যথেষ্ট
+  keyGenerator: (req) => {
+    // JWT থেকে user ID ব্যবহার, না পেলে IP fallback
+    try {
+      const token = req.headers.authorization?.split(" ")[1];
+      if (token) {
+        const decoded = require("jsonwebtoken").decode(token);
+        if (decoded?.id) return decoded.id;
+      }
+    } catch {}
+    return req.ip;
+  },
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false }, // Nginx proxy-র পিছনে — validation বন্ধ
+  message: { error: "অনেক বেশি রিকোয়েস্ট — কিছুক্ষণ পর চেষ্টা করুন" }
 });
 app.use("/api/", apiLimiter);
 
-// ── Health Check — সার্ভার চালু আছে কিনা check করতে ──
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
+// ── রিকোয়েস্ট টাইমিং — slow API ট্র্যাক করা ──
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    if (duration > 2000) {
+      console.warn(`[SLOW] ${req.method} ${req.originalUrl} — ${duration}ms (status: ${res.statusCode})`);
+    }
+  });
+  next();
+});
+
+// ── Health Check — সার্ভার ও ডাটাবেস চালু আছে কিনা check করতে ──
+const { pool } = require("./lib/supabase");
+app.get("/api/health", async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT 1");
+    res.json({
+      status: "ok",
+      db: "connected",
+      pool: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
+      uptime: process.uptime(),
+      memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + "MB"
+    });
+  } catch (err) {
+    res.status(503).json({ status: "unhealthy", db: "disconnected", error: err.message });
+  }
 });
 
 // ── Agency self-service — নিজের agency info get/update (owner/admin) ──
