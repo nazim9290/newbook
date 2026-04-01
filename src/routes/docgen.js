@@ -126,7 +126,7 @@ router.post("/upload", upload.single("file"), asyncHandler(async (req, res) => {
         agency_id: agencyId,
         name: template_name,
         category: category || "translation",
-        description: req.file.originalname,
+        description: req.body.description || req.file.originalname,
         template_url: permanentPath,
         file_path: permanentPath,
         field_mappings: JSON.stringify(placeholders),
