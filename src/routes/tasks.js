@@ -3,6 +3,7 @@ const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { checkPermission } = require("../middleware/checkPermission");
+const { logActivity } = require("../lib/activityLog");
 
 const router = express.Router();
 router.use(auth);
@@ -26,6 +27,11 @@ router.post("/", checkPermission("tasks", "write"), asyncHandler(async (req, res
   const record = { ...req.body, agency_id: req.user.agency_id, created_by: req.user.id };
   const { data, error } = await supabase.from("tasks").insert(record).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Activity log — নতুন টাস্ক তৈরি
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "tasks",
+    recordId: data.id, description: `নতুন টাস্ক: ${data.title || ""}`, ip: req.ip }).catch(() => {});
+
   res.status(201).json(data);
 }));
 
@@ -36,6 +42,11 @@ router.patch("/:id", checkPermission("tasks", "write"), asyncHandler(async (req,
     .eq("agency_id", req.user.agency_id)
     .select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Activity log — টাস্ক আপডেট (status change সহ)
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "tasks",
+    recordId: req.params.id, description: `টাস্ক আপডেট: ${data.title || req.params.id}${req.body.status ? ` → ${req.body.status}` : ""}`, ip: req.ip }).catch(() => {});
+
   res.json(data);
 }));
 
@@ -45,6 +56,11 @@ router.delete("/:id", checkPermission("tasks", "delete"), asyncHandler(async (re
     .eq("id", req.params.id)
     .eq("agency_id", req.user.agency_id);
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Activity log — টাস্ক মুছে ফেলা
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "delete", module: "tasks",
+    recordId: req.params.id, description: `টাস্ক মুছে ফেলা: ${req.params.id}`, ip: req.ip }).catch(() => {});
+
   res.json({ success: true });
 }));
 

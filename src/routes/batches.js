@@ -2,6 +2,7 @@ const express = require("express");
 const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
+const { logActivity } = require("../lib/activityLog");
 
 const router = express.Router();
 router.use(auth);
@@ -67,6 +68,11 @@ router.post("/", asyncHandler(async (req, res) => {
   };
   const { data, error } = await supabase.from("batches").insert(record).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Activity log — নতুন ব্যাচ তৈরি
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "batches",
+    recordId: data.id, description: `নতুন ব্যাচ: ${data.name || ""}`, ip: req.ip }).catch(() => {});
+
   res.status(201).json(data);
 }));
 
@@ -74,6 +80,11 @@ router.post("/", asyncHandler(async (req, res) => {
 router.patch("/:id", asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("batches").update(req.body).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Activity log — ব্যাচ আপডেট
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "batches",
+    recordId: req.params.id, description: `ব্যাচ আপডেট: ${data.name || req.params.id}`, ip: req.ip }).catch(() => {});
+
   res.json(data);
 }));
 

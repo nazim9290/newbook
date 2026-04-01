@@ -124,7 +124,7 @@ router.post("/", checkPermission("students", "write"), asyncHandler(async (req, 
 
   // Activity log — student তৈরি
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "students",
-    recordId: data.id, description: `নতুন স্টুডেন্ট: ${data.name_en}`, ip: req.ip });
+    recordId: data.id, description: `নতুন স্টুডেন্ট: ${data.name_en}`, ip: req.ip }).catch(() => {});
 
   // ক্যাশ invalidate — dashboard ও reports refresh হবে
   cache.invalidate(agencyId);
@@ -185,6 +185,10 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
     }
   }
 
+  // Activity log — student আপডেট (status change সহ)
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "students",
+    recordId: req.params.id, description: `স্টুডেন্ট আপডেট: ${data.name_en || req.params.id}${body.status ? ` → ${body.status}` : ""}`, ip: req.ip }).catch(() => {});
+
   // ক্যাশ invalidate — student update-এ dashboard/reports পুরনো হয়ে যায়
   cache.invalidate(req.user.agency_id);
 
@@ -197,7 +201,7 @@ router.delete("/:id", checkPermission("students", "delete"), asyncHandler(async 
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "delete", module: "students",
-    recordId: req.params.id, description: `স্টুডেন্ট মুছে ফেলা: ${req.params.id}`, ip: req.ip });
+    recordId: req.params.id, description: `স্টুডেন্ট মুছে ফেলা: ${req.params.id}`, ip: req.ip }).catch(() => {});
 
   // ক্যাশ invalidate — student delete হলে counts বদলায়
   cache.invalidate(req.user.agency_id);
@@ -219,6 +223,10 @@ router.post("/:id/payments", checkPermission("students", "write"), asyncHandler(
     .single();
 
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Activity log — পেমেন্ট যোগ
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "payments",
+    recordId: data.id, description: `পেমেন্ট যোগ: ৳${data.amount || 0} (${req.params.id})`, ip: req.ip }).catch(() => {});
 
   // ক্যাশ invalidate — payment যোগে revenue বদলায়
   cache.invalidate(req.user.agency_id);

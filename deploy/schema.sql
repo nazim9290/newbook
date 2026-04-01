@@ -124,7 +124,16 @@ CREATE TABLE IF NOT EXISTS salary_history (id UUID PRIMARY KEY DEFAULT uuid_gene
 CREATE TABLE IF NOT EXISTS tasks (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), agency_id UUID REFERENCES agencies(id), title TEXT NOT NULL, description TEXT, priority TEXT DEFAULT 'medium', status TEXT DEFAULT 'pending', assignee_id UUID, student_id TEXT REFERENCES students(id), due_date DATE, completed_at TIMESTAMPTZ, created_by UUID, created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now());
 CREATE TABLE IF NOT EXISTS communications (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), agency_id UUID REFERENCES agencies(id), student_id TEXT REFERENCES students(id), visitor_id UUID, type TEXT NOT NULL, direction TEXT DEFAULT 'outgoing', subject TEXT, notes TEXT, content TEXT, follow_up_date DATE, logged_by UUID, duration_min INT, created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now());
 CREATE TABLE IF NOT EXISTS calendar_events (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), agency_id UUID REFERENCES agencies(id), title TEXT NOT NULL, date DATE NOT NULL, time TEXT, end_time TEXT, type TEXT DEFAULT 'general', description TEXT, student_id TEXT REFERENCES students(id), created_by UUID, created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now());
-CREATE TABLE IF NOT EXISTS inventory (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), agency_id UUID REFERENCES agencies(id), name TEXT NOT NULL, category TEXT, quantity INT DEFAULT 0, unit_price NUMERIC DEFAULT 0, branch TEXT, status TEXT DEFAULT 'available', created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now());
+CREATE TABLE IF NOT EXISTS inventory (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  agency_id UUID REFERENCES agencies(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, category TEXT, quantity INT DEFAULT 0,
+  unit_price NUMERIC DEFAULT 0, branch TEXT,
+  condition TEXT DEFAULT 'new', status TEXT DEFAULT 'new',
+  brand TEXT, model TEXT, vendor TEXT, location TEXT,
+  purchase_date DATE, warranty TEXT, assigned_to TEXT, notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now()
+);
 
 CREATE TABLE IF NOT EXISTS excel_templates (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), agency_id UUID REFERENCES agencies(id), school_id UUID REFERENCES schools(id), school_name TEXT, file_name TEXT, template_url TEXT, version TEXT DEFAULT '1.0', mappings JSONB DEFAULT '[]', total_fields INT DEFAULT 0, mapped_fields INT DEFAULT 0, created_at TIMESTAMPTZ DEFAULT now());
 CREATE TABLE IF NOT EXISTS doc_templates (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), agency_id UUID REFERENCES agencies(id), name TEXT NOT NULL, description TEXT, template_url TEXT, linked_doc_type TEXT, field_mappings JSONB DEFAULT '[]', created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now());

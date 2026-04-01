@@ -60,9 +60,9 @@ router.post("/login", loginLimiter, asyncHandler(async (req, res) => {
   // httpOnly cookie-তে token set (XSS safe)
   setTokenCookie(res, token);
 
-  // Activity log — login
+  // Activity log — login (non-blocking)
   logActivity({ agencyId: user.agency_id, userId: user.id, action: "login", module: "auth",
-    description: `Login: ${user.email}`, ip: req.ip });
+    description: `Login: ${user.email}`, ip: req.ip }).catch(() => {});
 
   // JSON-এও token পাঠাও (backward compatibility)
   res.json({

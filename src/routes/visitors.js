@@ -4,15 +4,17 @@ const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { encryptSensitiveFields, decryptMany } = require("../lib/crypto");
 const { checkPermission } = require("../middleware/checkPermission");
+const { logActivity } = require("../lib/activityLog");
 const { generateId } = require("../lib/idGenerator");
 const cache = require("../lib/cache");
 
 const router = express.Router();
 router.use(auth);
 
-// GET /api/visitors
+// GET /api/visitors — search, filter, pagination সহ
+// সাপোর্টেড params: search, status, status_in (comma-separated), exclude_status, branch, page, limit
 router.get("/", checkPermission("visitors", "read"), asyncHandler(async (req, res) => {
-  const { search, status, branch, page = 1, limit: rawLimit = 50 } = req.query;
+  const { search, status, status_in, exclude_status, branch, page = 1, limit: rawLimit = 50 } = req.query;
   const limit = Math.min(Math.max(parseInt(rawLimit) || 50, 1), 100); // সর্বোচ্চ ১০০
   const safePage = Math.max(parseInt(page) || 1, 1);
   const offset = (safePage - 1) * limit;
@@ -22,7 +24,18 @@ router.get("/", checkPermission("visitors", "read"), asyncHandler(async (req, re
   if (search) {
     query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
   }
-  if (status && status !== "All") query = query.eq("status", status);
+  // একাধিক status সাপোর্ট — status_in=Interested,Thinking
+  if (status_in) {
+    const statuses = status_in.split(",").filter(Boolean);
+    if (statuses.length > 0) query = query.in("status", statuses);
+  } else if (status && status !== "All") {
+    query = query.eq("status", status);
+  }
+  // নির্দিষ্ট status বাদ দাও — exclude_status=Enrolled
+  if (exclude_status) {
+    const excluded = exclude_status.split(",").filter(Boolean);
+    excluded.forEach(s => { query = query.neq("status", s); });
+  }
   if (branch && branch !== "All") query = query.eq("branch", branch);
 
   query = query.order("created_at", { ascending: false }).range(offset, offset + limit - 1);
@@ -86,6 +99,10 @@ router.post("/", checkPermission("visitors", "write"), asyncHandler(async (req, 
   const { data, error } = await supabase.from("visitors").insert(encryptSensitiveFields(record)).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
+  // Activity log — নতুন visitor তৈরি
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "visitors",
+    recordId: data.id, description: `নতুন ভিজিটর: ${data.name || ""}`, ip: req.ip }).catch(() => {});
+
   // ক্যাশ invalidate — নতুন visitor যোগে dashboard counts বদলায়
   cache.invalidate(req.user.agency_id);
 
@@ -144,6 +161,10 @@ router.patch("/:id", checkPermission("visitors", "write"), asyncHandler(async (r
     .single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
+  // Activity log — visitor আপডেট
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "visitors",
+    recordId: req.params.id, description: `ভিজিটর আপডেট: ${data.name || req.params.id}${req.body.status ? ` → ${req.body.status}` : ""}`, ip: req.ip }).catch(() => {});
+
   // ক্যাশ invalidate — visitor status বদলে dashboard refresh দরকার
   cache.invalidate(req.user.agency_id);
 
@@ -192,6 +213,10 @@ router.post("/:id/convert", checkPermission("visitors", "write"), asyncHandler(a
 
   await supabase.from("visitors").update({ status: "converted", converted_student_id: student.id }).eq("id", req.params.id);
 
+  // Activity log — visitor → student কনভার্ট
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "visitors",
+    recordId: student.id, description: `ভিজিটর→স্টুডেন্ট কনভার্ট: ${visitor.name || ""} → ${student.id}`, ip: req.ip }).catch(() => {});
+
   // ক্যাশ invalidate — visitor→student convert এ সব count বদলায়
   cache.invalidate(req.user.agency_id);
 
@@ -205,6 +230,10 @@ router.delete("/:id", checkPermission("visitors", "delete"), asyncHandler(async 
     .eq("id", req.params.id)
     .eq("agency_id", req.user.agency_id);
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Activity log — visitor মুছে ফেলা
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "delete", module: "visitors",
+    recordId: req.params.id, description: `ভিজিটর মুছে ফেলা: ${req.params.id}`, ip: req.ip }).catch(() => {});
 
   // ক্যাশ invalidate — visitor delete এ count বদলায়
   cache.invalidate(req.user.agency_id);

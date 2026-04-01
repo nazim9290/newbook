@@ -10,6 +10,7 @@ const router = express.Router();
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const supabase = require("../lib/supabase");
+const { logActivity } = require("../lib/activityLog");
 
 // ═══════════════════════════════════════════════════════
 // Users — স্টাফ ইউজার ম্যানেজমেন্ট
@@ -55,6 +56,11 @@ router.patch("/:id", auth, asyncHandler(async (req, res) => {
     .single();
 
   if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Activity log — ইউজার আপডেট (role/permission পরিবর্তন)
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "users",
+    recordId: req.params.id, description: `ইউজার আপডেট: ${data.name || data.email}${role ? ` (role: ${role})` : ""}`, ip: req.ip }).catch(() => {});
+
   res.json(data);
 }));
 
@@ -75,6 +81,10 @@ router.post("/permissions", auth, asyncHandler(async (req, res) => {
       await supabase.from("users").update({ permissions: JSON.stringify(rolePerm) }).eq("id", u.id);
     }
   }
+  // Activity log — পারমিশন ম্যাট্রিক্স আপডেট
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "users",
+    description: `পারমিশন ম্যাট্রিক্স আপডেট`, ip: req.ip }).catch(() => {});
+
   res.json({ success: true, message: "পারমিশন সংরক্ষণ হয়েছে" });
 }));
 
@@ -86,6 +96,11 @@ router.delete("/:id", auth, asyncHandler(async (req, res) => {
   }
   const { error } = await supabase.from("users").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
   if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Activity log — ইউজার মুছে ফেলা
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "delete", module: "users",
+    recordId: req.params.id, description: `ইউজার মুছে ফেলা: ${req.params.id}`, ip: req.ip }).catch(() => {});
+
   res.json({ message: "User মুছে ফেলা হয়েছে" });
 }));
 

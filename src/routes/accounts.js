@@ -3,6 +3,7 @@ const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { checkPermission } = require("../middleware/checkPermission");
+const { logActivity } = require("../lib/activityLog");
 const { generateId } = require("../lib/idGenerator");
 const cache = require("../lib/cache");
 
@@ -52,6 +53,10 @@ router.post("/income", checkPermission("accounts", "write"), asyncHandler(async 
   const { data, error } = await supabase.from("payments").insert(record).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
+  // Activity log — আয় যোগ
+  logActivity({ agencyId, userId: req.user.id, action: "create", module: "accounts",
+    recordId: data.id, description: `আয় যোগ: ৳${data.amount || 0}`, ip: req.ip }).catch(() => {});
+
   // ক্যাশ invalidate — income যোগে revenue বদলায়
   cache.invalidate(agencyId);
 
@@ -97,6 +102,10 @@ router.post("/expenses", checkPermission("accounts", "write"), asyncHandler(asyn
   const { data, error } = await supabase.from("expenses").insert(record).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
+  // Activity log — খরচ যোগ
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "accounts",
+    recordId: data.id, description: `খরচ যোগ: ৳${data.amount || 0} — ${data.category || ""}`, ip: req.ip }).catch(() => {});
+
   // ক্যাশ invalidate — expense যোগে dashboard expense বদলায়
   cache.invalidate(req.user.agency_id);
 
@@ -134,6 +143,10 @@ router.post("/payments", checkPermission("accounts", "write"), asyncHandler(asyn
   const record = { ...req.body, agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001" };
   const { data, error } = await supabase.from("payments").insert(record).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Activity log — পেমেন্ট যোগ
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "payments",
+    recordId: data.id, description: `পেমেন্ট যোগ: ৳${data.amount || 0}`, ip: req.ip }).catch(() => {});
 
   // ক্যাশ invalidate — payment যোগে revenue/dues বদলায়
   cache.invalidate(req.user.agency_id);

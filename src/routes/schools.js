@@ -3,6 +3,7 @@ const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { checkPermission } = require("../middleware/checkPermission");
+const { logActivity } = require("../lib/activityLog");
 const { dbError, sanitizeNumerics } = require("../lib/dbError");
 
 const router = express.Router();
@@ -23,14 +24,23 @@ const SCHOOL_COLS = [
   "deadline_april", "deadline_october", "status", "notes",
 ];
 
-// GET /api/schools
+// GET /api/schools — search, filter, pagination সহ
 router.get("/", checkPermission("schools", "read"), asyncHandler(async (req, res) => {
-  const { country } = req.query;
-  let query = supabase.from("schools").select("*").eq("agency_id", req.user.agency_id).order("name_en");
+  const { country, search, page = 1, limit: rawLimit = 50 } = req.query;
+  const limit = Math.min(Math.max(parseInt(rawLimit) || 50, 1), 100); // সর্বোচ্চ ১০০
+  const safePage = Math.max(parseInt(page) || 1, 1);
+  const offset = (safePage - 1) * limit;
+
+  let query = supabase.from("schools").select("*", { count: "exact" }).eq("agency_id", req.user.agency_id);
+  if (search) {
+    query = query.or(`name_en.ilike.%${search}%,name_jp.ilike.%${search}%,city.ilike.%${search}%`);
+  }
   if (country && country !== "All") query = query.eq("country", country);
-  const { data, error } = await query;
+  query = query.order("name_en").range(offset, offset + limit - 1);
+
+  const { data, error, count } = await query;
   if (error) return dbError(res, error, "schools.list", 500);
-  res.json(data);
+  res.json({ data: data || [], total: count, page: +page, limit: +limit });
 }));
 
 // POST /api/schools — নতুন স্কুল (numeric fields sanitize সহ)
@@ -47,6 +57,11 @@ router.post("/", checkPermission("schools", "write"), asyncHandler(async (req, r
 
   const { data, error } = await supabase.from("schools").insert(sanitized).select().single();
   if (error) return dbError(res, error, "schools.create");
+
+  // Activity log — নতুন স্কুল তৈরি
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "schools",
+    recordId: data.id, description: `নতুন স্কুল: ${data.name_en || ""}`, ip: req.ip }).catch(() => {});
+
   res.status(201).json(data);
 }));
 
@@ -62,6 +77,11 @@ router.patch("/:id", checkPermission("schools", "write"), asyncHandler(async (re
   const { data, error } = await supabase.from("schools").update(sanitized)
     .eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) return dbError(res, error, "schools.update");
+
+  // Activity log — স্কুল আপডেট
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "schools",
+    recordId: req.params.id, description: `স্কুল আপডেট: ${data.name_en || req.params.id}`, ip: req.ip }).catch(() => {});
+
   res.json(data);
 }));
 
@@ -70,6 +90,11 @@ router.delete("/:id", checkPermission("schools", "delete"), asyncHandler(async (
   const { error } = await supabase.from("schools").delete()
     .eq("id", req.params.id).eq("agency_id", req.user.agency_id);
   if (error) return dbError(res, error, "schools.delete");
+
+  // Activity log — স্কুল মুছে ফেলা
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "delete", module: "schools",
+    recordId: req.params.id, description: `স্কুল মুছে ফেলা: ${req.params.id}`, ip: req.ip }).catch(() => {});
+
   res.json({ success: true });
 }));
 
