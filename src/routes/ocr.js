@@ -145,7 +145,11 @@ router.post("/scan", upload.single("file"), async (req, res) => {
     let fields;
     let detectedDocType = "unknown";
 
-    if ((/TIN|Taxpayer[\s\S]*?Identification[\s\S]*?Number/i.test(fullText)) && !/birth/i.test(fullText)) {
+    if (/Trade\s*License|E-Trade/i.test(fullText)) {
+      // ট্রেড লাইসেন্স — sponsor document
+      detectedDocType = "trade_license";
+      fields = parseTradeLicense(fullText);
+    } else if ((/TIN|Taxpayer[\s\S]*?Identification[\s\S]*?Number/i.test(fullText)) && !/birth/i.test(fullText)) {
       // টিআইএন সনদ — sponsor document
       detectedDocType = "tin_certificate";
       fields = parseSponsorDocument(fullText, "tin");
@@ -170,16 +174,22 @@ router.post("/scan", upload.single("file"), async (req, res) => {
       const birthFields = parseBirthCertificate(fullText);
       const academicFields = parseAcademicTranscript(fullText);
       const sponsorFields = parseSponsorDocument(fullText, "tin");
+      const tradeFields = parseTradeLicense(fullText);
 
       // কোন parser বেশি field extract করতে পেরেছে সেটা ব্যবহার করো
       const birthCount = Object.keys(birthFields).filter(k => !k.startsWith("_")).length;
       const academicCount = Object.keys(academicFields).filter(k => !k.startsWith("_")).length;
       const sponsorCount = Object.keys(sponsorFields).filter(k => !k.startsWith("_")).length;
+      const tradeCount = Object.keys(tradeFields).filter(k => !k.startsWith("_")).length;
 
-      if (sponsorCount > academicCount && sponsorCount > birthCount) {
+      const maxCount = Math.max(birthCount, academicCount, sponsorCount, tradeCount);
+      if (tradeCount === maxCount) {
+        detectedDocType = "trade_license";
+        fields = tradeFields;
+      } else if (sponsorCount === maxCount) {
         detectedDocType = "tin_certificate";
         fields = sponsorFields;
-      } else if (academicCount > birthCount) {
+      } else if (academicCount === maxCount) {
         detectedDocType = "academic_transcript";
         fields = academicFields;
       } else {
@@ -625,6 +635,128 @@ function parseDateToISO(dateStr) {
   }
 
   return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+}
+
+/**
+ * parseTradeLicense — ট্রেড লাইসেন্স (E-Trade License / City Corporation)
+ * License No, Business Name, Owner, Address, Fees extract করে
+ */
+function parseTradeLicense(text) {
+  const fields = {};
+
+  // License No — "License No : TRAD/009657/2023"
+  const licenseMatch = text.match(/License\s*No\s*[:\-]?\s*([\w\/\-]+)/i);
+  if (licenseMatch) fields.license_no = licenseMatch[1].trim();
+
+  // Issue Date — "Issue Date : 06/08/2023"
+  const issueDateMatch = text.match(/Issue\s*Date\s*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i);
+  if (issueDateMatch) {
+    const parts = issueDateMatch[1].split(/[\/-]/);
+    if (parts.length === 3) {
+      let [d, m, y] = parts;
+      if (y.length === 2) y = "20" + y;
+      fields.issue_date = `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    }
+  }
+
+  // Valid Upto — "Valid Upto 31th July 2024" or similar
+  const validMatch = text.match(/Valid\s*(?:Upto?|Until)\s*(\d{1,2}\s*\w+\s*\w*\s*\d{4})/i);
+  if (validMatch) fields.valid_upto = validMatch[1].trim();
+
+  // Financial Year — "Financial Year : 2023-2024"
+  const fyMatch = text.match(/Financial\s*Year\s*[:\-]?\s*([\d\-\/]+)/i);
+  if (fyMatch) fields.financial_year = fyMatch[1].trim();
+
+  // Issuing Authority — "Dhaka South City Corporation" etc
+  const authorityMatch = text.match(/([\w\s]+City\s*Corporation|[\w\s]+Paurashava|[\w\s]+Union\s*Parishad)/i);
+  if (authorityMatch) fields.issuing_authority = authorityMatch[1].trim();
+
+  // Business Name — "Business Name : M/S Howlader Enterprise"
+  const bizNameMatch = text.match(/Business\s*Name\s*[:\-]?\s*(.+?)(?:\n|$)/im);
+  if (bizNameMatch) fields.business_name = bizNameMatch[1].trim();
+
+  // Business Type
+  const bizTypeMatch = text.match(/Business\s*Type\s*[:\-]?\s*(.+?)(?:\n|$)/im);
+  if (bizTypeMatch) fields.business_type = bizTypeMatch[1].trim();
+
+  // Business Category
+  const bizCatMatch = text.match(/Business\s*Category\s*[:\-]?\s*(.+?)(?:\n|$)/im);
+  if (bizCatMatch) fields.business_category = bizCatMatch[1].trim();
+
+  // Business Address
+  const bizAddrMatch = text.match(/Business\s*Address\s*[:\-]?\s*(.+?)(?:\n|$)/im);
+  if (bizAddrMatch) fields.business_address = bizAddrMatch[1].trim();
+
+  // BIN Number
+  const binMatch = text.match(/BIN\s*(?:NO|Number)?\s*[:\-]?\s*(\d+)/i);
+  if (binMatch) fields.bin_no = binMatch[1];
+
+  // Owner Name — "Owner's Name : Md. Santu Hadladar"
+  const ownerMatch = text.match(/Owner['']?s?\s*Name\s*[:\-]?\s*([A-Za-z\s.]+?)(?:\n|$)/im);
+  if (ownerMatch) fields.owner_name = ownerMatch[1].trim();
+
+  // Father/Husband Name
+  const fatherMatch = text.match(/Father['']?s?(?:\/Husband['']?s?)?\s*Name\s*[:\-]?\s*([A-Za-z\s.]+?)(?:\n|$)/im);
+  if (fatherMatch) fields.father_name = fatherMatch[1].trim();
+
+  // Mother Name
+  const motherMatch = text.match(/Mother['']?s?\s*Name\s*[:\-]?\s*([A-Za-z\s.]+?)(?:\n|$)/im);
+  if (motherMatch) fields.mother_name = motherMatch[1].trim();
+
+  // NID/Passport — "NID/Passport/Birth Reg: No : 5982970484"
+  const nidMatch = text.match(/NID[\w\/]*\s*(?:Reg)?[\s:]*No\s*[:\-]?\s*(\d+)/i);
+  if (nidMatch) fields.nid_passport = nidMatch[1];
+
+  // Zone/Market/Area
+  const zoneMatch = text.match(/Zone\/Market\s*(?:Br\.?)?\s*[:\-]?\s*\n?\s*Area\s*[:\-]?\s*(\w+)/im);
+  if (zoneMatch) fields.zone_market = zoneMatch[1].trim();
+
+  // Present Address details
+  const presentHolding = text.match(/Owner\s*Present\s*Address[\s\S]*?Holding\s*No\s*[:\-]?\s*([\w\-\/]+)/im);
+  if (presentHolding) fields.present_holding = presentHolding[1].trim();
+
+  const presentVillage = text.match(/Owner\s*Present[\s\S]*?Village\s*[:\-]?\s*(.+?)(?:\n|Postcode|$)/im);
+  if (presentVillage) fields.present_village = presentVillage[1].trim();
+
+  const presentPS = text.match(/Owner\s*Present[\s\S]*?P\.?S\.?\s*[:\-]?\s*(\w+)/im);
+  if (presentPS) fields.present_ps = presentPS[1].trim();
+
+  const presentDist = text.match(/Owner\s*Present[\s\S]*?District\s*[:\-]?\s*(\w+)/im);
+  if (presentDist) fields.present_district = presentDist[1].trim();
+
+  // Permanent Address details
+  const permVillage = text.match(/(?:Owner\s*)?Permanent\s*Address[\s\S]*?(?:Village\s*[:\-]?\s*|Vill[\-\s]*)(\w+)/im);
+  if (permVillage) fields.perm_village = permVillage[1].trim();
+
+  const permPS = text.match(/Permanent[\s\S]*?P\.?S\.?\s*[:\-]?\s*(\w+)/im);
+  if (permPS) fields.perm_ps = permPS[1].trim();
+
+  const permDist = text.match(/Permanent[\s\S]*?District\s*[:\-]?\s*(\w+)/im);
+  if (permDist) fields.perm_district = permDist[1].trim();
+
+  // Fee items — "License/Renewal Fee : 3500", "VAT : 525", etc
+  const feePattern = /([\w\/\s]+?(?:Fee|Tax|VAT|Surcharge))\s*[:\-]?\s*([\d,.]+)/gi;
+  let feeMatch;
+  let idx = 1;
+  while ((feeMatch = feePattern.exec(text)) !== null) {
+    const amount = feeMatch[2].replace(/,/g, "");
+    if (parseFloat(amount) > 0) {
+      fields[`Member${idx}_Item`] = feeMatch[1].trim();
+      fields[`Member${idx}_Amount`] = amount;
+      idx++;
+    }
+  }
+
+  // Grand Total
+  const totalMatch = text.match(/Grand\s*Total\s*[:\-]?\s*([\d,]+)/i);
+  if (totalMatch) fields.grand_total = totalMatch[1].replace(/,/g, "");
+
+  // Confidence
+  const keyFields = ["license_no", "business_name", "owner_name"];
+  const found = keyFields.filter(k => fields[k]).length;
+  fields._confidence = found >= 2 ? "high" : found >= 1 ? "medium" : "low";
+
+  return fields;
 }
 
 module.exports = router;
