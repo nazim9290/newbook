@@ -145,7 +145,11 @@ router.post("/scan", upload.single("file"), async (req, res) => {
     let fields;
     let detectedDocType = "unknown";
 
-    if (/Trade\s*License|E-Trade/i.test(fullText)) {
+    if (/National\s*ID\s*Card|জাতীয় পরিচয়|ID\s*NO|NID\s*No/i.test(fullText)) {
+      // জাতীয় পরিচয়পত্র — NID (Old + Smart Card)
+      detectedDocType = "sponsor_nid";
+      fields = parseNID(fullText);
+    } else if (/Trade\s*License|E-Trade/i.test(fullText)) {
       // ট্রেড লাইসেন্স — sponsor document
       detectedDocType = "trade_license";
       fields = parseTradeLicense(fullText);
@@ -175,15 +179,20 @@ router.post("/scan", upload.single("file"), async (req, res) => {
       const academicFields = parseAcademicTranscript(fullText);
       const sponsorFields = parseSponsorDocument(fullText, "tin");
       const tradeFields = parseTradeLicense(fullText);
+      const nidFields = parseNID(fullText);
 
       // কোন parser বেশি field extract করতে পেরেছে সেটা ব্যবহার করো
       const birthCount = Object.keys(birthFields).filter(k => !k.startsWith("_")).length;
       const academicCount = Object.keys(academicFields).filter(k => !k.startsWith("_")).length;
       const sponsorCount = Object.keys(sponsorFields).filter(k => !k.startsWith("_")).length;
       const tradeCount = Object.keys(tradeFields).filter(k => !k.startsWith("_")).length;
+      const nidCount = Object.keys(nidFields).filter(k => !k.startsWith("_")).length;
 
-      const maxCount = Math.max(birthCount, academicCount, sponsorCount, tradeCount);
-      if (tradeCount === maxCount) {
+      const maxCount = Math.max(birthCount, academicCount, sponsorCount, tradeCount, nidCount);
+      if (nidCount === maxCount) {
+        detectedDocType = "sponsor_nid";
+        fields = nidFields;
+      } else if (tradeCount === maxCount) {
         detectedDocType = "trade_license";
         fields = tradeFields;
       } else if (sponsorCount === maxCount) {
@@ -635,6 +644,109 @@ function parseDateToISO(dateStr) {
   }
 
   return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+}
+
+/**
+ * parseNID — জাতীয় পরিচয়পত্র (Old Laminated + Smart Card)
+ * NID number, name, DOB, blood group, address, MRZ extract করে
+ */
+function parseNID(text) {
+  const fields = {};
+
+  // Format detect — Smart Card has MRZ line or "Smart" keyword
+  const hasMRZ = /I<BGD/.test(text);
+  const isSmart = hasMRZ || /Smart/i.test(text) || /Place\s*of\s*Birth/i.test(text);
+  fields.nid_format = isSmart ? "Smart Card" : "Old (Laminated)";
+
+  // NID Number — "ID NO: 2403858517" or "NID No: 598 297 0484" (10 or 13 or 17 digits)
+  const nidMatch = text.match(/(?:ID\s*NO|NID\s*No)\.?\s*[:\-]?\s*([\d\s]+)/i);
+  if (nidMatch) fields.nid_number = nidMatch[1].replace(/\s/g, "").trim();
+
+  // Also try 10+ digit number pattern if not found
+  if (!fields.nid_number) {
+    const digitMatch = text.match(/\b(\d{10,17})\b/);
+    if (digitMatch) fields.nid_number = digitMatch[1];
+  }
+
+  // Name (English) — "Name: MD BILLAL HOSSEN" or just after "Name"
+  const nameMatch = text.match(/Name\s*[:\-]?\s*([A-Z][A-Za-z\s.]+?)(?:\n|পিতা|Father|$)/im);
+  if (nameMatch) fields.name_en = nameMatch[1].trim();
+
+  // Father's Name — from MRZ or text
+  // MRZ: "HADLADAR<<MD<SANTU" → extract from text instead
+  const fatherMatch = text.match(/(?:Father|পিতা)\s*[:\-]?\s*([A-Za-z\s.]+?)(?:\n|Mother|মাতা|$)/im);
+  if (fatherMatch) fields.father_name = fatherMatch[1].trim();
+
+  // Mother's Name
+  const motherMatch = text.match(/(?:Mother|মাতা)\s*[:\-]?\s*([A-Za-z\s.]+?)(?:\n|Date|$)/im);
+  if (motherMatch) fields.mother_name = motherMatch[1].trim();
+
+  // Date of Birth — "Date of Birth: 08 Jun 1978" or "Date of Birth 15 May 1963"
+  const dobMatch = text.match(/Date\s*of\s*Birth\s*[:\-]?\s*(\d{1,2}\s*\w+\s*\d{4})/i);
+  if (dobMatch) {
+    const raw = dobMatch[1].trim();
+    // Try to parse "08 Jun 1978" → "1978-06-08"
+    const months = { jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06", jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12" };
+    const parts = raw.match(/(\d{1,2})\s*(\w{3})\w*\s*(\d{4})/i);
+    if (parts) {
+      const m = months[parts[2].toLowerCase().substring(0, 3)];
+      if (m) fields.dob = `${parts[3]}-${m}-${parts[1].padStart(2, "0")}`;
+    }
+  }
+
+  // Also try DD/MM/YYYY format
+  if (!fields.dob) {
+    const dobAlt = text.match(/(?:Date\s*of\s*Birth|DOB)\s*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i);
+    if (dobAlt) {
+      const p = dobAlt[1].split(/[\/-]/);
+      if (p.length === 3) {
+        let [d, m, y] = p;
+        if (y.length === 2) y = (parseInt(y) > 50 ? "19" : "20") + y;
+        fields.dob = `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+      }
+    }
+  }
+
+  // Blood Group — "Blood Group: AB-" or "Blood Group AB-"
+  const bloodMatch = text.match(/Blood\s*Group\s*[:\-]?\s*(A[B]?|B|O|AB)\s*([+-])/i);
+  if (bloodMatch) fields.blood_group = `${bloodMatch[1].toUpperCase()}${bloodMatch[2]}`;
+
+  // Place of Birth (Smart Card only)
+  const birthPlaceMatch = text.match(/Place\s*of\s*Birth\s*[:\-]?\s*([A-Z]+)/i);
+  if (birthPlaceMatch) fields.birth_place = birthPlaceMatch[1].trim();
+
+  // Address — from back side text
+  const addrMatch = text.match(/(?:ঠিকানা|Address)\s*[:\-]?\s*(.+?)(?:\n\n|Blood|$)/ims);
+  if (addrMatch) fields.address = addrMatch[1].replace(/\n/g, ", ").replace(/\s+/g, " ").trim();
+
+  // Issue Date — "Issue Date: 01 Jan 2017"
+  const issueMatch = text.match(/Issue\s*Date\s*[:\-]?\s*(\d{1,2}\s*\w+\s*\d{4})/i);
+  if (issueMatch) {
+    const raw = issueMatch[1].trim();
+    const months = { jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06", jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12" };
+    const parts = raw.match(/(\d{1,2})\s*(\w{3})\w*\s*(\d{4})/i);
+    if (parts) {
+      const m = months[parts[2].toLowerCase().substring(0, 3)];
+      if (m) fields.issue_date = `${parts[3]}-${m}-${parts[1].padStart(2, "0")}`;
+    }
+  }
+
+  // MRZ line (Smart Card back)
+  const mrzMatch = text.match(/(I<BGD[\s\S]*?<<<+)/);
+  if (mrzMatch) fields.mrz_line = mrzMatch[1].replace(/\n/g, " ").trim();
+
+  // PIN from MRZ — first 10 digits after I<BGD
+  if (hasMRZ && !fields.nid_number) {
+    const pinMatch = text.match(/I<BGD(\d{10,})/);
+    if (pinMatch) fields.nid_number = pinMatch[1].substring(0, 10);
+  }
+
+  // Confidence
+  const keyFields = ["nid_number", "name_en", "dob"];
+  const found = keyFields.filter(k => fields[k]).length;
+  fields._confidence = found >= 2 ? "high" : found >= 1 ? "medium" : "low";
+
+  return fields;
 }
 
 /**
