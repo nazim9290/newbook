@@ -82,28 +82,46 @@ router.post("/scan", upload.single("file"), async (req, res) => {
       });
     }
 
-    // ── Google Cloud Vision API call — TEXT_DETECTION + DOCUMENT_TEXT_DETECTION ──
-    const response = await fetch(
-      `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
-      {
+    // ── Image size check — base64 করলে ৩৩% বড় হয়, Google limit 10MB ──
+    const base64SizeMB = (base64Image.length * 3 / 4) / (1024 * 1024);
+    console.log(`[OCR] File: ${req.file.originalname}, Size: ${base64SizeMB.toFixed(2)}MB`);
+
+    if (base64SizeMB > 8) {
+      return res.status(400).json({ error: "Image too large — max 8MB. Please compress or resize." });
+    }
+
+    // ── Google Cloud Vision API call — DOCUMENT_TEXT_DETECTION only (বেশি accurate) ──
+    const visionUrl = `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`;
+    const visionBody = JSON.stringify({
+      requests: [{
+        image: { content: base64Image },
+        features: [{ type: "DOCUMENT_TEXT_DETECTION" }]
+      }]
+    });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+    let response;
+    try {
+      response = await fetch(visionUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          requests: [{
-            image: { content: base64Image },
-            features: [
-              { type: "TEXT_DETECTION" },
-              { type: "DOCUMENT_TEXT_DETECTION" }
-            ]
-          }]
-        })
-      }
-    );
+        body: visionBody,
+        signal: controller.signal,
+      });
+    } catch (fetchErr) {
+      clearTimeout(timeout);
+      console.error("[OCR] Google Vision fetch error:", fetchErr.cause?.code || fetchErr.message);
+      return res.status(502).json({ error: "Google Vision API connection failed — try again" });
+    }
+    clearTimeout(timeout);
 
     const data = await response.json();
 
     // Google API error handle
     if (data.error) {
+      console.error("[OCR] Google API error:", data.error.message);
       throw new Error(data.error.message);
     }
 
