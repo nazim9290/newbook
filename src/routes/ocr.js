@@ -127,7 +127,57 @@ const P = {
 };
 
 const DOC_CONFIGS = [
-  // ── 0. Passport (Bangladesh MRP) ──
+  // ── 0a. Learning Certificate (学習証明書) — must be before Proficiency ──
+  {
+    id: "learning_certificate",
+    detect: /Learning\s*Certificate|学習証明書/i,
+    fields: [
+      { key: "ref_no", patterns: [/(?:Ref|Sl\.?\s*No)[:\-.\s]*([\w\-\/]+)/i] },
+      { key: "cert_date", patterns: [/Date[:\-\s]*(\d{4}[\/-]\d{2}[\/-]\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i], type: "date" },
+      { key: "institute_name", patterns: [/^([A-Z][\w\s]+(?:Institute|School|Academy|Centre))/im] },
+      { key: "name_en", patterns: [/(?:Name\s*of\s*(?:the\s*)?Student|学生の名前)\s*[:\-]?\s*([A-Z][A-Za-z\s]+?)(?:\n|$)/im] },
+      { key: "student_id", patterns: [/Student\s*ID\s*(?:\(学生証\))?\s*[:\-]?\s*([\w\-\/]+)/i] },
+      { key: "learning_period", patterns: [/(?:Learning\s*Period|日本語学習期間)\s*[:\-]?\s*(.+?)(?:\n|$)/im] },
+      { key: "course_level", patterns: [/(?:Level|レベル)\s*[:\-]?\s*(N[1-5])/i] },
+      { key: "reference_book", patterns: [/(?:Reference\s*Book|参考書)\s*[:\-]?\s*(.+?)(?:\n|$)/im] },
+      { key: "total_classes", patterns: [/(?:Total\s*Number\s*of\s*Class|クラス総数)\s*[:\-]?\s*(\d+)/i] },
+      { key: "total_hours", patterns: [/(?:Total\s*Number\s*of\s*Hours|総時間数)\s*[:\-]?\s*(\d+)/i] },
+      { key: "class_duration", patterns: [/(?:Duration\s*of\s*Class\s*Per\s*day|日あたり)\s*[:\-]?\s*(.+?)(?:\n|$)/im] },
+      { key: "weekly_duration", patterns: [/(?:Duration.*?Per\s*Week|週あたり)\s*[:\-]?\s*(.+?)(?:\n|$)/im] },
+      { key: "class_time", patterns: [/(?:Class\s*Time|授業時間)\s*[:\-]?\s*(.+?)(?:\n|$)/im] },
+      { key: "attendance_rate", patterns: [/(?:Attendance\s*Rate|出席.*?率)\s*[:\-]?\s*(\d+%?)/i] },
+      { key: "total_study_hours", patterns: [/(?:Total\s*Study\s*Hour|総学習時間)\s*[:\-]?\s*(\d+)/i] },
+      { key: "class_test_rate", patterns: [/(?:Class\s*Test.*?Rate|クラステスト.*?率)\s*[:\-]?\s*(\d+%?)/i] },
+      // Skill scores table
+      { key: "skills", type: "table", pattern: /(Listening|Speaking|Reading|Writing)\s*[:\-]?\s*(?:\([^)]*\)\s*)?(\d+%?)/gi, columns: ["Skill", "Score"] },
+    ],
+    confidence: ["name_en", "student_id", "course_level"],
+  },
+
+  // ── 0b. Language Proficiency Certificate (日本語能力証明書) ──
+  {
+    id: "language_proficiency_certificate",
+    detect: /(?:Language|Japanese)\s*(?:Proficiency|能力)\s*Certificate|日本語能力証明書/i,
+    fields: [
+      { key: "sl_no", patterns: [/(?:Sl\.?\s*No|Ref)[:\-.\s]*([\w\-\/]+)/i] },
+      { key: "institute_name", patterns: [/^([A-Z][\w\s]+(?:Institute|School|Academy|Centre))/im] },
+      { key: "cert_date", patterns: [/Date[:\-\s]*(\d{4}[\/-]\d{2}[\/-]\d{2})/i], type: "date" },
+      { key: "name_en", patterns: [/Name\s*(?:\(名前\))?[:\-]?\s*([A-Z][A-Za-z\s]+?)(?:\n|Date|$)/im] },
+      { key: "father_name", patterns: [/Father['']?s?\s*name\s*(?:\([^)]*\))?[:\-]?\s*([A-Z][A-Za-z\s]+?)(?:\n|Mother|$)/im] },
+      { key: "mother_name", patterns: [/Mother['']?s?\s*name\s*(?:\([^)]*\))?[:\-]?\s*([A-Z][A-Za-z\s]+?)(?:\n|Student|$)/im] },
+      { key: "student_id", patterns: [/Student\s*ID\s*(?:No)?\.?\s*(?:\([^)]*\))?[:\-]?\s*([\w\-\/]+)/i] },
+      { key: "dob", patterns: [/Date\s*of\s*birth\s*(?:\([^)]*\))?[:\-]?\s*(\d{4}[\/-]\d{2}[\/-]\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i], type: "date" },
+      { key: "course_level", patterns: [/(N[1-5])\s*Japanese/i, /completed.*?(N[1-5])/i, /Level[:\-\s]*(N[1-5])/i] },
+      { key: "total_hours", patterns: [/(\d+)\s*hours?\s*(?:Japanese|Language)/i, /completed\s*(\d+)\s*hours/i] },
+      { key: "attended_hours", patterns: [/attends?\s*\.?(\d+)\.?\s*hours/i] },
+      { key: "grade", patterns: [/Grade\s*\.?\.?\s*([A-F][+-]?)/i, /obtained\s*Grade\s*\.?\.?\s*([A-F][+-]?)/i] },
+      { key: "course_from", patterns: [/(?:From|Duration)[:\-.\s]*(\d{4}[\/-]\d{2}[\/-]\d{2})/i], type: "date" },
+      { key: "course_to", patterns: [/(?:to)\s*\.?\.?\s*(\d{4}[\/-]\d{2}[\/-]\d{2})/i], type: "date" },
+    ],
+    confidence: ["name_en", "course_level", "institute_name"],
+  },
+
+  // ── 0c. Passport (Bangladesh MRP) ──
   {
     id: "passport",
     detect: /PASSPORT|PEOPLE['']?S\s*REPUBLIC\s*OF\s*BANGLADESH|P<BGD/i,
