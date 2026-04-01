@@ -127,6 +127,30 @@ const P = {
 };
 
 const DOC_CONFIGS = [
+  // ── 0. Studentship Certificate (ছাত্রত্ব সনদ) ──
+  {
+    id: "studentship_certificate",
+    detect: /TO\s*WHOM\s*IT\s*MAY\s*CONCERN|regular\s*student|running\s*student|studentship/i,
+    fields: [
+      { key: "institution_name", patterns: [/^([\w\s]+(?:College|University|Institute|School))/im, /(?:Department\s*of[\s\S]*?)([\w\s]+(?:College|University))/im] },
+      { key: "department", patterns: [/Department\s*of\s*([\w\s&]+?)(?:\n|$)/im] },
+      { key: "institution_address", patterns: [/([\w\s,\-]+\d{4})\s*$/im] },
+      { key: "name_en", patterns: [/(?:certify\s*that|certify\s*,?\s*that)\s+([A-Z][A-Za-z\s.]+?)(?:,\s*(?:son|daughter)|$)/im] },
+      { key: "father_name", patterns: [/(?:son|daughter)\s*of\s*([A-Z][A-Za-z\s.]+?)(?:\s*\(father\)|\s*and)/im] },
+      { key: "mother_name", patterns: [/(?:and)\s*([A-Z][A-Za-z\s.]+?)(?:\s*\(mother\))/im] },
+      { key: "degree", patterns: [/(?:in\s*the\s*)([\w\s]+?)(?:\s*in\s+\w+\s*program|\s*program)/im] },
+      { key: "subject", patterns: [/(?:in\s+)(Management|[\w\s]+?)\s*program/im] },
+      { key: "year", patterns: [/(?:in\s*his|in\s*her)\s*(\d+(?:st|nd|rd|th)?\s*year)/im] },
+      { key: "roll_no", patterns: [/(?:roll\s*(?:number|no)\.?\s*(?:is)?)\s*(\d+)/im] },
+      { key: "session", patterns: [/(?:session\s*(?:is)?)\s*([\d\-\/]+)/im] },
+      { key: "student_type", patterns: [/(regular|irregular|private)\s*student/im] },
+    ],
+    postProcess: (fields) => {
+      if (fields.student_type) fields.student_type = fields.student_type.charAt(0).toUpperCase() + fields.student_type.slice(1).toLowerCase();
+    },
+    confidence: ["name_en", "institution_name", "degree"],
+  },
+
   // ── 0a. Learning Certificate (学習証明書) — must be before Proficiency ──
   {
     id: "learning_certificate",
