@@ -19,7 +19,8 @@ SELECT
       "key": "section_exam",
       "label": "পরীক্ষার বিবরণ",
       "label_en": "Examination Details",
-      "type": "section_header"
+      "type": "section_header",
+      "description": "Please upload the Marksheet/Academic Transcript (not the main certificate)"
     },
     {
       "key": "board_name",
@@ -186,7 +187,8 @@ SELECT
       "key": "section_exam",
       "label": "পরীক্ষার বিবরণ",
       "label_en": "Examination Details",
-      "type": "section_header"
+      "type": "section_header",
+      "description": "Please upload the Marksheet/Academic Transcript (not the main certificate)"
     },
     {
       "key": "board_name",
