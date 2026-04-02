@@ -113,6 +113,27 @@ const apiLimiter = rateLimit({
 });
 app.use("/api/", apiLimiter);
 
+// ── Heavy endpoint রেট লিমিট — OCR ও DocGen (CPU-intensive, বেশি সময় নেয়) ──
+const heavyLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10, // ১০ req/min — OCR/DocGen heavy operation
+  keyGenerator: (req) => {
+    // JWT থেকে user ID ব্যবহার, না পেলে IP fallback
+    try {
+      const token = req.headers.authorization?.split(" ")[1];
+      if (token) {
+        const decoded = require("jsonwebtoken").decode(token);
+        if (decoded?.id) return decoded.id;
+      }
+    } catch {}
+    return req.ip;
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
+  message: { error: "Too many requests — please wait" }
+});
+
 // ── রিকোয়েস্ট টাইমিং — slow API ট্র্যাক করা ──
 app.use((req, res, next) => {
   const start = Date.now();
@@ -197,7 +218,7 @@ app.use("/api/calendar", require("./routes/calendar"));         // ক্যা�
 app.use("/api/communications", require("./routes/communications")); // যোগাযোগ লগ
 app.use("/api/inventory", require("./routes/inventory"));       // সম্পদ ও মালামাল
 app.use("/api/submissions", require("./routes/submissions"));   // স্কুলে submission
-app.use("/api/docgen", require("./routes/docgen"));             // Document Generator (Translation)
+app.use("/api/docgen", heavyLimiter, require("./routes/docgen"));             // Document Generator (Translation) — heavy limit
 app.use("/api/docdata", require("./routes/docdata"));           // Document Types ও Student Document Data
 app.use("/api/users", require("./routes/users"));               // ইউজার ও Branch ম্যানেজমেন্ট
 app.use("/api/branches", require("./routes/branches"));         // শাখা CRUD (ঠিকানা, ফোন, ম্যানেজার)
@@ -206,7 +227,7 @@ app.use("/api/student-portal", require("./routes/student-portal")); // স্ট
 app.use("/api/reports", require("./routes/reports"));               // রিপোর্ট ও Analytics
 app.use("/api/partners", require("./routes/partners"));             // পার্টনার এজেন্সি (B2B)
 app.use("/api/pre-departure", require("./routes/pre-departure"));   // প্রি-ডিপার্চার ও VFS
-app.use("/api/ocr", require("./routes/ocr"));                       // OCR — জন্ম নিবন্ধন স্ক্যান (Google Vision)
+app.use("/api/ocr", heavyLimiter, require("./routes/ocr"));                       // OCR — জন্ম নিবন্ধন স্ক্যান (Google Vision) — heavy limit
 
 // ── 404 Handler — route না পেলে error (path leak করবে না) ──
 app.use((req, res) => {

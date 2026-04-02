@@ -187,9 +187,24 @@ router.post("/create-from-default", asyncHandler(async (req, res) => {
   if (dtData.placeholders) {
     placeholders = placeholders.map(p => {
       const saved = dtData.placeholders.find(sp => sp.key === p.key);
-      return saved ? { ...p, field: saved.field || "" } : p;
+      return saved && saved.field ? { ...p, field: saved.field } : p;
     });
   }
+
+  // Auto-map — placeholder name থেকে intelligent field match
+  const AUTO_MAP = {
+    "Register No": "register_no", "Date of Registration": "reg_date:jp",
+    "Date of Issue": "issue_date:jp", "Birth Registration No": "birth_reg_no",
+    "Name": "name_en", "Sex": "sex:jp", "Date of Birth": "dob:jp",
+    "Place of Birth": "birth_place", "Father's Name": "father_name",
+    "Father's Nationality": "father_nationality:jp", "Mother's Name": "mother_name",
+    "Mother's Nationality": "mother_nationality:jp", "Permanent Address": "permanent_address",
+    "BR Number": "birth_reg_no", "In Word": "dob_in_word",
+  };
+  placeholders = placeholders.map(p => {
+    if (!p.field && AUTO_MAP[p.key]) return { ...p, field: AUTO_MAP[p.key] };
+    return p;
+  });
 
   // Save as agency template
   const { data: newTmpl, error } = await supabase.from("doc_templates").insert({
