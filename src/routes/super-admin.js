@@ -257,6 +257,7 @@ router.get("/default-templates", asyncHandler(async (req, res) => {
 }));
 
 // POST /default-templates — নতুন template আপলোড (multer file upload সহ)
+// .docx ফাইল হলে {{placeholder}} detect করে template_data-তে সংরক্ষণ করে
 router.post("/default-templates", upload.single("file"), asyncHandler(async (req, res) => {
   const { name, name_bn, description, category, sub_category, country } = req.body;
   if (!name) return res.status(400).json({ error: "Name required" });
@@ -274,9 +275,43 @@ router.post("/default-templates", upload.single("file"), asyncHandler(async (req
     file_name = req.file.originalname;
   }
 
+  // ── .docx ফাইল থেকে {{placeholder}} detect ──
+  let placeholders = [];
+  if (file_url && (file_name || "").endsWith(".docx")) {
+    try {
+      const AdmZip = require("adm-zip");
+      const fullPath = path.join(__dirname, "../..", file_url);
+      const zip = new AdmZip(fullPath);
+      const entries = zip.getEntries();
+      const foundKeys = new Set();
+
+      entries.forEach(entry => {
+        if (entry.entryName.endsWith(".xml")) {
+          let content = entry.getData().toString("utf8");
+          // XML tag সরিয়ে clean {{placeholders}} খোঁজা
+          const cleaned = content.replace(/<[^>]+>/g, "");
+          const matches = cleaned.match(/\{\{([^}]+)\}\}/g) || [];
+          matches.forEach(m => {
+            const key = m.replace(/[{}]/g, "").trim();
+            if (key && !foundKeys.has(key)) {
+              foundKeys.add(key);
+              placeholders.push({ key, placeholder: m, field: "" });
+            }
+          });
+        }
+      });
+    } catch (err) {
+      console.error("[Default Template] Placeholder detection failed:", err.message);
+    }
+  }
+
+  // template_data-তে placeholders সংরক্ষণ
+  const templateData = placeholders.length > 0 ? { placeholders } : null;
+
   const { data } = await supabase.from("default_templates").insert({
     name, name_bn, description, category: category || "excel", sub_category, country: country || "Japan",
-    file_url, file_name
+    file_url, file_name,
+    template_data: templateData ? JSON.stringify(templateData) : null,
   }).select().single();
 
   res.json(data);
@@ -286,6 +321,20 @@ router.post("/default-templates", upload.single("file"), asyncHandler(async (req
 router.patch("/default-templates/:id", asyncHandler(async (req, res) => {
   const updates = { ...req.body, updated_at: new Date().toISOString() };
   const { data } = await supabase.from("default_templates").update(updates).eq("id", req.params.id).select().single();
+  res.json(data);
+}));
+
+// PATCH /default-templates/:id/mapping — placeholder → system field mapping সংরক্ষণ
+router.patch("/default-templates/:id/mapping", asyncHandler(async (req, res) => {
+  const { placeholders } = req.body;
+  if (!Array.isArray(placeholders)) return res.status(400).json({ error: "placeholders array required" });
+
+  const { data, error } = await supabase.from("default_templates")
+    .update({ template_data: JSON.stringify({ placeholders }), updated_at: new Date().toISOString() })
+    .eq("id", req.params.id)
+    .select().single();
+
+  if (error) return res.status(500).json({ error: "Mapping সংরক্ষণ ব্যর্থ" });
   res.json(data);
 }));
 
