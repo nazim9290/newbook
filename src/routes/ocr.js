@@ -19,7 +19,7 @@ const auth = require("../middleware/auth");
 
 router.use(auth);
 
-// ── Upload config ──
+// ── আপলোড কনফিগ — temp ফোল্ডারে ফাইল সেভ, max 10MB ──
 const uploadDir = path.join(__dirname, "../../uploads/ocr-temp");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
@@ -85,7 +85,9 @@ function genericParse(text, fieldConfigs) {
   return fields;
 }
 
-/** Date parser — "08 Jun 1978", "06/08/2023", "13 February, 2022" → YYYY-MM-DD */
+/** তারিখ পার্সার — বিভিন্ন ফরম্যাটের তারিখকে YYYY-MM-DD-তে রূপান্তর করে
+ *  "08 Jun 1978", "06/08/2023", "13 February, 2022" → "1978-06-08", "2023-08-06", "2022-02-13"
+ */
 function parseDate(raw) {
   if (!raw) return "";
   const months = { jan:"01", feb:"02", mar:"03", apr:"04", may:"05", jun:"06",
@@ -113,7 +115,7 @@ function parseDate(raw) {
 // DOCUMENT CONFIGS — প্রতিটি doc type-এর detection + field rules
 // ═══════════════════════════════════════════════════════════════
 
-// Shared patterns — reusable across doc types
+// শেয়ার্ড regex প্যাটার্ন — একাধিক doc type-এ পুনরায় ব্যবহৃত হয়
 const P = {
   name:       [/Name\s*(?:of\s*Student)?\s*[:\-]\s*([A-Za-z\s.]+?)(?:\n|$)/im],
   father:     [/Father['']?s?(?:\/Husband['']?s?)?\s*Name\s*[:\-]\s*([A-Za-z\s.]+?)(?:\n|$)/im],
@@ -127,7 +129,7 @@ const P = {
 };
 
 const DOC_CONFIGS = [
-  // ── 0. Studentship Certificate (ছাত্রত্ব সনদ) ──
+  // ── 0. ছাত্রত্ব সনদ (Studentship Certificate) — কলেজ/বিশ্ববিদ্যালয়ের ছাত্র প্রমাণপত্র ──
   {
     id: "studentship_certificate",
     detect: /TO\s*WHOM\s*IT\s*MAY\s*CONCERN|regular\s*student|running\s*student|studentship/i,
@@ -151,7 +153,7 @@ const DOC_CONFIGS = [
     confidence: ["name_en", "institution_name", "degree"],
   },
 
-  // ── 0a. Learning Certificate (学習証明書) — must be before Proficiency ──
+  // ── 0a. জাপানি ভাষা শিক্ষা সনদ (学習証明書) — Proficiency-এর আগে detect করতে হবে ──
   {
     id: "learning_certificate",
     detect: /Learning\s*Certificate|学習証明書/i,
@@ -178,7 +180,7 @@ const DOC_CONFIGS = [
     confidence: ["name_en", "student_id", "course_level"],
   },
 
-  // ── 0b. Language Proficiency Certificate (日本語能力証明書) ──
+  // ── 0b. জাপানি ভাষা দক্ষতা সনদ (日本語能力証明書) — JLPT/NAT লেভেল, গ্রেড, সময়কাল ──
   {
     id: "language_proficiency_certificate",
     detect: /(?:Language|Japanese)\s*(?:Proficiency|能力)\s*Certificate|日本語能力証明書/i,
@@ -201,7 +203,7 @@ const DOC_CONFIGS = [
     confidence: ["name_en", "course_level", "institute_name"],
   },
 
-  // ── 0c. Passport (Bangladesh MRP) ──
+  // ── 0c. পাসপোর্ট (বাংলাদেশ MRP) — ব্যক্তিগত তথ্য, MRZ fallback সহ ──
   {
     id: "passport",
     detect: /PASSPORT|PEOPLE['']?S\s*REPUBLIC\s*OF\s*BANGLADESH|P<BGD/i,
@@ -229,7 +231,7 @@ const DOC_CONFIGS = [
       { key: "previous_passport_no", patterns: [/Previous\s*Passport\s*(?:No)?\.?\s*[:\-]?\s*([A-Z]?\d{6,})/i] },
     ],
     postProcess: (fields, text) => {
-      // MRZ থেকে passport number extract (fallback)
+      // MRZ লাইন থেকে passport number extract — OCR মূল text-এ না পেলে fallback
       if (!fields.passport_number) {
         const mrz = text.match(/P<BGD([A-Z]+)<<([A-Z]+)/);
         if (mrz) { fields.surname = mrz[1]; fields.given_name = mrz[2]; }
@@ -240,7 +242,7 @@ const DOC_CONFIGS = [
     confidence: ["passport_number", "surname", "given_name", "dob"],
   },
 
-  // ── 1. Family Relation Certificate ──
+  // ── 1. পারিবারিক সম্পর্ক সনদ — ইউনিয়ন/পৌরসভা থেকে পরিবারের সদস্য তালিকা ──
   {
     id: "family_relation_certificate",
     detect: /Family\s*Relation\s*Certificate/i,
@@ -255,13 +257,13 @@ const DOC_CONFIGS = [
       { key: "post_office", patterns: [/P\.?o\.?[:\s]*([\w\s]+?)(?:,|P\.?s|$)/im] },
       { key: "police_station", patterns: [/P\.?s[:\s.]*([\w\s]+?)(?:,|Dist|Sadar|$)/im] },
       { key: "district", patterns: [/Dist[:\s.]*([\w\s]+?)(?:,|\.|$)/im] },
-      // Family members table — "01 SIFAT SHEIKH MYSELF 07-10-2001"
+      // পরিবারের সদস্য টেবিল — "01 SIFAT SHEIKH MYSELF 07-10-2001" ফরম্যাটে parse
       { key: "members", type: "table", pattern: /\d{1,2}\s+([A-Z][A-Za-z\s.]+?)\s+(MYSELF|FATHER|MOTHER|BROTHER|SISTER|SPOUSE|SON|DAUGHTER|UNCLE|AUNT)\s+(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/gi, columns: ["Name", "Relation", "DOB"] },
     ],
     confidence: ["applicant_name", "father_name"],
   },
 
-  // ── 1. National ID Card (Old + Smart Card) ──
+  // ── 1a. জাতীয় পরিচয়পত্র (NID — পুরাতন ল্যামিনেটেড + স্মার্ট কার্ড) ──
   {
     id: "sponsor_nid",
     detect: /National\s*ID\s*Card|জাতীয় পরিচয়|ID\s*NO\s*:|NID\s*No/i,
@@ -288,7 +290,7 @@ const DOC_CONFIGS = [
     confidence: ["nid_number", "name_en", "dob"],
   },
 
-  // ── 2. Trade License ──
+  // ── 2. ট্রেড লাইসেন্স — ব্যবসার নাম, মালিক, BIN, ফি টেবিল ──
   {
     id: "trade_license",
     detect: /Trade\s*License|E-Trade/i,
@@ -308,17 +310,17 @@ const DOC_CONFIGS = [
       { key: "mother_name", patterns: P.mother },
       { key: "nid_passport", patterns: [/NID[\w\/]*\s*(?:Reg)?[\s:]*No\s*[:\-]?\s*(\d+)/i] },
       { key: "grand_total", patterns: [/Grand\s*Total\s*[:\-]?\s*([\d,]+)/i], type: "number" },
-      // Fee table
+      // ফি টেবিল — License Fee, Tax, VAT ইত্যাদি
       { key: "fees", type: "table", pattern: /([\w\/\s]+?(?:Fee|Tax|VAT|Surcharge))\s*[:\-]?\s*([\d,.]+)/gi, columns: ["Item", "Amount"] },
     ],
     confidence: ["license_no", "business_name", "owner_name"],
   },
 
-  // ── 3. TIN Certificate ──
+  // ── 3. TIN সনদ — করদাতা সনাক্তকরণ নম্বর (e-TIN), ঠিকানা, সার্কেল/জোন ──
   {
     id: "tin_certificate",
     detect: /TIN|Taxpayer[\s\S]{0,20}Identification[\s\S]{0,20}Number/i,
-    reject: /birth/i, // TIN text-এ "birth" থাকলে Birth Cert হতে পারে
+    reject: /birth/i, // "birth" শব্দ থাকলে TIN না — Birth Certificate হতে পারে, তাই skip
     fields: [
       { key: "tin_number", patterns: [/(?:TIN|e-TIN)\s*[:\-]?\s*(\d{12})/i] },
       { key: "name_en", patterns: P.name },
@@ -335,7 +337,7 @@ const DOC_CONFIGS = [
     confidence: ["tin_number", "name_en"],
   },
 
-  // ── 4. Income Tax Certificate ──
+  // ── 4. আয়কর সনদ — e-TIN, কর পরিশোধ টেবিল (বছর ও পরিমাণ) ──
   {
     id: "income_tax_certificate",
     detect: /Income\s*Tax\s*Certificate/i,
@@ -350,13 +352,13 @@ const DOC_CONFIGS = [
       { key: "business_id", patterns: [/Business\s*Identification\s*Number\s*[:\-]?\s*(.+?)(?:\n|$)/i] },
       { key: "taxes_circle", patterns: P.taxCircle },
       { key: "taxes_zone", patterns: P.taxZone },
-      // Tax payments table
+      // কর পরিশোধের টেবিল — বছর ও পরিমাণ
       { key: "tax_payments", type: "table", pattern: /(\d{4}[-–]\d{4}).*?(?:paid\s*)?Tk\.?\s*([\d,]+)/gi, columns: ["Year", "Amount"] },
     ],
     confidence: ["etin", "name_en"],
   },
 
-  // ── 5. Annual Income Certificate ──
+  // ── 5. বার্ষিক আয়ের সনদ — আয়ের উৎস, বছর, পরিমাণ টেবিল ──
   {
     id: "annual_income_certificate",
     detect: /Annual\s*In[oc]ome\s*Certificate/i,
@@ -366,18 +368,18 @@ const DOC_CONFIGS = [
       { key: "mother_name", patterns: P.mother },
       { key: "permanent_address", patterns: P.permAddr },
       { key: "present_address", patterns: P.curAddr },
-      // Income table
+      // আয়ের উৎস টেবিল — Source, Year, Amount
       { key: "income", type: "table", pattern: /\d+\s+([\w\s]+?)\s*\((\d{4}[-–]\d{4})\)\s*([\d,]+)/gi, columns: ["Source", "Year", "Amount"] },
     ],
     confidence: ["name_en"],
   },
 
-  // ── 6. Birth Certificate — Bengali+English mixed OCR handle ──
+  // ── 6. জন্ম নিবন্ধন সনদ — বাংলা+ইংরেজি মিশ্র OCR, পৌরসভা/সিটি কর্পোরেশন/ইউনিয়ন ──
   {
     id: "birth_certificate",
     detect: /birth\s*(registration|certificate)|জন্ম\s*নিবন্ধন/i,
     fields: [
-      // 17-digit registration number — BR Number বা Birth Registration Number
+      // ১৭ সংখ্যার রেজিস্ট্রেশন নম্বর — BR Number বা Birth Registration Number
       { key: "birth_reg_no", patterns: [/\b(\d{17})\b/, /BR\s*Number[\s\n]*[:\-]?\s*(\d[\s\d|]*\d)/i] },
       { key: "register_no", patterns: [/Register\s*No\.?[\s\n]*[:\-]?\s*(\d+)/i], type: "number" },
 
@@ -449,7 +451,7 @@ const DOC_CONFIGS = [
       { key: "order_of_child", patterns: [/Order\s*of\s*Child[\s\n]*[:\-]?\s*(\d+)/i] },
     ],
     postProcess: (fields, text) => {
-      // Template type auto-detect
+      // টেমপ্লেট ধরন স্বয়ংক্রিয়ভাবে চিনবে — পৌরসভা/সিটি কর্পোরেশন/ইউনিয়ন
       if (/paurashava/i.test(text)) fields.template_type = "Paurashava";
       else if (/city corporation/i.test(text)) fields.template_type = "City Corporation";
       else if (/union parishad/i.test(text)) fields.template_type = "Union Parishad";
@@ -464,7 +466,7 @@ const DOC_CONFIGS = [
     confidence: ["birth_reg_no", "name_en", "dob", "father_name", "mother_name"],
   },
 
-  // ── 7. SSC/HSC Academic Transcript ──
+  // ── 7. SSC/HSC একাডেমিক ট্রান্সক্রিপ্ট — বোর্ড, রোল, GPA, বিষয়ভিত্তিক গ্রেড টেবিল ──
   {
     id: "academic_transcript",
     detect: /secondary\s*certificate|SSC|HSC|intermediate|academic\s*transcript/i,
@@ -483,15 +485,15 @@ const DOC_CONFIGS = [
       { key: "student_type", patterns: [/Type\s*(?:of\s*Student)?\s*[:\-]?\s*(Regular|Irregular|Private)/im] },
       { key: "gpa", patterns: [/G\.?P\.?A\.?\s*[:\-]?\s*(\d\.\d{2})/i, /\b(\d\.\d{2})\b/] },
       { key: "result_date", patterns: [/(?:Date\s*of\s*Publication|Date\s*of\s*Results?)\s*[:\-]?\s*(\d{1,2}\s+\w+,?\s*\d{4})/im] },
-      // Subject results table
+      // বিষয়ভিত্তিক ফলাফল টেবিল — Subject, Grade, Point
       { key: "subjects", type: "table", pattern: /\d?\s*([\w\s&]{3,40}?)\s+(A\+|A\-?|B\+?|C\+?|D|F)\s+(\d\.?\d*)/g, columns: ["Subject", "Grade", "Point"] },
     ],
     postProcess: (fields, text) => {
-      // SSC or HSC detect
+      // SSC নাকি HSC — text থেকে পরীক্ষার ধরন চিনবে
       if (/higher\s*secondary|HSC/i.test(text)) fields._exam_type = "HSC";
       else if (/secondary\s*school|SSC/i.test(text)) fields._exam_type = "SSC";
 
-      // GPA with additional — second GPA match
+      // চতুর্থ বিষয়সহ GPA — দ্বিতীয় GPA match থাকলে additional হিসেবে সেভ
       const gpas = text.match(/\b(\d\.\d{2})\b/g);
       if (gpas && gpas.length >= 2 && gpas[1] !== gpas[0]) {
         fields.gpa = gpas[0];
@@ -537,7 +539,8 @@ function detectAndParse(text) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ROUTE HANDLER
+// রাউট হ্যান্ডলার — POST /api/ocr/scan
+// ফাইল আপলোড → Vision API → text extract → auto-detect → parsed fields return
 // ═══════════════════════════════════════════════════════════════
 
 router.post("/scan", upload.single("file"), async (req, res) => {
@@ -556,7 +559,7 @@ router.post("/scan", upload.single("file"), async (req, res) => {
     console.log(`[OCR] File: ${req.file.originalname}, Size: ${base64SizeMB.toFixed(2)}MB`);
     if (base64SizeMB > 8) return res.status(400).json({ error: "Image too large — max 8MB" });
 
-    // Google Vision API call
+    // Google Vision API কল — 30 সেকেন্ড timeout সহ
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
 
@@ -586,7 +589,7 @@ router.post("/scan", upload.single("file"), async (req, res) => {
     // console.log("[OCR] Raw text:", fullText.substring(0, 100));
     if (!fullText.trim()) return res.status(400).json({ error: "No text detected — upload a clearer image" });
 
-    // Auto-detect + parse
+    // স্বয়ংক্রিয়ভাবে document type চিনে fields parse করো
     const { docType, fields } = detectAndParse(fullText);
 
     res.json({
