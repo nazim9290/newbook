@@ -264,6 +264,36 @@ router.post("/:id/exam-result", checkPermission("students", "write"), asyncHandl
   res.status(201).json(data);
 }));
 
+// ── Education CRUD — শিক্ষাগত তথ্য ──
+router.post("/:id/education", checkPermission("students", "write"), asyncHandler(async (req, res) => {
+  const { level, school_name, year, board, gpa, group_name } = req.body;
+  const { data, error } = await supabase.from("student_education").insert({
+    student_id: req.params.id, level, school_name, passing_year: year, board, gpa, group_name,
+  }).select().single();
+  if (error) return res.status(400).json({ error: error.message });
+  res.status(201).json(data);
+}));
+
+router.patch("/:id/education/:eduId", checkPermission("students", "write"), asyncHandler(async (req, res) => {
+  const { level, school_name, year, board, gpa, group_name } = req.body;
+  const { data, error } = await supabase.from("student_education").update({
+    level, school_name, passing_year: year, board, gpa, group_name, updated_at: new Date().toISOString(),
+  }).eq("id", req.params.eduId).select().single();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+}));
+
+router.delete("/:id/education/:eduId", checkPermission("students", "write"), asyncHandler(async (req, res) => {
+  await supabase.from("student_education").delete().eq("id", req.params.eduId);
+  res.json({ success: true });
+}));
+
+// DELETE /api/students/:id/jp-exams/:examId — পরীক্ষার ফলাফল মুছুন
+router.delete("/:id/jp-exams/:examId", checkPermission("students", "write"), asyncHandler(async (req, res) => {
+  await supabase.from("student_jp_exams").delete().eq("id", req.params.examId);
+  res.json({ success: true });
+}));
+
 // POST /api/students/:id/fee-items — add fee item (ফি কাঠামো)
 router.post("/:id/fee-items", checkPermission("students", "write"), asyncHandler(async (req, res) => {
   const { category, label, amount } = req.body;
