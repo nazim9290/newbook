@@ -380,47 +380,53 @@ const DOC_CONFIGS = [
       // 17-digit registration number
       { key: "birth_reg_no", patterns: [/\b(\d{17})\b/, /Registration\s*Number\s*[\s\S]*?(\d{17})/i] },
       { key: "register_no", patterns: [/Register\s*No[:\s]*(\d[\s\d]*\d)/i], type: "number" },
-      // Name — "Name : Sifat Sheikh" or "Name\nSifat Sheikh" — Bengali text আগে থাকতে পারে
+      // Name — OCR-এ "Name\n: Sifat Sheikh" multi-line হতে পারে
       { key: "name_en", patterns: [
         /Name\s*[:\-]\s*([A-Z][A-Za-z\s.]+?)(?:\n|মাতা|Mother|পিতা|Father|$)/im,
+        /Name\s*\n\s*[:\-]?\s*([A-Z][A-Za-z\s.]+?)(?:\n|মাতা|Mother|$)/im,
         /Name\s*[:\-]?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/im,
       ] },
-      // DOB — multiple formats
+      // DOB — "Date of Birth\n: 10/07/2001" multi-line
       { key: "dob", patterns: [
-        /Date\s*of\s*Birth\s*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
-        /Birth\s*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
+        /Date\s*of\s*Birth[\s\n]*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
+        /Birth[\s\n]*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
       ], type: "date" },
       { key: "dob_in_word", patterns: [
-        /[Ii]n\s*[Ww]ord\s*[:\-]?\s*([A-Z][A-Za-z\s,]+?(?:Thousand|Hundred|One|Two|Three|Four|Five)[A-Za-z\s]*)/i,
+        /[Ii]n\s*[Ww]ord[\s\n]*[:\-]?\s*([A-Z][A-Za-z\s,]+?(?:Thousand|Hundred|One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)[A-Za-z\s]*)/i,
       ] },
       { key: "sex", patterns: [/Sex\s*[:\-]?\s*(Male|Female|Other)/i] },
-      // Place of Birth — mixed text
+      // Place of Birth — "Place of Birth\n: Munshiganj"
       { key: "birth_place", patterns: [
-        /Place\s*of\s*Birth\s*[:\-]?\s*([A-Za-z][A-Za-z\s,.\-]+?)(?:\n|স্থায়ী|Permanent|$)/i,
+        /Place\s*of\s*Birth[\s\n]*[:\-]?\s*([A-Za-z][A-Za-z\s,.\-]+?)(?:\n|স্থায়ী|Permanent|$)/i,
       ] },
-      // Father — "Father : Karim Sheikh" — Bengali label আগে থাকতে পারে
+      // Father — "Father\n: Karim Sheikh" or same line
       { key: "father_name", patterns: [
-        /Father\s*[:\-]\s*([A-Z][A-Za-z\s.]+?)(?:\n|Nationality|জাতীয়তা|$)/im,
-        /Father\s*[:\-]?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/im,
+        /Father[\s\n]*[:\-]?\s*([A-Z][A-Za-z\s.]+?)(?:\n|Nationality|জাতীয়তা|পিতার|$)/im,
+        /Father[\s\n]*[:\-]?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/im,
       ] },
       { key: "father_nationality", patterns: [
-        /(?:Father['']?s?\s*)?Nationality\s*[:\-]?\s*(Bangladeshi|[A-Z][a-z]+)/i,
+        /Father['']?s?\s*Nationality[\s\n]*[:\-]?\s*(Bangladeshi|[A-Z][a-z]+)/i,
+        /Nationality[\s\n]*[:\-]?\s*(Bangladeshi)/i,
       ] },
-      // Mother
+      // Mother — "Mother\nAyesha Begum" (sometimes no colon)
       { key: "mother_name", patterns: [
-        /Mother\s*[:\-]\s*([A-Z][A-Za-z\s.]+?)(?:\n|Nationality|জাতীয়তা|$)/im,
-        /Mother\s*[:\-]?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/im,
+        /Mother[\s\n]*[:\-]?\s*([A-Z][A-Za-z\s.]+?)(?:\n|Nationality|জাতীয়তা|মাতার|$)/im,
+        /Mother[\s\n]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/im,
       ] },
       { key: "mother_nationality", patterns: [
-        /Mother['']?s?\s*Nationality\s*[:\-]?\s*(Bangladeshi|[A-Z][a-z]+)/i,
+        /Mother['']?s?\s*Nationality[\s\n]*[:\-]?\s*(Bangladeshi|[A-Z][a-z]+)/i,
       ] },
-      // Permanent Address — multi-word with commas
+      // Permanent Address — multi-line "Permanent\nAddress\n: Middle Mohakali..."
       { key: "permanent_address", patterns: [
-        /Permanent\s*Address\s*[:\-]?\s*([A-Za-z][A-Za-z\d\s,.\-\/]+?)(?:\n\n|\nDate|\nThis|$)/ims,
+        /Permanent[\s\n]*Address[\s\n]*[:\-]?\s*([A-Za-z][A-Za-z\d\s,.\-\/\n]+?)(?:\n\n|\nDate|\nThis|$)/i,
       ] },
-      // Dates
-      { key: "reg_date", patterns: [/Date\s*of\s*Registration\s*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i], type: "date" },
-      { key: "issue_date", patterns: [/Date\s*of\s*Issu(?:e|ance)\s*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i], type: "date" },
+      // Dates — "Date of Registration\n27/01/2015" multi-line
+      { key: "reg_date", patterns: [
+        /Date\s*of\s*Registration[\s\n]*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
+      ], type: "date" },
+      { key: "issue_date", patterns: [
+        /Date\s*of\s*Issu(?:e|ance)[\s\n]*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
+      ], type: "date" },
       // Authority — Union/Paurashava/City Corp
       { key: "paurashava_name", patterns: [/([\w\s]+?)\s*Paurashava/i] },
       { key: "zone", patterns: [/Zone[:\-\s]*(\d+)/i] },
