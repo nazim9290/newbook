@@ -101,10 +101,12 @@ router.get("/stats", auth, asyncHandler(async (req, res) => {
       ORDER BY due_date ASC LIMIT 5
     `, [agencyId]),
 
-    // ৯. বকেয়া payment (pending/partial)
+    // ৯. বকেয়া — মোট fee_items - মোট payments
     pool.query(`
-      SELECT COALESCE(SUM(total_amount - paid_amount), 0)::numeric AS total_due
-      FROM payments WHERE agency_id = $1 AND status IN ('pending', 'partial')
+      SELECT
+        COALESCE((SELECT SUM(amount) FROM fee_items WHERE agency_id = $1), 0) -
+        COALESCE((SELECT SUM(amount) FROM payments WHERE agency_id = $1), 0)
+        AS total_due
     `, [agencyId]),
 
     // ১০. ভিসা/পৌঁছেছে count
