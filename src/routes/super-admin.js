@@ -11,7 +11,13 @@ const asyncHandler = require("../lib/asyncHandler");
 const auth = require("../middleware/auth");
 const bcrypt = require("bcryptjs");
 const { generatePrefix, ensureUniquePrefix } = require("../lib/idGenerator");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 const router = express.Router();
+
+// ── Multer config — ফাইল আপলোড (tmp ফোল্ডারে) ──
+const upload = multer({ dest: path.join(__dirname, "../../uploads/tmp"), limits: { fileSize: 20 * 1024 * 1024 } });
 
 // Super Admin guard — শুধু super_admin role access পাবে
 const superOnly = (req, res, next) => {
@@ -238,6 +244,61 @@ router.patch("/agencies/:id/fee", asyncHandler(async (req, res) => {
     .eq("id", req.params.id).select().single();
   if (error) return res.status(500).json({ error: "আপডেট ব্যর্থ" });
   res.json(data);
+}));
+
+// ═══════════════════════════════════════════════════
+// Default Templates — গ্লোবাল টেমপ্লেট ম্যানেজমেন্ট
+// ═══════════════════════════════════════════════════
+
+// GET /default-templates — সব default template list
+router.get("/default-templates", asyncHandler(async (req, res) => {
+  const { data } = await supabase.from("default_templates").select("*").order("sort_order");
+  res.json(data || []);
+}));
+
+// POST /default-templates — নতুন template আপলোড (multer file upload সহ)
+router.post("/default-templates", upload.single("file"), asyncHandler(async (req, res) => {
+  const { name, name_bn, description, category, sub_category, country } = req.body;
+  if (!name) return res.status(400).json({ error: "Name required" });
+
+  let file_url = null, file_name = null;
+  if (req.file) {
+    // uploads/default-templates/ ফোল্ডার auto-create
+    const destDir = path.join(__dirname, "../../uploads/default-templates");
+    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+
+    const ext = path.extname(req.file.originalname);
+    const dest = path.join(destDir, `${Date.now()}${ext}`);
+    fs.renameSync(req.file.path, dest);
+    file_url = `/uploads/default-templates/${path.basename(dest)}`;
+    file_name = req.file.originalname;
+  }
+
+  const { data } = await supabase.from("default_templates").insert({
+    name, name_bn, description, category: category || "excel", sub_category, country: country || "Japan",
+    file_url, file_name
+  }).select().single();
+
+  res.json(data);
+}));
+
+// PATCH /default-templates/:id — template আপডেট
+router.patch("/default-templates/:id", asyncHandler(async (req, res) => {
+  const updates = { ...req.body, updated_at: new Date().toISOString() };
+  const { data } = await supabase.from("default_templates").update(updates).eq("id", req.params.id).select().single();
+  res.json(data);
+}));
+
+// DELETE /default-templates/:id — template মুছে ফেলা
+router.delete("/default-templates/:id", asyncHandler(async (req, res) => {
+  // ফাইল থাকলে ডিস্ক থেকে মুছো
+  const { data: tpl } = await supabase.from("default_templates").select("file_url").eq("id", req.params.id).single();
+  if (tpl?.file_url) {
+    const filePath = path.join(__dirname, "../../", tpl.file_url);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  }
+  await supabase.from("default_templates").delete().eq("id", req.params.id);
+  res.json({ success: true });
 }));
 
 module.exports = router;

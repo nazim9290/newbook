@@ -170,6 +170,12 @@ app.patch("/api/agency/me", agencyAuth, agencyAsync(async (req, res) => {
   res.json(data);
 }));
 
+// ── Default Templates — যে কোনো authenticated user দেখতে পারে ──
+app.get("/api/default-templates", agencyAuth, agencyAsync(async (req, res) => {
+  const { data } = await agencySupa.from("default_templates").select("*").eq("is_active", true).order("sort_order");
+  res.json(data || []);
+}));
+
 // ═══════════════════════════════════════════════════════
 // API Routes — প্রতিটি module আলাদা route file-এ
 // ═══════════════════════════════════════════════════════
