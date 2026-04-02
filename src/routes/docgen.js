@@ -185,6 +185,18 @@ router.post("/generate", asyncHandler(async (req, res) => {
     // doc_data (user input) priority, তারপর student profile
     const flat = { ...flattenForDoc(decrypted), ...doc_data };
 
+    // Auto-generate issuing_authority — template_type অনুযায়ী
+    if (!flat.issuing_authority) {
+      if (flat.union_name) flat.issuing_authority = [flat.union_name, flat.upazila_name, flat.district_name].filter(Boolean).join(", ");
+      else if (flat.paurashava_name) flat.issuing_authority = flat.paurashava_name;
+      else if (flat.city_corp_name) flat.issuing_authority = [flat.city_corp_name, flat.zone ? `Zone-${flat.zone}` : ""].filter(Boolean).join(", ");
+    }
+    // Issuing location lines — template-এ আলাদা line হিসেবে ব্যবহার করা যাবে
+    if (!flat.issuing_line1) {
+      flat.issuing_line1 = flat.union_name || flat.paurashava_name || flat.city_corp_name || "";
+      flat.issuing_line2 = flat.union_name ? [flat.upazila_name, flat.district_name].filter(Boolean).join(", ") : flat.zone ? `Zone-${flat.zone}` : "";
+    }
+
     // Get template file buffer — VPS local
     let templateBuffer;
     const tmplPath = tmpl.template_url || tmpl.file_path;
