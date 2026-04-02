@@ -525,6 +525,7 @@ router.post("/scan", upload.single("file"), async (req, res) => {
     if (data.error) { console.error("[OCR] API error:", data.error.message); throw new Error(data.error.message); }
 
     const fullText = data.responses?.[0]?.fullTextAnnotation?.text || "";
+    console.log("[OCR] Raw text (first 500 chars):", fullText.substring(0, 500));
     if (!fullText.trim()) return res.status(400).json({ error: "No text detected — upload a clearer image" });
 
     // Auto-detect + parse
