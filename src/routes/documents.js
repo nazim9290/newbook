@@ -4,6 +4,7 @@ const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { encrypt, decrypt } = require("../lib/crypto");
 const { checkPermission } = require("../middleware/checkPermission");
+const { getBranchFilter } = require("../lib/branchFilter");
 
 const router = express.Router();
 router.use(auth);
@@ -17,10 +18,23 @@ router.get("/", checkPermission("documents", "read"), asyncHandler(async (req, r
   const limit = Math.min(parseInt(req.query.limit) || 50, 500);
   const offset = (page - 1) * limit;
 
+  // Branch filter — staff শুধু নিজ branch-এর students-এর documents দেখবে
+  const branchFilter = getBranchFilter(req.user);
+  let branchStudentIds = null;
+  if (branchFilter) {
+    const { data: branchStudents } = await supabase.from("students")
+      .select("id")
+      .eq("agency_id", req.user.agency_id)
+      .eq("branch", branchFilter);
+    branchStudentIds = (branchStudents || []).map(s => s.id);
+    if (branchStudentIds.length === 0) return res.json({ data: [], total: 0, page, limit });
+  }
+
   // মোট রেকর্ড সংখ্যা বের করতে count query
   let countQuery = supabase.from("documents").select("*", { count: "exact" }).eq("agency_id", req.user.agency_id);
   if (student_id) countQuery = countQuery.eq("student_id", student_id);
   if (status && status !== "All") countQuery = countQuery.eq("status", status);
+  if (branchStudentIds) countQuery = countQuery.in("student_id", branchStudentIds);
   countQuery = countQuery.limit(0); // শুধু count দরকার, data না
   const { count: total, error: countError } = await countQuery;
   if (countError) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
@@ -29,6 +43,7 @@ router.get("/", checkPermission("documents", "read"), asyncHandler(async (req, r
   let query = supabase.from("documents").select("*, students(name_en)").eq("agency_id", req.user.agency_id).order("updated_at", { ascending: false }).range(offset, offset + limit - 1);
   if (student_id) query = query.eq("student_id", student_id);
   if (status && status !== "All") query = query.eq("status", status);
+  if (branchStudentIds) query = query.in("student_id", branchStudentIds);
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 

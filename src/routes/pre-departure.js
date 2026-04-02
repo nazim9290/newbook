@@ -18,6 +18,7 @@ const supabase = require("../lib/supabase");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const { getBranchFilter } = require("../lib/branchFilter");
 
 // ── Multer config — pre-departure document upload ──
 const pdUploadDir = path.join(process.env.UPLOAD_DIR || path.join(__dirname, "../../uploads"), "pre-departure");
@@ -46,6 +47,9 @@ const pdUpload = multer({
 router.get("/", auth, asyncHandler(async (req, res) => {
   const agencyId = req.user.agency_id;
   const pool = supabase.pool;
+
+  // Branch filter — staff শুধু নিজ branch-এর students দেখবে
+  const branchFilter = getBranchFilter(req.user);
 
   // COE+ stage-এ থাকা students আনো + pre_departure data join (checklists + deadlines সহ)
   const { rows } = await pool.query(`
@@ -76,8 +80,9 @@ router.get("/", auth, asyncHandler(async (req, res) => {
         'COE_RECEIVED','HEALTH_CHECK','TUITION_REMITTED','VFS_SCHEDULED',
         'VISA_APPLIED','VISA_GRANTED','PRE_DEPARTURE','ARRIVED','COMPLETED'
       )
+      AND ($2::text IS NULL OR s.branch = $2)
     ORDER BY s.updated_at DESC
-  `, [agencyId]);
+  `, [agencyId, branchFilter]);
 
   // প্রতিটি student-এর departure data format করো
   const students = rows.map(r => ({

@@ -6,6 +6,7 @@ const { checkPermission } = require("../middleware/checkPermission");
 const { logActivity } = require("../lib/activityLog");
 const { generateId } = require("../lib/idGenerator");
 const cache = require("../lib/cache");
+const { getBranchFilter } = require("../lib/branchFilter");
 
 const router = express.Router();
 router.use(auth);
@@ -121,9 +122,13 @@ router.get("/payments", checkPermission("accounts", "read"), asyncHandler(async 
   const limit = Math.min(parseInt(req.query.limit) || 50, 500);
   const offset = (page - 1) * limit;
 
+  // Branch filter — staff শুধু নিজ branch-এর payments দেখবে
+  const branchFilter = getBranchFilter(req.user);
+
   // মোট রেকর্ড সংখ্যা বের করতে count query
   let countQuery = supabase.from("payments").select("*", { count: "exact" }).eq("agency_id", req.user.agency_id);
   if (student_id) countQuery = countQuery.eq("student_id", student_id);
+  if (branchFilter) countQuery = countQuery.eq("branch", branchFilter);
   countQuery = countQuery.limit(0);
   const { count: total, error: countError } = await countQuery;
   if (countError) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
@@ -131,6 +136,7 @@ router.get("/payments", checkPermission("accounts", "read"), asyncHandler(async 
   // পেজিনেটেড ডেটা query
   let query = supabase.from("payments").select("*, students(name_en)").eq("agency_id", req.user.agency_id).order("date", { ascending: false }).range(offset, offset + limit - 1);
   if (student_id) query = query.eq("student_id", student_id);
+  if (branchFilter) query = query.eq("branch", branchFilter);
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 

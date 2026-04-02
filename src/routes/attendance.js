@@ -2,6 +2,7 @@ const express = require("express");
 const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
+const { getBranchFilter } = require("../lib/branchFilter");
 
 const router = express.Router();
 router.use(auth);
@@ -17,6 +18,19 @@ router.get("/", asyncHandler(async (req, res) => {
     .eq("date", date)
     .eq("agency_id", req.user.agency_id);
   if (batch && batch !== "all") query = query.eq("batch_id", batch);
+
+  // Branch filter — staff শুধু নিজ branch-এর students-এর attendance দেখবে
+  const branchFilter = getBranchFilter(req.user);
+  if (branchFilter) {
+    // attendance table-এ branch নেই, তাই student_id দিয়ে filter
+    const { data: branchStudents } = await supabase.from("students")
+      .select("id")
+      .eq("agency_id", req.user.agency_id)
+      .eq("branch", branchFilter);
+    const studentIds = (branchStudents || []).map(s => s.id);
+    if (studentIds.length === 0) return res.json([]);
+    query = query.in("student_id", studentIds);
+  }
 
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি" });

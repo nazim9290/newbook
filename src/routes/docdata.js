@@ -9,6 +9,7 @@ const express = require("express");
 const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
+const { getBranchFilter } = require("../lib/branchFilter");
 
 const router = express.Router();
 router.use(auth);
@@ -77,6 +78,19 @@ router.delete("/types/:id", asyncHandler(async (req, res) => {
 
 // GET /api/docdata/student/:studentId — একটি student-এর সব document data
 router.get("/student/:studentId", asyncHandler(async (req, res) => {
+  // Branch filter — staff শুধু নিজ branch-এর student-এর data দেখবে
+  const branchFilter = getBranchFilter(req.user);
+  if (branchFilter) {
+    const { data: student } = await supabase.from("students")
+      .select("branch")
+      .eq("id", req.params.studentId)
+      .eq("agency_id", req.user.agency_id)
+      .single();
+    if (student && student.branch && student.branch !== branchFilter) {
+      return res.status(403).json({ error: "এই student আপনার branch-এ নেই" });
+    }
+  }
+
   const { data, error } = await supabase
     .from("document_data")
     .select("*, doc_types(name, name_bn, category, fields)")
