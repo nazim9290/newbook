@@ -145,6 +145,69 @@ router.post("/upload", upload.single("file"), asyncHandler(async (req, res) => {
 }));
 
 // ================================================================
+// POST /api/docgen/create-from-default — default template থেকে agency template তৈরি
+router.post("/create-from-default", asyncHandler(async (req, res) => {
+  const { default_template_id, template_name, category, description, linked_doc_type } = req.body;
+  if (!default_template_id || !template_name) return res.status(400).json({ error: "default_template_id ও template_name দিন" });
+
+  // Default template fetch
+  const { data: dt } = await supabase.from("default_templates").select("*").eq("id", default_template_id).single();
+  if (!dt || !dt.file_url) return res.status(404).json({ error: "Default template পাওয়া যায়নি বা ফাইল নেই" });
+
+  // File copy — default → agency template
+  const srcPath = path.join(__dirname, "../..", dt.file_url);
+  if (!fs.existsSync(srcPath)) return res.status(404).json({ error: "Template file পাওয়া যায়নি: " + dt.file_url });
+
+  const ext = path.extname(dt.file_name || "template.docx");
+  const destName = `${req.user.agency_id}_${Date.now()}_${(dt.file_name || "template.docx").replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+  const destDir = path.join(__dirname, "../../uploads/doc-templates");
+  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+  const destPath = path.join(destDir, destName);
+  fs.copyFileSync(srcPath, destPath);
+
+  // Detect placeholders from copied file
+  let placeholders = [];
+  try {
+    const AdmZip = require("adm-zip");
+    const zip = new AdmZip(destPath);
+    const foundKeys = new Set();
+    zip.getEntries().forEach(entry => {
+      if (entry.entryName.endsWith(".xml")) {
+        const cleaned = entry.getData().toString("utf8").replace(/<[^>]+>/g, "");
+        (cleaned.match(/\{\{([^}]+)\}\}/g) || []).forEach(m => {
+          const key = m.replace(/[{}]/g, "").trim();
+          if (key && !foundKeys.has(key)) { foundKeys.add(key); placeholders.push({ key, placeholder: m, field: "" }); }
+        });
+      }
+    });
+  } catch (err) { console.error("[DocGen] Placeholder detect error:", err.message); }
+
+  // Copy mappings from default template if available
+  const dtData = typeof dt.template_data === "string" ? JSON.parse(dt.template_data || "{}") : (dt.template_data || {});
+  if (dtData.placeholders) {
+    placeholders = placeholders.map(p => {
+      const saved = dtData.placeholders.find(sp => sp.key === p.key);
+      return saved ? { ...p, field: saved.field || "" } : p;
+    });
+  }
+
+  // Save as agency template
+  const { data: newTmpl, error } = await supabase.from("doc_templates").insert({
+    agency_id: req.user.agency_id,
+    name: template_name,
+    category: category || "translation",
+    description: description || dt.description || "",
+    linked_doc_type: linked_doc_type || "",
+    template_url: destPath,
+    file_path: destPath,
+    field_mappings: JSON.stringify(placeholders),
+    placeholders: JSON.stringify(placeholders),
+  }).select().single();
+
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি" }); }
+  res.json({ template: newTmpl, placeholders });
+}));
+
 // POST /api/docgen/generate — template + student → .docx download
 // Body: { template_id, student_id, format: "docx" | "pdf" }
 // ================================================================
