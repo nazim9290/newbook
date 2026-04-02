@@ -37,19 +37,21 @@ router.get("/stats", auth, asyncHandler(async (req, res) => {
     visaCountRes,
     docCountRes,
   ] = await Promise.all([
-    // ১. মোট student + active count
+    // ১. মোট student + active + আজকের enrolled count
     pool.query(`
       SELECT
         COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE status NOT IN ('CANCELLED','PAUSED'))::int AS active
+        COUNT(*) FILTER (WHERE status NOT IN ('CANCELLED','PAUSED'))::int AS active,
+        COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE)::int AS today_enrolled
       FROM students WHERE agency_id = $1
     `, [agencyId]),
 
-    // ২. মোট visitor count (এই মাসের + total)
+    // ২. মোট visitor count (আজকের + এই মাসের + total)
     pool.query(`
       SELECT
         COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE created_at >= date_trunc('month', CURRENT_DATE))::int AS this_month
+        COUNT(*) FILTER (WHERE created_at >= date_trunc('month', CURRENT_DATE))::int AS this_month,
+        COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE)::int AS today
       FROM visitors WHERE agency_id = $1
     `, [agencyId]),
 
@@ -60,9 +62,11 @@ router.get("/stats", auth, asyncHandler(async (req, res) => {
       GROUP BY status ORDER BY count DESC
     `, [agencyId]),
 
-    // ৪. এই মাসের মোট আয় (payments)
+    // ৪. এই মাসের + আজকের মোট আয় (payments)
     pool.query(`
-      SELECT COALESCE(SUM(amount), 0)::numeric AS total
+      SELECT
+        COALESCE(SUM(amount), 0)::numeric AS total,
+        COALESCE(SUM(amount) FILTER (WHERE date = CURRENT_DATE), 0)::numeric AS today
       FROM payments WHERE agency_id = $1
         AND date >= date_trunc('month', CURRENT_DATE)
     `, [agencyId]),
@@ -165,14 +169,17 @@ router.get("/stats", auth, asyncHandler(async (req, res) => {
     students: {
       total: studentCountRes.rows[0].total,
       active: studentCountRes.rows[0].active,
+      todayEnrolled: studentCountRes.rows[0].today_enrolled || 0,
     },
     visitors: {
       total: visitorCountRes.rows[0].total,
       thisMonth: visitorCountRes.rows[0].this_month,
+      today: visitorCountRes.rows[0].today || 0,
     },
     pipeline: pipelineRes.rows,
     revenue: {
       thisMonth: Number(revenueRes.rows[0].total),
+      today: Number(revenueRes.rows[0].today || 0),
       monthly: monthlyRevenue,
     },
     expenses: {
