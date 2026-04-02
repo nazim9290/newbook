@@ -427,10 +427,22 @@ function flattenForDoc(student) {
   const jp = (student.student_jp_exams || [])[0] || {};
   flat.jp_level = jp.level || ""; flat.jp_score = jp.score || "";
 
-  // Sponsor
+  // Sponsor — মূল তথ্য + 経費支弁書 extended fields
   const sp = (student.sponsors || [])[0] || {};
   flat.sponsor_name = sp.name || ""; flat.sponsor_phone = sp.phone || "";
   flat.sponsor_address = sp.address || ""; flat.sponsor_relationship = sp.relationship || "";
+  // Extended sponsor fields — 経費支弁書 (Financial Sponsorship Document)
+  flat.sponsor_statement = sp.statement || "";
+  flat.sponsor_payment_to_student = sp.payment_to_student ? "✓" : "";
+  flat.sponsor_payment_to_school = sp.payment_to_school ? "✓" : "";
+  flat.sponsor_sign_date = sp.sign_date || "";
+  flat.sponsor_tin = sp.tin || "";
+  flat.sponsor_income = sp.annual_income_y1 || "";
+  flat.sponsor_company = sp.company_name || "";
+  flat.sponsor_nid = sp.nid || "";
+  flat.tuition_jpy = sp.tuition_jpy || student.tuition_jpy || "";
+  flat.monthly_living = sp.living_jpy_monthly || student.monthly_living || "";
+  flat.exchange_rate = sp.exchange_rate || "";
 
   // Family
   const fam = student.student_family || [];

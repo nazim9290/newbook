@@ -174,6 +174,49 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
 
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
+  // ── Sponsor upsert — frontend sponsor object থাকলে sponsors table-এ save ──
+  if (body.sponsor && typeof body.sponsor === "object") {
+    try {
+      const sp = body.sponsor;
+      // sponsors table-এর valid columns — বাকি সব ignore
+      const SPONSOR_COLS = [
+        "name", "name_en", "relationship", "phone", "address", "nid",
+        "company_name", "company_address", "trade_license", "tin",
+        "annual_income_y1", "annual_income_y2", "annual_income_y3",
+        "tax_y1", "tax_y2", "tax_y3",
+        "tuition_jpy", "living_jpy_monthly", "payment_method", "exchange_rate",
+        "fund_formation", "notes",
+        // 経費支弁書 fields
+        "statement", "payment_to_student", "payment_to_school", "sign_date",
+      ];
+      const sponsorRecord = { student_id: req.params.id };
+      for (const col of SPONSOR_COLS) {
+        if (sp[col] !== undefined) {
+          // Numeric columns — empty string কে null করো
+          if (["annual_income_y1","annual_income_y2","annual_income_y3","tax_y1","tax_y2","tax_y3","tuition_jpy","living_jpy_monthly","exchange_rate"].includes(col)) {
+            sponsorRecord[col] = sp[col] === "" ? null : Number(sp[col]);
+          } else if (col === "fund_formation") {
+            sponsorRecord[col] = typeof sp[col] === "string" ? sp[col] : JSON.stringify(sp[col] || []);
+          } else if (["payment_to_student", "payment_to_school"].includes(col)) {
+            sponsorRecord[col] = !!sp[col];
+          } else if (col === "sign_date") {
+            sponsorRecord[col] = sp[col] || null;
+          } else {
+            sponsorRecord[col] = sp[col];
+          }
+        }
+      }
+      sponsorRecord.updated_at = new Date().toISOString();
+
+      // Upsert — student_id UNIQUE constraint দিয়ে conflict resolve
+      const encSponsor = encryptSensitiveFields(sponsorRecord);
+      await supabase.from("sponsors").upsert(encSponsor, { onConflict: "student_id" });
+    } catch (spErr) {
+      console.error("[Sponsor Upsert]", spErr.message);
+      // Sponsor save fail হলেও student update সফল — পরে retry করা যাবে
+    }
+  }
+
   // ── Billing: student ENROLLED হলে charge তৈরি ──
   if (body.status === "ENROLLED" && data) {
     try {
