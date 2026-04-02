@@ -187,6 +187,26 @@ SELECT
       "label_en": "District Name",
       "type": "text",
       "condition": { "when": "template_type", "equals": "Union Parishad" }
+    },
+    {
+      "key": "section_template",
+      "label_en": "Template Fields (auto-generated)",
+      "type": "section_header"
+    },
+    {
+      "key": "issuing_line1",
+      "label_en": "Issuing Authority Line 1",
+      "type": "text"
+    },
+    {
+      "key": "issuing_line2",
+      "label_en": "Issuing Authority Line 2",
+      "type": "text"
+    },
+    {
+      "key": "issuing_authority",
+      "label_en": "Issuing Authority (combined)",
+      "type": "text"
     }
   ]'::jsonb,
   true,
