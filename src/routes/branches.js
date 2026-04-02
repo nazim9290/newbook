@@ -47,8 +47,18 @@ router.post("/", asyncHandler(async (req, res) => {
 
 // PATCH /api/branches/:id
 router.patch("/:id", asyncHandler(async (req, res) => {
+  // ── Optimistic Lock — concurrent edit protection ──
+  const clientUpdatedAt = req.body.updated_at;
+  if (clientUpdatedAt) {
+    const { data: current } = await supabase.from("branches").select("updated_at").eq("id", req.params.id).single();
+    if (current && current.updated_at && new Date(current.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
+      return res.status(409).json({ error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — রিফ্রেশ করুন", code: "CONFLICT" });
+    }
+  }
+
+  const updates = { ...req.body, updated_at: new Date().toISOString() };
   const { data, error } = await supabase.from("branches")
-    .update(req.body).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
+    .update(updates).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি" });
   res.json(data);
 }));

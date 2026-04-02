@@ -35,7 +35,23 @@ router.post("/employees", checkPermission("hr", "write"), asyncHandler(async (re
 
 // PATCH /api/hr/employees/:id
 router.patch("/employees/:id", checkPermission("hr", "write"), asyncHandler(async (req, res) => {
-  const { data, error } = await supabase.from("employees").update(encryptSensitiveFields(req.body)).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
+  // ── Optimistic Lock — concurrent edit protection ──
+  // Frontend updated_at পাঠালে check করো — অন্য কেউ এর মধ্যে পরিবর্তন করেছে কিনা
+  const { updated_at: clientUpdatedAt } = req.body;
+  if (clientUpdatedAt) {
+    const { data: current } = await supabase.from("employees").select("updated_at").eq("id", req.params.id).single();
+    if (current && current.updated_at && new Date(current.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
+      return res.status(409).json({
+        error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — পেজ রিফ্রেশ করুন",
+        code: "CONFLICT",
+        server_updated_at: current.updated_at,
+      });
+    }
+  }
+
+  // প্রতিটি save-এ updated_at নতুন করে সেট — পরবর্তী conflict check-এর জন্য
+  const payload = { ...req.body, updated_at: new Date().toISOString() };
+  const { data, error } = await supabase.from("employees").update(encryptSensitiveFields(payload)).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
   // Activity log — কর্মচারী আপডেট
@@ -100,12 +116,28 @@ router.post("/leaves", checkPermission("hr", "write"), asyncHandler(async (req, 
 
 // PATCH /api/hr/leaves/:id — ছুটি অনুমোদন/বাতিল
 router.patch("/leaves/:id", checkPermission("hr", "write"), asyncHandler(async (req, res) => {
+  // ── Optimistic Lock — concurrent edit protection ──
+  // Frontend updated_at পাঠালে check করো — অন্য কেউ এর মধ্যে পরিবর্তন করেছে কিনা
+  const { updated_at: clientUpdatedAt } = req.body;
+  if (clientUpdatedAt) {
+    const { data: current } = await supabase.from("leaves").select("updated_at").eq("id", req.params.id).single();
+    if (current && current.updated_at && new Date(current.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
+      return res.status(409).json({
+        error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — পেজ রিফ্রেশ করুন",
+        code: "CONFLICT",
+        server_updated_at: current.updated_at,
+      });
+    }
+  }
+
   const updates = {};
   if (req.body.status) {
     updates.status = req.body.status;
     if (req.body.status === "approved") { updates.approved_by = req.user.id; updates.approved_at = new Date().toISOString(); }
   }
   if (req.body.notes !== undefined) updates.notes = req.body.notes;
+  // প্রতিটি save-এ updated_at নতুন করে সেট — পরবর্তী conflict check-এর জন্য
+  updates.updated_at = new Date().toISOString();
   const { data, error } = await supabase.from("leaves").update(updates)
     .eq("id", req.params.id).eq("agency_id", req.user.agency_id).select("*, employees(name)").single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি" }); }

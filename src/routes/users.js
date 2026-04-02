@@ -31,6 +31,16 @@ router.get("/", auth, asyncHandler(async (req, res) => {
 // ── PATCH /api/users/:id — ইউজার আপডেট (role, branch, is_active, password reset) ──
 router.patch("/:id", auth, asyncHandler(async (req, res) => {
   const { name, phone, role, branch, is_active, permissions, password } = req.body;
+
+  // ── Optimistic Lock — concurrent edit protection ──
+  const clientUpdatedAt = req.body.updated_at;
+  if (clientUpdatedAt) {
+    const { data: current } = await supabase.from("users").select("updated_at").eq("id", req.params.id).single();
+    if (current && current.updated_at && new Date(current.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
+      return res.status(409).json({ error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — রিফ্রেশ করুন", code: "CONFLICT" });
+    }
+  }
+
   const update = {};
   if (name !== undefined) update.name = name;
   if (phone !== undefined) update.phone = phone;
@@ -47,6 +57,9 @@ router.patch("/:id", auth, asyncHandler(async (req, res) => {
   }
 
   if (Object.keys(update).length === 0) return res.status(400).json({ error: "কিছু পরিবর্তন করুন" });
+
+  // আপডেট timestamp যোগ
+  update.updated_at = new Date().toISOString();
 
   const { data, error } = await supabase.from("users")
     .update(update)

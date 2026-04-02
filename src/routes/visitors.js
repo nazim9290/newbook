@@ -123,6 +123,20 @@ const VISITOR_FIELD_MAP = {
   name_en: "name", date: "visit_date",
 };
 router.patch("/:id", checkPermission("visitors", "write"), asyncHandler(async (req, res) => {
+  // ── Optimistic Lock — concurrent edit protection ──
+  // Frontend updated_at পাঠালে check করো — অন্য কেউ এর মধ্যে পরিবর্তন করেছে কিনা
+  const { updated_at: clientUpdatedAt } = req.body;
+  if (clientUpdatedAt) {
+    const { data: current } = await supabase.from("visitors").select("updated_at").eq("id", req.params.id).single();
+    if (current && current.updated_at && new Date(current.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
+      return res.status(409).json({
+        error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — পেজ রিফ্রেশ করুন",
+        code: "CONFLICT",
+        server_updated_at: current.updated_at,
+      });
+    }
+  }
+
   // Frontend field names → DB column names convert
   const DATE_COLS = ["visit_date", "last_follow_up", "next_follow_up", "dob"];
   // Valid DB columns — এগুলোই শুধু update হবে, বাকি সব ignore
@@ -151,6 +165,9 @@ router.patch("/:id", checkPermission("visitors", "write"), asyncHandler(async (r
       }
     }
   }
+
+  // প্রতিটি save-এ updated_at নতুন করে সেট — পরবর্তী conflict check-এর জন্য
+  updates.updated_at = new Date().toISOString();
 
   const { data, error } = await supabase
     .from("visitors")

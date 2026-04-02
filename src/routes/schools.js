@@ -67,12 +67,29 @@ router.post("/", checkPermission("schools", "write"), asyncHandler(async (req, r
 
 // PATCH /api/schools/:id
 router.patch("/:id", checkPermission("schools", "write"), asyncHandler(async (req, res) => {
+  // ── Optimistic Lock — concurrent edit protection ──
+  // Frontend updated_at পাঠালে check করো — অন্য কেউ এর মধ্যে পরিবর্তন করেছে কিনা
+  const clientUpdatedAt = req.body.updated_at;
+  if (clientUpdatedAt) {
+    const { data: current } = await supabase.from("schools").select("updated_at").eq("id", req.params.id).single();
+    if (current && current.updated_at && new Date(current.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
+      return res.status(409).json({
+        error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — পেজ রিফ্রেশ করুন",
+        code: "CONFLICT",
+        server_updated_at: current.updated_at,
+      });
+    }
+  }
+
   const updates = {};
   for (const col of SCHOOL_COLS) {
     if (req.body[col] !== undefined) updates[col] = req.body[col];
   }
   const sanitized = sanitizeNumerics(updates, NUMERIC_COLS);
   if (req.body.has_dormitory !== undefined) sanitized.has_dormitory = !!req.body.has_dormitory;
+
+  // প্রতিটি save-এ updated_at নতুন করে সেট — পরবর্তী conflict check-এর জন্য
+  sanitized.updated_at = new Date().toISOString();
 
   const { data, error } = await supabase.from("schools").update(sanitized)
     .eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();

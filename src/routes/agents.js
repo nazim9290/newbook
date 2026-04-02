@@ -22,7 +22,24 @@ router.post("/", checkPermission("agents", "write"), asyncHandler(async (req, re
 }));
 
 router.patch("/:id", checkPermission("agents", "write"), asyncHandler(async (req, res) => {
-  const { data, error } = await supabase.from("agents").update(req.body).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
+  // ── Optimistic Lock — concurrent edit protection ──
+  // Frontend updated_at পাঠালে check করো — অন্য কেউ এর মধ্যে পরিবর্তন করেছে কিনা
+  const clientUpdatedAt = req.body.updated_at;
+  if (clientUpdatedAt) {
+    const { data: current } = await supabase.from("agents").select("updated_at").eq("id", req.params.id).single();
+    if (current && current.updated_at && new Date(current.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
+      return res.status(409).json({
+        error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — পেজ রিফ্রেশ করুন",
+        code: "CONFLICT",
+        server_updated_at: current.updated_at,
+      });
+    }
+  }
+
+  // প্রতিটি save-এ updated_at নতুন করে সেট — পরবর্তী conflict check-এর জন্য
+  const updates = { ...req.body, updated_at: new Date().toISOString() };
+
+  const { data, error } = await supabase.from("agents").update(updates).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data);
 }));

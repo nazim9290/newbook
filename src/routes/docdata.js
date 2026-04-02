@@ -51,7 +51,17 @@ router.post("/types", asyncHandler(async (req, res) => {
 
 // PATCH /api/docdata/types/:id — document type update
 router.patch("/types/:id", asyncHandler(async (req, res) => {
-  const { data, error } = await supabase.from("doc_types").update(req.body).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
+  // ── Optimistic Lock — concurrent edit protection ──
+  const clientUpdatedAt = req.body.updated_at;
+  if (clientUpdatedAt) {
+    const { data: current } = await supabase.from("doc_types").select("updated_at").eq("id", req.params.id).single();
+    if (current && current.updated_at && new Date(current.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
+      return res.status(409).json({ error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — রিফ্রেশ করুন", code: "CONFLICT" });
+    }
+  }
+
+  const updates = { ...req.body, updated_at: new Date().toISOString() };
+  const { data, error } = await supabase.from("doc_types").update(updates).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data);
 }));

@@ -86,6 +86,20 @@ router.post("/", checkPermission("inventory", "write"), asyncHandler(async (req,
 // PATCH /:id — item আপডেট (যেকোনো field)
 // ═══════════════════════════════════════════════════════
 router.patch("/:id", checkPermission("inventory", "write"), asyncHandler(async (req, res) => {
+  // ── Optimistic Lock — concurrent edit protection ──
+  // Frontend updated_at পাঠালে check করো — অন্য কেউ এর মধ্যে পরিবর্তন করেছে কিনা
+  const clientUpdatedAt = req.body.updated_at;
+  if (clientUpdatedAt) {
+    const { data: current } = await supabase.from("inventory").select("updated_at").eq("id", req.params.id).single();
+    if (current && current.updated_at && new Date(current.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
+      return res.status(409).json({
+        error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — পেজ রিফ্রেশ করুন",
+        code: "CONFLICT",
+        server_updated_at: current.updated_at,
+      });
+    }
+  }
+
   const fields = pickFields(req.body);
   if (Object.keys(fields).length <= 1) {
     // শুধু updated_at আছে — আসলে কোনো পরিবর্তন নেই
@@ -110,6 +124,20 @@ router.patch("/:id", checkPermission("inventory", "write"), asyncHandler(async (
 // PATCH /:id/condition — শুধু condition/status পরিবর্তন
 // ═══════════════════════════════════════════════════════
 router.patch("/:id/condition", checkPermission("inventory", "write"), asyncHandler(async (req, res) => {
+  // ── Optimistic Lock — concurrent edit protection ──
+  // Frontend updated_at পাঠালে check করো — অন্য কেউ এর মধ্যে পরিবর্তন করেছে কিনা
+  const clientUpdatedAt = req.body.updated_at;
+  if (clientUpdatedAt) {
+    const { data: current } = await supabase.from("inventory").select("updated_at").eq("id", req.params.id).single();
+    if (current && current.updated_at && new Date(current.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
+      return res.status(409).json({
+        error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — পেজ রিফ্রেশ করুন",
+        code: "CONFLICT",
+        server_updated_at: current.updated_at,
+      });
+    }
+  }
+
   const { condition } = req.body;
   if (!condition) {
     return res.status(400).json({ error: "condition দিতে হবে" });

@@ -37,7 +37,23 @@ router.post("/", checkPermission("tasks", "write"), asyncHandler(async (req, res
 
 // PATCH /api/tasks/:id — agency_id চেক সহ
 router.patch("/:id", checkPermission("tasks", "write"), asyncHandler(async (req, res) => {
-  const { data, error } = await supabase.from("tasks").update(req.body)
+  // ── Optimistic Lock — concurrent edit protection ──
+  // Frontend updated_at পাঠালে check করো — অন্য কেউ এর মধ্যে পরিবর্তন করেছে কিনা
+  const { updated_at: clientUpdatedAt } = req.body;
+  if (clientUpdatedAt) {
+    const { data: current } = await supabase.from("tasks").select("updated_at").eq("id", req.params.id).single();
+    if (current && current.updated_at && new Date(current.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
+      return res.status(409).json({
+        error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — পেজ রিফ্রেশ করুন",
+        code: "CONFLICT",
+        server_updated_at: current.updated_at,
+      });
+    }
+  }
+
+  // প্রতিটি save-এ updated_at নতুন করে সেট — পরবর্তী conflict check-এর জন্য
+  const payload = { ...req.body, updated_at: new Date().toISOString() };
+  const { data, error } = await supabase.from("tasks").update(payload)
     .eq("id", req.params.id)
     .eq("agency_id", req.user.agency_id)
     .select().single();
