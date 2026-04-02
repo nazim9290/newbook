@@ -15,13 +15,24 @@ router.use(auth);
 
 // ════════════════ DOC TYPES ════════════════
 
-// GET /api/docdata/types — সব document type
+// GET /api/docdata/types — সক্রিয় document types (frontend Documents, DocGen ইত্যাদির জন্য)
 router.get("/types", asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from("doc_types")
     .select("*")
     .eq("agency_id", req.user.agency_id)
     .eq("is_active", true)
+    .order("sort_order");
+  if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  res.json(data || []);
+}));
+
+// GET /api/docdata/types/all — সব document type (active + inactive) — Admin Settings-এর জন্য
+router.get("/types/all", asyncHandler(async (req, res) => {
+  const { data, error } = await supabase
+    .from("doc_types")
+    .select("*")
+    .eq("agency_id", req.user.agency_id)
     .order("sort_order");
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   res.json(data || []);
