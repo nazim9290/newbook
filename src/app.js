@@ -125,6 +125,10 @@ app.use((req, res, next) => {
   next();
 });
 
+// ── Static Files — uploads ফোল্ডার serve (avatars, logos, documents) ──
+const path = require("path");
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+
 // ── Health Check — সার্ভার ও ডাটাবেস চালু আছে কিনা check করতে ──
 const { pool } = require("./lib/supabase");
 app.get("/api/health", async (req, res) => {
