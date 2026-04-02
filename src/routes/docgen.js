@@ -157,13 +157,25 @@ router.post("/generate", asyncHandler(async (req, res) => {
     const { data: tmpl } = await supabase.from("doc_templates").select("*").eq("id", template_id).eq("agency_id", req.user.agency_id).single();
     if (!tmpl) return res.status(404).json({ error: "Template পাওয়া যায়নি" });
 
-    // Get student with related data
+    // Get student — আলাদা query (join issue avoid)
     const { data: student } = await supabase
       .from("students")
-      .select("*, student_education(*), student_jp_exams(*), student_family(*), sponsors(*)")
+      .select("*")
       .eq("id", student_id)
       .single();
     if (!student) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
+
+    // Related data — আলাদা queries
+    const [eduRes, examRes, famRes, sponsorRes] = await Promise.all([
+      supabase.from("student_education").select("*").eq("student_id", student_id),
+      supabase.from("student_jp_exams").select("*").eq("student_id", student_id),
+      supabase.from("student_family").select("*").eq("student_id", student_id),
+      supabase.from("sponsors").select("*").eq("student_id", student_id),
+    ]);
+    student.student_education = eduRes.data || [];
+    student.student_jp_exams = examRes.data || [];
+    student.student_family = famRes.data || [];
+    student.sponsors = sponsorRes.data || [];
 
     // Decrypt sensitive fields
     const { decryptSensitiveFields } = require("../lib/crypto");
