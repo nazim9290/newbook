@@ -377,63 +377,76 @@ const DOC_CONFIGS = [
     id: "birth_certificate",
     detect: /birth\s*(registration|certificate)|জন্ম\s*নিবন্ধন/i,
     fields: [
-      // 17-digit registration number
-      { key: "birth_reg_no", patterns: [/\b(\d{17})\b/, /Registration\s*Number\s*[\s\S]*?(\d{17})/i] },
-      { key: "register_no", patterns: [/Register\s*No[:\s]*(\d[\s\d]*\d)/i], type: "number" },
-      // Name — OCR-এ "Name\n: Sifat Sheikh" multi-line হতে পারে
+      // 17-digit registration number — BR Number বা Birth Registration Number
+      { key: "birth_reg_no", patterns: [/\b(\d{17})\b/, /BR\s*Number[\s\n]*[:\-]?\s*(\d[\s\d|]*\d)/i] },
+      { key: "register_no", patterns: [/Register\s*No\.?[\s\n]*[:\-]?\s*(\d+)/i], type: "number" },
+
+      // Name — Format 1: "Name\n: Sifat Sheikh", Format 2: "Name: Arpita Roy"
       { key: "name_en", patterns: [
-        /Name\s*[:\-]\s*([A-Z][A-Za-z\s.]+?)(?:\n|মাতা|Mother|পিতা|Father|$)/im,
-        /Name\s*\n\s*[:\-]?\s*([A-Z][A-Za-z\s.]+?)(?:\n|মাতা|Mother|$)/im,
-        /Name\s*[:\-]?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/im,
+        /(?:^|\n)\s*Name[\s\n]*[:\-]\s*([A-Z][A-Za-z\s.]+?)(?:\n|মাতা|Mother|পিতা|Father|Date|$)/im,
+        /Name[\s\n]*[:\-]?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/im,
       ] },
-      // DOB — "Date of Birth\n: 10/07/2001" multi-line
+
+      // DOB — "10/07/2001" or box digits "2 1 1 0 2 0 0 5"
       { key: "dob", patterns: [
         /Date\s*of\s*Birth[\s\n]*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
         /Birth[\s\n]*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
       ], type: "date" },
       { key: "dob_in_word", patterns: [
-        /[Ii]n\s*[Ww]ord[\s\n]*[:\-]?\s*([A-Z][A-Za-z\s,]+?(?:Thousand|Hundred|One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)[A-Za-z\s]*)/i,
+        /[Ii]n\s*[Ww]ord[\s\n]*[:\-]?\s*([A-Z][A-Za-z\s,]+?(?:Thousand|Hundred|One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)\s*[A-Za-z\s]*)/i,
       ] },
-      { key: "sex", patterns: [/Sex\s*[:\-]?\s*(Male|Female|Other)/i] },
-      // Place of Birth — "Place of Birth\n: Munshiganj"
+      { key: "sex", patterns: [/Sex[\s\n]*[:\-]?\s*(Male|Female|Other)/i] },
+
+      // Place of Birth
       { key: "birth_place", patterns: [
-        /Place\s*of\s*Birth[\s\n]*[:\-]?\s*([A-Za-z][A-Za-z\s,.\-]+?)(?:\n|স্থায়ী|Permanent|$)/i,
+        /Place\s*of\s*Birth[\s\n]*[:\-]?\s*([A-Za-z][A-Za-z\s,.\-]+?)(?:\n|স্থায়ী|Permanent|Order|$)/i,
       ] },
-      // Father — "Father\n: Karim Sheikh" or same line
+
+      // Father — Format 1: "Father\n: Karim Sheikh", Format 2: "Father's Name: Khagen Roy"
       { key: "father_name", patterns: [
+        /Father['']?s?\s*Name[\s\n]*[:\-]?\s*([A-Z][A-Za-z\s.]+?)(?:\n|Father|BRN|NID|$)/im,
         /Father[\s\n]*[:\-]?\s*([A-Z][A-Za-z\s.]+?)(?:\n|Nationality|জাতীয়তা|পিতার|$)/im,
-        /Father[\s\n]*[:\-]?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/im,
       ] },
       { key: "father_nationality", patterns: [
         /Father['']?s?\s*Nationality[\s\n]*[:\-]?\s*(Bangladeshi|[A-Z][a-z]+)/i,
-        /Nationality[\s\n]*[:\-]?\s*(Bangladeshi)/i,
       ] },
-      // Mother — "Mother\nAyesha Begum" (sometimes no colon)
+
+      // Mother — Format 1: "Mother\nAyesha Begum", Format 2: "Mother's Name: Kanchan Roy"
       { key: "mother_name", patterns: [
+        /Mother['']?s?\s*Name[\s\n]*[:\-]?\s*([A-Z][A-Za-z\s.]+?)(?:\n|Mother|BRN|NID|$)/im,
         /Mother[\s\n]*[:\-]?\s*([A-Z][A-Za-z\s.]+?)(?:\n|Nationality|জাতীয়তা|মাতার|$)/im,
-        /Mother[\s\n]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/im,
       ] },
       { key: "mother_nationality", patterns: [
         /Mother['']?s?\s*Nationality[\s\n]*[:\-]?\s*(Bangladeshi|[A-Z][a-z]+)/i,
       ] },
-      // Permanent Address — multi-line "Permanent\nAddress\n: Middle Mohakali..."
+
+      // Permanent Address
       { key: "permanent_address", patterns: [
-        /Permanent[\s\n]*Address[\s\n]*[:\-]?\s*([A-Za-z][A-Za-z\d\s,.\-\/\n]+?)(?:\n\n|\nDate|\nThis|$)/i,
+        /Permanent[\s\n]*Address[\s\n]*[:\-]?\s*([A-Za-z][A-Za-z\d\s,.\-\/\n]+?)(?:\n\n|\nDate|\nThis|\nFather|$)/i,
       ] },
-      // Dates — "Date of Registration\n27/01/2015" multi-line
+
+      // Dates
       { key: "reg_date", patterns: [
         /Date\s*of\s*Registration[\s\n]*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
       ], type: "date" },
       { key: "issue_date", patterns: [
         /Date\s*of\s*Issu(?:e|ance)[\s\n]*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
       ], type: "date" },
-      // Authority — Union/Paurashava/City Corp
+
+      // Authority
       { key: "paurashava_name", patterns: [/([\w\s]+?)\s*Paurashava/i] },
       { key: "zone", patterns: [/Zone[:\-\s]*(\d+)/i] },
       { key: "city_corp_name", patterns: [/([\w\s]+?)\s*City\s*Corporation/i] },
       { key: "union_name", patterns: [/([\w\s]+?)\s*Union\s*Parishad/i] },
-      { key: "upazila_name", patterns: [/(?:Upazila|Sadar)[,:\-\s]*([\w\s]+?)(?:,|\n|$)/i] },
-      { key: "district_name", patterns: [/(?:Dist(?:rict)?|Munshiganj|Dhaka|Chittagong|Sylhet|Barishal|Rajshahi|Rangpur|Khulna|Mymensingh)[:\-.\s]*([\w\s]*?)(?:,|\n|$)/i] },
+      { key: "upazila_name", patterns: [/Upazila[\s\n]*[:\-]?\s*([\w\s]+?)(?:,|\n|$)/i] },
+      { key: "district_name", patterns: [/District[\s\n]*[:\-]?\s*([\w\s]+?)(?:,|\n|$)/i] },
+
+      // Format 2 specific — BRN, NID, Order of Child
+      { key: "father_brn", patterns: [/Father['']?s?\s*BRN[\s\n]*[:\-]?\s*(\d+)/i] },
+      { key: "father_nid", patterns: [/Father['']?s?\s*NID[\s\n]*[:\-]?\s*(\d+)/i] },
+      { key: "mother_brn", patterns: [/Mother['']?s?\s*BRN[\s\n]*[:\-]?\s*(\d+)/i] },
+      { key: "mother_nid", patterns: [/Mother['']?s?\s*NID[\s\n]*[:\-]?\s*(\d+)/i] },
+      { key: "order_of_child", patterns: [/Order\s*of\s*Child[\s\n]*[:\-]?\s*(\d+)/i] },
     ],
     postProcess: (fields, text) => {
       // Template type auto-detect
