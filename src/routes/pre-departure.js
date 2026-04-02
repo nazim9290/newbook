@@ -178,6 +178,42 @@ router.post("/:studentId", auth, asyncHandler(async (req, res) => {
   }, { onConflict: "student_id" }).select().single();
 
   if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // ── Auto-sync: Pre-Departure milestone → Student pipeline status আপডেট ──
+  // Pre-Departure মডিউলে milestone complete হলে student-এর status auto-update
+  const studentUpdate = {};
+  if (body.arrival_confirmed) {
+    // গন্তব্যে পৌঁছানো কনফার্ম হলে ARRIVED
+    studentUpdate.status = "ARRIVED";
+  } else if (body.visa_status === "granted") {
+    // ভিসা পেয়েছে
+    studentUpdate.status = "VISA_GRANTED";
+  } else if (body.vfs_docs_submitted && body.vfs_appointment_date) {
+    // VFS appointment ও ডক জমা হয়েছে
+    studentUpdate.status = "VISA_APPLIED";
+  } else if (body.tuition_remitted && body.health_status === "done") {
+    // টিউশন remitted + Health check done
+    studentUpdate.status = "TUITION_REMITTED";
+  } else if (body.health_status === "done") {
+    // Health check সম্পন্ন
+    studentUpdate.status = "HEALTH_CHECK";
+  }
+
+  // Student status update — যদি milestone-ভিত্তিক পরিবর্তন হয়
+  if (studentUpdate.status) {
+    try {
+      const pool = supabase.pool;
+      await pool.query(
+        `UPDATE students SET status = $1, updated_at = NOW() WHERE id = $2 AND agency_id = $3`,
+        [studentUpdate.status, studentId, agencyId]
+      );
+      console.log(`[Auto-Sync] Student ${studentId} → ${studentUpdate.status}`);
+    } catch (syncErr) {
+      // auto-sync ব্যর্থ হলেও pre-departure save সফল, তাই error throw করবো না
+      console.error("[Auto-Sync Error]", syncErr.message);
+    }
+  }
+
   res.json(data);
 }));
 
