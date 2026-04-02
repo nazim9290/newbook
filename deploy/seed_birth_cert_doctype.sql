@@ -102,6 +102,16 @@ SELECT
       "type": "text"
     },
     {
+      "key": "father_brn",
+      "label_en": "Father''s BRN",
+      "type": "text"
+    },
+    {
+      "key": "father_nid",
+      "label_en": "Father''s NID",
+      "type": "text"
+    },
+    {
       "key": "mother_name",
       "label": "মাতার নাম",
       "label_en": "Mother''s Name",
@@ -112,6 +122,21 @@ SELECT
       "key": "mother_nationality",
       "label": "মাতার জাতীয়তা",
       "label_en": "Mother''s Nationality",
+      "type": "text"
+    },
+    {
+      "key": "mother_brn",
+      "label_en": "Mother''s BRN",
+      "type": "text"
+    },
+    {
+      "key": "mother_nid",
+      "label_en": "Mother''s NID",
+      "type": "text"
+    },
+    {
+      "key": "order_of_child",
+      "label_en": "Order of Child",
       "type": "text"
     },
 
