@@ -67,7 +67,8 @@ router.get("/", auth, asyncHandler(async (req, res) => {
       -- Korea-specific columns
       pd.admission_topik_status, pd.admission_topik_date, pd.admission_topik_score,
       pd.d4_visa_status, pd.d4_visa_date,
-      pd.arc_card_status, pd.arc_card_date
+      pd.arc_card_status, pd.arc_card_date,
+      pd.updated_at AS pd_updated_at
     FROM students s
     LEFT JOIN pre_departure pd ON pd.student_id = s.id
     WHERE s.agency_id = $1
@@ -109,6 +110,7 @@ router.get("/", auth, asyncHandler(async (req, res) => {
     admissionTopik: { status: r.admission_topik_status || "pending", date: r.admission_topik_date, score: r.admission_topik_score || "" },
     d4Visa: { status: r.d4_visa_status || "pending", date: r.d4_visa_date },
     arcCard: { status: r.arc_card_status || "pending", date: r.arc_card_date },
+    pd_updated_at: r.pd_updated_at || null, // optimistic lock — frontend-এ save-এর সময় পাঠাবে
   }));
 
   // ── KPI — overdue deadline গণনা সহ ──
@@ -134,6 +136,24 @@ router.post("/:studentId", auth, asyncHandler(async (req, res) => {
   const agencyId = req.user.agency_id;
   const studentId = req.params.studentId;
   const body = req.body;
+
+  // ── Optimistic Lock — concurrent edit protection ──
+  // Frontend updated_at পাঠালে check করো — অন্য কেউ এর মধ্যে পরিবর্তন করেছে কিনা
+  const { updated_at: clientUpdatedAt } = body;
+  if (clientUpdatedAt) {
+    const { data: existing } = await supabase.from("pre_departure")
+      .select("updated_at")
+      .eq("student_id", studentId)
+      .eq("agency_id", agencyId)
+      .single();
+    if (existing && existing.updated_at && new Date(existing.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
+      return res.status(409).json({
+        error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — রিফ্রেশ করুন",
+        code: "CONFLICT",
+        server_updated_at: existing.updated_at,
+      });
+    }
+  }
 
   // Upsert — আছে তো update, নাহলে insert
   const { data, error } = await supabase.from("pre_departure").upsert({
@@ -175,6 +195,7 @@ router.post("/:studentId", auth, asyncHandler(async (req, res) => {
     d4_visa_date: body.d4_visa_date || null,
     arc_card_status: body.arc_card_status || "pending",
     arc_card_date: body.arc_card_date || null,
+    updated_at: new Date().toISOString(), // প্রতিটি save-এ timestamp আপডেট — optimistic lock
   }, { onConflict: "student_id" }).select().single();
 
   if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }

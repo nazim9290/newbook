@@ -92,8 +92,25 @@ router.get("/student/:studentId/:docTypeId", asyncHandler(async (req, res) => {
 
 // POST /api/docdata/save — document data save/update (upsert)
 router.post("/save", asyncHandler(async (req, res) => {
-  const { student_id, doc_type_id, field_data, notes } = req.body;
+  const { student_id, doc_type_id, field_data, notes, updated_at: clientUpdatedAt } = req.body;
   if (!student_id || !doc_type_id) return res.status(400).json({ error: "student_id ও doc_type_id দিন" });
+
+  // ── Optimistic Lock — concurrent edit protection ──
+  // Frontend updated_at পাঠালে check করো — অন্য কেউ এর মধ্যে পরিবর্তন করেছে কিনা
+  if (clientUpdatedAt) {
+    const { data: existing } = await supabase.from("document_data")
+      .select("updated_at")
+      .eq("student_id", student_id)
+      .eq("doc_type_id", doc_type_id)
+      .single();
+    if (existing && existing.updated_at && new Date(existing.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
+      return res.status(409).json({
+        error: "এই ডকুমেন্ট অন্য কেউ পরিবর্তন করেছে — রিফ্রেশ করুন",
+        code: "CONFLICT",
+        server_updated_at: existing.updated_at,
+      });
+    }
+  }
 
   const record = {
     agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001",
@@ -101,6 +118,7 @@ router.post("/save", asyncHandler(async (req, res) => {
     doc_type_id,
     field_data: typeof field_data === "string" ? field_data : JSON.stringify(field_data || {}),
     status: "completed",
+    updated_at: new Date().toISOString(), // প্রতিটি save-এ timestamp আপডেট
   };
 
   // notes column থাকলে record-এ যোগ করো (DB migration পরে কাজ করবে)

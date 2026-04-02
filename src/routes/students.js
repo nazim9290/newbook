@@ -136,6 +136,20 @@ router.post("/", checkPermission("students", "write"), asyncHandler(async (req, 
 router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (req, res) => {
   const body = req.body;
 
+  // ── Optimistic Lock — concurrent edit protection ──
+  // Frontend updated_at পাঠালে check করো — অন্য কেউ এর মধ্যে পরিবর্তন করেছে কিনা
+  const { updated_at: clientUpdatedAt } = body;
+  if (clientUpdatedAt) {
+    const { data: current } = await supabase.from("students").select("updated_at").eq("id", req.params.id).single();
+    if (current && current.updated_at && new Date(current.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
+      return res.status(409).json({
+        error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — পেজ রিফ্রেশ করুন",
+        code: "CONFLICT",
+        server_updated_at: current.updated_at,
+      });
+    }
+  }
+
   // শুধু valid DB columns রাখো
   const updates = {};
   for (const col of STUDENT_COLUMNS) {
@@ -144,6 +158,9 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
   if (body.passport) updates.passport_number = body.passport;
   if (body.father) updates.father_name = body.father;
   if (body.mother) updates.mother_name = body.mother;
+
+  // প্রতিটি save-এ updated_at নতুন করে সেট — পরবর্তী conflict check-এর জন্য
+  updates.updated_at = new Date().toISOString();
 
   const encrypted = encryptSensitiveFields(updates);
 
