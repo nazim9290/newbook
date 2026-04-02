@@ -372,37 +372,75 @@ const DOC_CONFIGS = [
     confidence: ["name_en"],
   },
 
-  // ── 6. Birth Certificate ──
+  // ── 6. Birth Certificate — Bengali+English mixed OCR handle ──
   {
     id: "birth_certificate",
-    detect: /birth\s*(registration|certificate)/i,
+    detect: /birth\s*(registration|certificate)|জন্ম\s*নিবন্ধন/i,
     fields: [
-      { key: "birth_reg_no", patterns: [/\b(\d{17})\b/] },
+      // 17-digit registration number
+      { key: "birth_reg_no", patterns: [/\b(\d{17})\b/, /Registration\s*Number\s*[\s\S]*?(\d{17})/i] },
       { key: "register_no", patterns: [/Register\s*No[:\s]*(\d[\s\d]*\d)/i], type: "number" },
-      { key: "name_en", patterns: [/(?:^|\n)\s*Name\s*[:\-]?\s*([A-Za-z\s.]+?)(?:\n|$)/im] },
-      { key: "dob", patterns: [/Date\s*of\s*Birth\s*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i], type: "date" },
-      { key: "dob_in_word", patterns: [/(?:In\s*Word|in\s*words?)\s*[:\-]?\s*([A-Za-z\s,]+?(?:Thousand|Hundred)[A-Za-z\s]*)/i] },
+      // Name — "Name : Sifat Sheikh" or "Name\nSifat Sheikh" — Bengali text আগে থাকতে পারে
+      { key: "name_en", patterns: [
+        /Name\s*[:\-]\s*([A-Z][A-Za-z\s.]+?)(?:\n|মাতা|Mother|পিতা|Father|$)/im,
+        /Name\s*[:\-]?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/im,
+      ] },
+      // DOB — multiple formats
+      { key: "dob", patterns: [
+        /Date\s*of\s*Birth\s*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
+        /Birth\s*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
+      ], type: "date" },
+      { key: "dob_in_word", patterns: [
+        /[Ii]n\s*[Ww]ord\s*[:\-]?\s*([A-Z][A-Za-z\s,]+?(?:Thousand|Hundred|One|Two|Three|Four|Five)[A-Za-z\s]*)/i,
+      ] },
       { key: "sex", patterns: [/Sex\s*[:\-]?\s*(Male|Female|Other)/i] },
-      { key: "birth_place", patterns: [/Place\s*of\s*Birth\s*[:\-]?\s*([A-Za-z\s,.-]+?)(?:\n|$)/i] },
-      { key: "father_name", patterns: [/Father\s*[:\-]?\s*([A-Za-z\s.]+?)(?:\n|$)/i] },
-      { key: "father_nationality", patterns: [/Father['']?s?\s*Nationality\s*[:\-]?\s*([A-Za-z]+)/i] },
-      { key: "mother_name", patterns: [/Mother\s*[:\-]?\s*([A-Za-z\s.]+?)(?:\n|$)/i] },
-      { key: "mother_nationality", patterns: [/Mother['']?s?\s*Nationality\s*[:\-]?\s*([A-Za-z]+)/i] },
-      { key: "permanent_address", patterns: [/Permanent\s*Address\s*[:\-]?\s*([A-Za-z\d\s,.\-\/]+?)(?:\n|Date|$)/i] },
+      // Place of Birth — mixed text
+      { key: "birth_place", patterns: [
+        /Place\s*of\s*Birth\s*[:\-]?\s*([A-Za-z][A-Za-z\s,.\-]+?)(?:\n|স্থায়ী|Permanent|$)/i,
+      ] },
+      // Father — "Father : Karim Sheikh" — Bengali label আগে থাকতে পারে
+      { key: "father_name", patterns: [
+        /Father\s*[:\-]\s*([A-Z][A-Za-z\s.]+?)(?:\n|Nationality|জাতীয়তা|$)/im,
+        /Father\s*[:\-]?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/im,
+      ] },
+      { key: "father_nationality", patterns: [
+        /(?:Father['']?s?\s*)?Nationality\s*[:\-]?\s*(Bangladeshi|[A-Z][a-z]+)/i,
+      ] },
+      // Mother
+      { key: "mother_name", patterns: [
+        /Mother\s*[:\-]\s*([A-Z][A-Za-z\s.]+?)(?:\n|Nationality|জাতীয়তা|$)/im,
+        /Mother\s*[:\-]?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/im,
+      ] },
+      { key: "mother_nationality", patterns: [
+        /Mother['']?s?\s*Nationality\s*[:\-]?\s*(Bangladeshi|[A-Z][a-z]+)/i,
+      ] },
+      // Permanent Address — multi-word with commas
+      { key: "permanent_address", patterns: [
+        /Permanent\s*Address\s*[:\-]?\s*([A-Za-z][A-Za-z\d\s,.\-\/]+?)(?:\n\n|\nDate|\nThis|$)/ims,
+      ] },
+      // Dates
       { key: "reg_date", patterns: [/Date\s*of\s*Registration\s*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i], type: "date" },
       { key: "issue_date", patterns: [/Date\s*of\s*Issu(?:e|ance)\s*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i], type: "date" },
-      { key: "paurashava_name", patterns: [/(\w+)\s*Paurashava/i] },
+      // Authority — Union/Paurashava/City Corp
+      { key: "paurashava_name", patterns: [/([\w\s]+?)\s*Paurashava/i] },
       { key: "zone", patterns: [/Zone[:\-\s]*(\d+)/i] },
-      { key: "city_corp_name", patterns: [/([\w\s]+)\s*(?:City\s*Corporation)/i] },
-      { key: "union_name", patterns: [/([\w\s]+)\s*Union\s*Parishad/i] },
-      { key: "upazila_name", patterns: [/(?:Upazila|Upozila)[:\-\s]*([\w\s]+?)(?:,|\n|$)/i] },
-      { key: "district_name", patterns: [/Dist(?:rict)?[:\-.\s]*([\w\s]+?)(?:,|\n|$)/i] },
+      { key: "city_corp_name", patterns: [/([\w\s]+?)\s*City\s*Corporation/i] },
+      { key: "union_name", patterns: [/([\w\s]+?)\s*Union\s*Parishad/i] },
+      { key: "upazila_name", patterns: [/(?:Upazila|Sadar)[,:\-\s]*([\w\s]+?)(?:,|\n|$)/i] },
+      { key: "district_name", patterns: [/(?:Dist(?:rict)?|Munshiganj|Dhaka|Chittagong|Sylhet|Barishal|Rajshahi|Rangpur|Khulna|Mymensingh)[:\-.\s]*([\w\s]*?)(?:,|\n|$)/i] },
     ],
     postProcess: (fields, text) => {
       // Template type auto-detect
       if (/paurashava/i.test(text)) fields.template_type = "Paurashava";
       else if (/city corporation/i.test(text)) fields.template_type = "City Corporation";
       else if (/union parishad/i.test(text)) fields.template_type = "Union Parishad";
+
+      // Header থেকে location extract — "Munshiganj Sadar, Munshiganj"
+      const headerLocMatch = text.match(/(?:Union\s*Parishad|Paurashava|City\s*Corporation)\s*\n\s*([A-Za-z\s]+?)(?:,\s*([A-Za-z\s]+?))?(?:\n|$)/i);
+      if (headerLocMatch) {
+        if (!fields.upazila_name && headerLocMatch[1]) fields.upazila_name = headerLocMatch[1].trim();
+        if (!fields.district_name && headerLocMatch[2]) fields.district_name = headerLocMatch[2].trim();
+      }
     },
     confidence: ["birth_reg_no", "name_en", "dob", "father_name", "mother_name"],
   },
