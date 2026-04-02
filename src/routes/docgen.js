@@ -241,20 +241,37 @@ router.post("/generate", asyncHandler(async (req, res) => {
     const templateName = (tmpl.name || "document").replace(/[^a-zA-Z0-9_\- ]/g, "");
 
     if (format === "pdf") {
-      // PDF: convert docx content to HTML then PDF
+      // PDF: replaced .docx → LibreOffice headless → PDF
       try {
-        const htmlPdf = require("html-pdf-node");
-        // Simple approach: extract text and generate PDF
-        const textContent = generateHTMLFromFlat(flat, tmpl.placeholders || []);
-        const file = { content: textContent };
-        const pdfBuffer = await htmlPdf.generatePdf(file, { format: "A4", margin: { top: "20mm", bottom: "20mm", left: "15mm", right: "15mm" } });
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename="${templateName}_${studentName}.pdf"`);
-        res.send(pdfBuffer);
-        return;
+        const { execSync } = require("child_process");
+        const tmpDir = path.join(__dirname, "../../uploads/ocr-temp");
+        if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+
+        // Temp .docx file save
+        const tmpDocx = path.join(tmpDir, `gen_${Date.now()}.docx`);
+        fs.writeFileSync(tmpDocx, outputBuffer);
+
+        // LibreOffice convert → PDF
+        execSync(`libreoffice --headless --convert-to pdf --outdir "${tmpDir}" "${tmpDocx}"`, { timeout: 30000 });
+        const tmpPdf = tmpDocx.replace(".docx", ".pdf");
+
+        if (fs.existsSync(tmpPdf)) {
+          const pdfBuffer = fs.readFileSync(tmpPdf);
+          res.setHeader("Content-Type", "application/pdf");
+          res.setHeader("Content-Disposition", `attachment; filename="${templateName}_${studentName}.pdf"`);
+          res.send(pdfBuffer);
+          // Cleanup
+          try { fs.unlinkSync(tmpDocx); fs.unlinkSync(tmpPdf); } catch {}
+          return;
+        }
+        throw new Error("PDF conversion failed");
       } catch (pdfErr) {
-        // PDF fail → send docx instead
-        console.error("PDF generation failed:", pdfErr.message);
+        console.error("[DocGen] PDF error:", pdfErr.message);
+        // Fallback: send .docx instead
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        res.setHeader("Content-Disposition", `attachment; filename="${templateName}_${studentName}.docx"`);
+        res.send(outputBuffer);
+        return;
       }
     }
 
