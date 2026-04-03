@@ -300,6 +300,7 @@ router.post("/:id/exam-result", checkPermission("students", "write"), asyncHandl
   if (!exam_type) return res.status(400).json({ error: "পরীক্ষার ধরন দিন" });
   const { data, error } = await supabase.from("student_jp_exams").insert({
     student_id: req.params.id,
+    agency_id: req.user.agency_id,
     exam_type, level, score: score || null, result: result || null,
     exam_date: exam_date || null,
   }).select().single();
@@ -311,7 +312,8 @@ router.post("/:id/exam-result", checkPermission("students", "write"), asyncHandl
 router.post("/:id/education", checkPermission("students", "write"), asyncHandler(async (req, res) => {
   const { level, school_name, year, board, gpa, group_name } = req.body;
   const { data, error } = await supabase.from("student_education").insert({
-    student_id: req.params.id, level, school_name, passing_year: year, board, gpa, group_name,
+    student_id: req.params.id, agency_id: req.user.agency_id,
+    level, school_name, passing_year: year, board, gpa, group_name,
   }).select().single();
   if (error) return res.status(400).json({ error: error.message });
   res.status(201).json(data);
@@ -344,7 +346,7 @@ router.post("/:id/fee-items", checkPermission("students", "write"), asyncHandler
 
   const { data, error } = await supabase
     .from("fee_items")
-    .insert({ student_id: req.params.id, category, label: label || category, amount: Number(amount) })
+    .insert({ student_id: req.params.id, agency_id: req.user.agency_id, category, label: label || category, amount: Number(amount) })
     .select()
     .single();
 
