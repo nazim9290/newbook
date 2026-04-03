@@ -243,25 +243,36 @@ router.post("/generate", asyncHandler(async (req, res) => {
       .single();
     if (!student) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
 
-    // Related data — আলাদা queries
-    const [eduRes, examRes, famRes, sponsorRes] = await Promise.all([
+    // Related data — আলাদা queries (student relations + system context)
+    const [eduRes, examRes, famRes, sponsorRes, agencyRes, schoolRes, batchRes, branchRes] = await Promise.all([
       supabase.from("student_education").select("*").eq("student_id", student_id),
       supabase.from("student_jp_exams").select("*").eq("student_id", student_id),
       supabase.from("student_family").select("*").eq("student_id", student_id),
       supabase.from("sponsors").select("*").eq("student_id", student_id),
+      // সিস্টেম ভ্যারিয়েবল: এজেন্সি, স্কুল, ব্যাচ, ব্রাঞ্চ fetch
+      supabase.from("agencies").select("*").eq("id", req.user.agency_id).single(),
+      student.school_id ? supabase.from("schools").select("*").eq("id", student.school_id).single() : { data: null },
+      student.batch_id ? supabase.from("batches").select("*").eq("id", student.batch_id).single() : { data: null },
+      student.branch ? supabase.from("branches").select("*").eq("agency_id", req.user.agency_id).eq("name", student.branch).single() : { data: null },
     ]);
     student.student_education = eduRes.data || [];
     student.student_jp_exams = examRes.data || [];
     student.student_family = famRes.data || [];
     student.sponsors = sponsorRes.data || [];
 
+    // সিস্টেম context — agency, school, batch, branch
+    const agency = agencyRes.data || {};
+    const school = schoolRes.data || {};
+    const batch = batchRes.data || {};
+    const branch = branchRes.data || {};
+
     // Decrypt sensitive fields
     const { decryptSensitiveFields } = require("../lib/crypto");
     const decrypted = decryptSensitiveFields(student);
 
-    // Flatten student data + document-specific data merge
-    // doc_data (user input) priority, তারপর student profile
-    const flat = { ...flattenForDoc(decrypted), ...doc_data };
+    // Flatten student data + system context + document-specific data merge
+    // doc_data (user input) priority, তারপর student profile + system context
+    const flat = { ...flattenForDoc(decrypted, { agency, school, batch, branch }), ...doc_data };
 
     // Auto-generate issuing_authority — template_type অনুযায়ী
     if (!flat.issuing_authority) {
@@ -412,24 +423,52 @@ router.delete("/templates/:id", asyncHandler(async (req, res) => {
 // HELPERS
 // ================================================================
 
-// Student data flatten (same logic as excel)
-function flattenForDoc(student) {
+// Student data flatten — nested data কে flat key-value-তে convert
+// context: { agency, school, batch, branch } — sys_* ভ্যারিয়েবলের জন্য
+function flattenForDoc(student, context = {}) {
   const flat = { ...student };
 
-  // Education
-  const edu = student.student_education || [];
+  // ═══════════════════════════════════════════════════
+  // Education — SSC, HSC, Honours/Bachelor
+  // ═══════════════════════════════════════════════════
+  const edu = student.student_education || student.education || [];
   const ssc = edu.find(e => (e.level || "").toLowerCase().includes("ssc")) || {};
   const hsc = edu.find(e => (e.level || "").toLowerCase().includes("hsc")) || {};
-  flat.edu_ssc_school = ssc.school_name || ""; flat.edu_ssc_year = ssc.year || "";
-  flat.edu_hsc_school = hsc.school_name || ""; flat.edu_hsc_year = hsc.year || "";
+  const honours = edu.find(e => (e.level || "").toLowerCase().includes("bachelor") || (e.level || "").toLowerCase().includes("hon")) || {};
 
+  flat.edu_ssc_school = ssc.school_name || "";
+  flat.edu_ssc_year = ssc.passing_year || ssc.year || "";
+  flat.edu_ssc_board = ssc.board || "";
+  flat.edu_ssc_gpa = ssc.gpa || "";
+  flat.edu_ssc_subject = ssc.group_name || ssc.subject_group || ssc.department || "";
+
+  flat.edu_hsc_school = hsc.school_name || "";
+  flat.edu_hsc_year = hsc.passing_year || hsc.year || "";
+  flat.edu_hsc_board = hsc.board || "";
+  flat.edu_hsc_gpa = hsc.gpa || "";
+  flat.edu_hsc_subject = hsc.group_name || hsc.subject_group || hsc.department || "";
+
+  flat.edu_honours_school = honours.school_name || "";
+  flat.edu_honours_year = honours.passing_year || honours.year || "";
+  flat.edu_honours_gpa = honours.gpa || "";
+  flat.edu_honours_subject = honours.group_name || honours.subject_group || honours.department || "";
+
+  // ═══════════════════════════════════════════════════
   // JP Exams
+  // ═══════════════════════════════════════════════════
   const jp = (student.student_jp_exams || [])[0] || {};
   flat.jp_level = jp.level || ""; flat.jp_score = jp.score || "";
+  flat.jp_exam_type = jp.exam_type || ""; flat.jp_result = jp.result || "";
+  flat.jp_exam_date = jp.exam_date || "";
 
+  // ═══════════════════════════════════════════════════
   // Sponsor — মূল তথ্য + 経費支弁書 extended fields
-  const sp = (student.sponsors || [])[0] || {};
-  flat.sponsor_name = sp.name || ""; flat.sponsor_phone = sp.phone || "";
+  // ═══════════════════════════════════════════════════
+  const { decryptSensitiveFields } = require("../lib/crypto");
+  const spRaw = (student.sponsors || [])[0] || {};
+  const sp = decryptSensitiveFields(spRaw);
+  flat.sponsor_name = sp.name || ""; flat.sponsor_name_en = sp.name_en || sp.name || "";
+  flat.sponsor_phone = sp.phone || "";
   flat.sponsor_address = sp.address || ""; flat.sponsor_relationship = sp.relationship || "";
   // Extended sponsor fields — 経費支弁書 (Financial Sponsorship Document)
   flat.sponsor_statement = sp.statement || "";
@@ -443,22 +482,71 @@ function flattenForDoc(student) {
   flat.tuition_jpy = sp.tuition_jpy || student.tuition_jpy || "";
   flat.monthly_living = sp.living_jpy_monthly || student.monthly_living || "";
   flat.exchange_rate = sp.exchange_rate || "";
+  // Sponsor yearly income/tax — ৩ বছরের তথ্য
+  flat.sponsor_income_y1 = sp.annual_income_y1 || "";
+  flat.sponsor_income_y2 = sp.annual_income_y2 || "";
+  flat.sponsor_income_y3 = sp.annual_income_y3 || "";
+  flat.sponsor_tax_y1 = sp.tax_paid_y1 || sp.tax_y1 || "";
+  flat.sponsor_tax_y2 = sp.tax_paid_y2 || sp.tax_y2 || "";
+  flat.sponsor_tax_y3 = sp.tax_paid_y3 || sp.tax_y3 || "";
 
-  // Family
+  // ═══════════════════════════════════════════════════
+  // Family — বাবা, মা
+  // ═══════════════════════════════════════════════════
   const fam = student.student_family || [];
   const father = fam.find(f => f.relation === "father") || {};
   const mother = fam.find(f => f.relation === "mother") || {};
   flat.father_dob = father.dob || ""; flat.father_occupation = father.occupation || "";
   flat.mother_dob = mother.dob || ""; flat.mother_occupation = mother.occupation || "";
 
-  // Age
+  // ═══════════════════════════════════════════════════
+  // Age — DOB থেকে বয়স
+  // ═══════════════════════════════════════════════════
   if (flat.dob) {
     flat.age = String(Math.floor((Date.now() - new Date(flat.dob)) / (365.25 * 24 * 60 * 60 * 1000)));
   }
 
-  // Today's date
-  flat.today = new Date().toISOString().slice(0, 10);
-  flat.today_jp = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" });
+  // ═══════════════════════════════════════════════════
+  // Today's date — বিভিন্ন format
+  // ═══════════════════════════════════════════════════
+  const today = new Date();
+  flat.today = today.toISOString().slice(0, 10);
+  flat.today_jp = today.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" });
+
+  // ═══════════════════════════════════════════════════
+  // System Variables — agency, branch, school, batch
+  // context থেকে DB data ব্যবহার করে sys_* prefix-এ set
+  // ═══════════════════════════════════════════════════
+  const { agency = {}, school = {}, batch = {}, branch = {} } = context;
+
+  // এজেন্সি
+  flat.sys_agency_name = agency.name || "";
+  flat.sys_agency_name_bn = agency.name_bn || "";
+  flat.sys_agency_address = agency.address || "";
+  flat.sys_agency_phone = agency.phone || "";
+  flat.sys_agency_email = agency.email || "";
+
+  // ব্রাঞ্চ — fallback: student.branch (name string)
+  flat.sys_branch_name = branch.name || student.branch || "";
+  flat.sys_branch_address = branch.address || branch.address_bn || "";
+  flat.sys_branch_phone = branch.phone || "";
+  flat.sys_branch_manager = branch.manager || "";
+
+  // স্কুল — fallback: student.school (name string)
+  flat.sys_school_name = school.name_en || student.school || "";
+  flat.sys_school_name_jp = school.name_jp || "";
+  flat.sys_school_address = school.address || "";
+
+  // ব্যাচ — fallback: student.batch (name string)
+  flat.sys_batch_name = batch.name || student.batch || "";
+  flat.sys_batch_start = batch.start_date || "";
+  flat.sys_batch_end = batch.end_date || "";
+  flat.sys_batch_teacher = batch.teacher || "";
+  flat.sys_batch_schedule = batch.schedule || "";
+
+  // sys_today — today alias with sys_ prefix
+  flat.sys_today = flat.today;
+  flat.sys_today_jp = flat.today_jp;
 
   return flat;
 }
