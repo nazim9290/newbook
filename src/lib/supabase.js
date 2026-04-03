@@ -20,7 +20,7 @@ const fs = require("fs");
 // ── PostgreSQL Connection Pool ──
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 50,
+  max: 100,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
   statement_timeout: 30000,  // ৩০ সেকেন্ডের বেশি query বন্ধ হবে
