@@ -183,15 +183,30 @@ router.patch("/:id", asyncHandler(async (req, res) => {
 }));
 
 // POST /api/batches/:id/enroll — enroll student
+// batch_students junction table + student.batch ফিল্ড sync
 router.post("/:id/enroll", asyncHandler(async (req, res) => {
   const { student_id } = req.body;
   if (!student_id) return res.status(400).json({ error: "student_id দিন" });
+
+  // ব্যাচ তথ্য আনো — নাম sync করতে
+  const { data: batch } = await supabase.from("batches").select("id, name").eq("id", req.params.id).single();
+  if (!batch) return res.status(404).json({ error: "Batch পাওয়া যায়নি" });
+
+  // batch_students junction table-এ enroll
   const { data, error } = await supabase
     .from("batch_students")
-    .insert({ batch_id: req.params.id, student_id })
+    .insert({ batch_id: req.params.id, student_id, agency_id: req.user.agency_id })
     .select()
     .single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // ── student.batch ও batch_id sync — ব্যাচ নাম ও ID student record-এ সেট ──
+  await supabase.from("students")
+    .update({ batch: batch.name, batch_id: batch.id })
+    .eq("id", student_id)
+    .eq("agency_id", req.user.agency_id)
+    .catch(() => {});
+
   res.status(201).json(data);
 }));
 
