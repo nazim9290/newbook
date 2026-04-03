@@ -347,6 +347,17 @@ router.delete("/:id/education/:eduId", checkPermission("students", "write"), asy
   res.json({ success: true });
 }));
 
+// PATCH /api/students/:id/jp-exams/:examId — পরীক্ষার ফলাফল আপডেট
+router.patch("/:id/jp-exams/:examId", checkPermission("students", "write"), asyncHandler(async (req, res) => {
+  const { exam_type, level, score, result, exam_date } = req.body;
+  const { data, error } = await supabase.from("student_jp_exams").update({
+    exam_type, level, score: score || null, result: result || null,
+    exam_date: exam_date || null, updated_at: new Date().toISOString(),
+  }).eq("id", req.params.examId).select().single();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+}));
+
 // DELETE /api/students/:id/jp-exams/:examId — পরীক্ষার ফলাফল মুছুন
 router.delete("/:id/jp-exams/:examId", checkPermission("students", "write"), asyncHandler(async (req, res) => {
   await supabase.from("student_jp_exams").delete().eq("id", req.params.examId);
