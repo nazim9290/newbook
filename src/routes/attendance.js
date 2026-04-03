@@ -3,6 +3,7 @@ const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { getBranchFilter } = require("../lib/branchFilter");
+const cache = require("../lib/cache");
 
 const router = express.Router();
 router.use(auth);
@@ -60,6 +61,10 @@ router.post("/save", asyncHandler(async (req, res) => {
     .select();
 
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি" });
+
+  // Cache invalidate — attendance সেভ হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   res.json({ saved: data.length });
 }));
 

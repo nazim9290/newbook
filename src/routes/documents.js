@@ -5,6 +5,8 @@ const asyncHandler = require("../lib/asyncHandler");
 const { encrypt, decrypt } = require("../lib/crypto");
 const { checkPermission } = require("../middleware/checkPermission");
 const { getBranchFilter } = require("../lib/branchFilter");
+const cache = require("../lib/cache");
+const { logActivity } = require("../lib/activityLog");
 
 const router = express.Router();
 router.use(auth);
@@ -56,6 +58,10 @@ router.post("/", checkPermission("documents", "write"), asyncHandler(async (req,
   const record = { ...req.body, agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001" };
   const { data, error } = await supabase.from("documents").insert(record).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Cache invalidate — নতুন ডকুমেন্ট তৈরি হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   res.status(201).json(data);
 }));
 
@@ -69,6 +75,10 @@ router.patch("/:id", checkPermission("documents", "write"), asyncHandler(async (
     .select()
     .single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Cache invalidate — ডকুমেন্ট আপডেট হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   res.json(data);
 }));
 
@@ -105,6 +115,10 @@ router.post("/:id/fields", checkPermission("documents", "write"), asyncHandler(a
     .upsert(rows, { onConflict: "document_id,field_name" })
     .select();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Cache invalidate — ডকুমেন্ট fields আপডেট হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   res.json(data);
 }));
 

@@ -19,6 +19,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const { getBranchFilter } = require("../lib/branchFilter");
+const cache = require("../lib/cache");
 
 // ── Multer config — pre-departure document upload ──
 const pdUploadDir = path.join(process.env.UPLOAD_DIR || path.join(__dirname, "../../uploads"), "pre-departure");
@@ -225,6 +226,9 @@ router.post("/:studentId", auth, asyncHandler(async (req, res) => {
     studentUpdate.status = "HEALTH_CHECK";
   }
 
+  // Cache invalidate — pre-departure data আপডেট হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   // Student status update — যদি milestone-ভিত্তিক পরিবর্তন হয়
   if (studentUpdate.status) {
     try {
@@ -302,6 +306,9 @@ router.post("/:studentId/upload", auth, pdUpload.single("file"), asyncHandler(as
     );
   }
 
+  // Cache invalidate — ফাইল আপলোড হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   res.json({ files: updatedFiles, uploaded: fileEntry });
 }));
 
@@ -356,6 +363,9 @@ router.delete("/:studentId/files/:fileId", auth, asyncHandler(async (req, res) =
     `UPDATE pre_departure SET files = $1 WHERE id = $2`,
     [JSON.stringify(updatedFiles), rows[0].id]
   );
+
+  // Cache invalidate — ফাইল মুছে ফেলা হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
 
   res.json({ files: updatedFiles });
 }));

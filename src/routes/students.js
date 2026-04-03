@@ -258,6 +258,37 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
     }
   }
 
+  // ── Batch sync — batch_id পরিবর্তন হলে batch_students junction table আপডেট ──
+  if (body.batch_id && data.batch_id) {
+    try {
+      // পুরনো enrollment থাকলে মুছে নতুনটা যোগ
+      await supabase.from("batch_students").delete().eq("student_id", req.params.id);
+      await supabase.from("batch_students").insert({
+        batch_id: data.batch_id, student_id: req.params.id, agency_id: req.user.agency_id,
+      });
+      // batch name sync — batch_id থেকে name আনো
+      if (!body.batch) {
+        const { data: batchInfo } = await supabase.from("batches").select("name").eq("id", data.batch_id).single();
+        if (batchInfo) await supabase.from("students").update({ batch: batchInfo.name }).eq("id", req.params.id);
+      }
+    } catch (e) { console.error("[Batch Sync]", e.message); }
+  }
+
+  // ── School sync — school name থেকে school_id, বা school_id থেকে name sync ──
+  if (body.school && !body.school_id) {
+    // নাম দিয়ে school_id খুঁজো
+    try {
+      const { data: sch } = await supabase.from("schools").select("id").eq("name_en", body.school).eq("agency_id", req.user.agency_id).single();
+      if (sch) await supabase.from("students").update({ school_id: sch.id }).eq("id", req.params.id);
+    } catch {}
+  } else if (body.school_id && !body.school) {
+    // ID দিয়ে name খুঁজো
+    try {
+      const { data: sch } = await supabase.from("schools").select("name_en").eq("id", body.school_id).single();
+      if (sch) await supabase.from("students").update({ school: sch.name_en }).eq("id", req.params.id);
+    } catch {}
+  }
+
   // Activity log — student আপডেট (status change সহ)
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "students",
     recordId: req.params.id, description: `স্টুডেন্ট আপডেট: ${data.name_en || req.params.id}${body.status ? ` → ${body.status}` : ""}`, ip: req.ip }).catch(() => {});

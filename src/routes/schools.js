@@ -4,6 +4,7 @@ const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { checkPermission } = require("../middleware/checkPermission");
 const { logActivity } = require("../lib/activityLog");
+const cache = require("../lib/cache");
 const { dbError, sanitizeNumerics } = require("../lib/dbError");
 
 const router = express.Router();
@@ -58,6 +59,9 @@ router.post("/", checkPermission("schools", "write"), asyncHandler(async (req, r
   const { data, error } = await supabase.from("schools").insert(sanitized).select().single();
   if (error) return dbError(res, error, "schools.create");
 
+  // Cache invalidate — নতুন স্কুল তৈরি হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   // Activity log — নতুন স্কুল তৈরি
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "schools",
     recordId: data.id, description: `নতুন স্কুল: ${data.name_en || ""}`, ip: req.ip }).catch(() => {});
@@ -95,6 +99,9 @@ router.patch("/:id", checkPermission("schools", "write"), asyncHandler(async (re
     .eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) return dbError(res, error, "schools.update");
 
+  // Cache invalidate — স্কুল আপডেট হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   // Activity log — স্কুল আপডেট
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "schools",
     recordId: req.params.id, description: `স্কুল আপডেট: ${data.name_en || req.params.id}`, ip: req.ip }).catch(() => {});
@@ -107,6 +114,9 @@ router.delete("/:id", checkPermission("schools", "delete"), asyncHandler(async (
   const { error } = await supabase.from("schools").delete()
     .eq("id", req.params.id).eq("agency_id", req.user.agency_id);
   if (error) return dbError(res, error, "schools.delete");
+
+  // Cache invalidate — স্কুল মুছে ফেলা হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
 
   // Activity log — স্কুল মুছে ফেলা
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "delete", module: "schools",
@@ -132,6 +142,10 @@ router.post("/:id/submissions", checkPermission("schools", "write"), asyncHandle
     .insert({ ...req.body, school_id: req.params.id, agency_id: req.user.agency_id })
     .select().single();
   if (error) return dbError(res, error, "schools.addSubmission");
+
+  // Cache invalidate — submission যোগ হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   res.status(201).json(data);
 }));
 
@@ -140,6 +154,10 @@ router.patch("/submissions/:subId", checkPermission("schools", "write"), asyncHa
   const { data, error } = await supabase.from("submissions").update(req.body)
     .eq("id", req.params.subId).eq("agency_id", req.user.agency_id).select().single();
   if (error) return dbError(res, error, "schools.updateSubmission");
+
+  // Cache invalidate — submission আপডেট হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   res.json(data);
 }));
 
@@ -202,6 +220,10 @@ router.post("/:id/interview-template", checkPermission("schools", "write"), temp
     .update({ interview_template: safeName, interview_template_name: origName, interview_template_mapping: null })
     .eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) return dbError(res, error, "schools.uploadTemplate");
+
+  // Cache invalidate — টেমপ্লেট আপলোড হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   res.json({
     template: safeName, template_name: origName,
     header_row: bestRow, row_headers: headers, col_labels: colLabels,
@@ -218,6 +240,10 @@ router.delete("/:id/interview-template", checkPermission("schools", "write"), as
   }
   await supabase.from("schools").update({ interview_template: null, interview_template_name: null, interview_template_mapping: null })
     .eq("id", req.params.id).eq("agency_id", req.user.agency_id);
+
+  // Cache invalidate — টেমপ্লেট মুছে ফেলা হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   res.json({ success: true });
 }));
 
@@ -229,6 +255,10 @@ router.post("/:id/interview-mapping", checkPermission("schools", "write"), async
     .update({ interview_template_mapping: JSON.stringify({ format: format || "row", header_row: header_row || 3, mapping }) })
     .eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) return dbError(res, error, "schools.saveMapping");
+
+  // Cache invalidate — ম্যাপিং সেভ হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   res.json({ success: true, message: "ম্যাপিং সেভ হয়েছে" });
 }));
 

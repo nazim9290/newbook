@@ -12,6 +12,7 @@ const express = require("express");
 const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
+const cache = require("../lib/cache");
 const router = express.Router();
 router.use(auth);
 
@@ -42,6 +43,10 @@ router.post("/", asyncHandler(async (req, res) => {
   };
   const { data, error } = await supabase.from("submissions").insert(record).select("*, students(name_en), schools(name_en)").single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Cache invalidate — নতুন submission তৈরি হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   res.status(201).json(data);
 }));
 
@@ -59,6 +64,10 @@ router.patch("/:id", asyncHandler(async (req, res) => {
   const updates = { ...req.body, updated_at: new Date().toISOString() };
   const { data, error } = await supabase.from("submissions").update(updates).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select("*, students(name_en), schools(name_en)").single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Cache invalidate — submission আপডেট হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   res.json(data);
 }));
 
@@ -81,6 +90,10 @@ router.post("/:id/feedback", asyncHandler(async (req, res) => {
   }).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
 
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Cache invalidate — feedback যোগ হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   // Response-এ feedback parsed array হিসেবে পাঠাও
   if (data) data.feedback = typeof data.feedback === "string" ? JSON.parse(data.feedback) : (data.feedback || []);
   res.json(data);
@@ -102,6 +115,10 @@ router.patch("/:id/feedback/:index/resolve", asyncHandler(async (req, res) => {
   }).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
 
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Cache invalidate — feedback resolve হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   if (data) data.feedback = typeof data.feedback === "string" ? JSON.parse(data.feedback) : (data.feedback || []);
   res.json(data);
 }));
@@ -110,6 +127,10 @@ router.patch("/:id/feedback/:index/resolve", asyncHandler(async (req, res) => {
 router.delete("/:id", asyncHandler(async (req, res) => {
   const { error } = await supabase.from("submissions").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Cache invalidate — submission মুছে ফেলা হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   res.json({ success: true });
 }));
 

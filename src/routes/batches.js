@@ -3,6 +3,7 @@ const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { logActivity } = require("../lib/activityLog");
+const cache = require("../lib/cache");
 
 const router = express.Router();
 router.use(auth);
@@ -137,6 +138,9 @@ router.post("/", asyncHandler(async (req, res) => {
     if (updated) Object.assign(data, updated);
   }
 
+  // Cache invalidate — নতুন ব্যাচ তৈরি হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   // Activity log — নতুন ব্যাচ তৈরি
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "batches",
     recordId: data.id, description: `নতুন ব্যাচ: ${data.name || ""}`, ip: req.ip }).catch(() => {});
@@ -175,6 +179,9 @@ router.patch("/:id", asyncHandler(async (req, res) => {
     if (updated) Object.assign(data, updated);
   }
 
+  // Cache invalidate — ব্যাচ আপডেট হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   // Activity log — ব্যাচ আপডেট
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "batches",
     recordId: req.params.id, description: `ব্যাচ আপডেট: ${data.name || req.params.id}`, ip: req.ip }).catch(() => {});
@@ -207,6 +214,13 @@ router.post("/:id/enroll", asyncHandler(async (req, res) => {
     .eq("agency_id", req.user.agency_id)
     .catch(() => {});
 
+  // Cache invalidate — enrollment হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
+  // Activity log — ব্যাচে student enroll
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "batches",
+    recordId: data.id, description: `Batch enrollment: ${student_id} → ${batch.name || req.params.id}`, ip: req.ip }).catch(() => {});
+
   res.status(201).json(data);
 }));
 
@@ -221,6 +235,10 @@ router.post("/:id/tests", asyncHandler(async (req, res) => {
     scores: scores ? JSON.stringify(scores) : "{}",
   }).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Cache invalidate — ক্লাস টেস্ট যোগ হলে cache মুছে দাও
+  cache.invalidate(req.user.agency_id);
+
   res.status(201).json(data);
 }));
 

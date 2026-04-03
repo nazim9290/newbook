@@ -236,6 +236,24 @@ router.post("/:id/convert", checkPermission("visitors", "write"), asyncHandler(a
 
   if (sErr) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
+  // ── Education transfer — visitor education array → student_education table-এ ──
+  try {
+    const eduArr = typeof visitor.education === "string" ? JSON.parse(visitor.education) : visitor.education;
+    if (Array.isArray(eduArr) && eduArr.length > 0) {
+      const eduRows = eduArr
+        .filter(e => e.level || e.institution || e.year)
+        .map(e => ({
+          student_id: studentId, agency_id: agencyId,
+          level: e.level || "", school_name: e.institution || e.board || "",
+          year: e.year || null, board: e.board || "", gpa: e.gpa || "",
+          group_name: e.subject || e.group || "",
+        }));
+      if (eduRows.length > 0) {
+        await supabase.from("student_education").insert(eduRows);
+      }
+    }
+  } catch (eduErr) { console.error("[Edu Transfer]", eduErr.message); }
+
   // JP Exam data transfer — visitor-এ JP cert থাকলে student_jp_exams-এ যোগ
   if (visitor.has_jp_cert && visitor.jp_exam_type) {
     await supabase.from("student_jp_exams").insert({
