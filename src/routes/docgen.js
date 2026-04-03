@@ -244,11 +244,14 @@ router.post("/generate", asyncHandler(async (req, res) => {
     if (!student) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
 
     // Related data — আলাদা queries (student relations + system context)
-    const [eduRes, examRes, famRes, sponsorRes, agencyRes, schoolRes, batchRes, branchRes] = await Promise.all([
+    const [eduRes, examRes, famRes, sponsorRes, workRes, jpStudyRes, agencyRes, schoolRes, batchRes, branchRes] = await Promise.all([
       supabase.from("student_education").select("*").eq("student_id", student_id),
       supabase.from("student_jp_exams").select("*").eq("student_id", student_id),
       supabase.from("student_family").select("*").eq("student_id", student_id),
       supabase.from("sponsors").select("*").eq("student_id", student_id),
+      // Resume tables — 職歴, 日本語学習歴
+      supabase.from("student_work_experience").select("*").eq("student_id", student_id),
+      supabase.from("student_jp_study").select("*").eq("student_id", student_id),
       // সিস্টেম ভ্যারিয়েবল: এজেন্সি, স্কুল, ব্যাচ, ব্রাঞ্চ fetch
       // School: student-এর school_id → fallback school name search
       supabase.from("agencies").select("*").eq("id", req.user.agency_id).single(),
@@ -264,6 +267,9 @@ router.post("/generate", asyncHandler(async (req, res) => {
     student.student_jp_exams = examRes.data || [];
     student.student_family = famRes.data || [];
     student.sponsors = sponsorRes.data || [];
+    // Resume tables — 職歴, 日本語学習歴
+    student.work_experience = workRes.data || [];
+    student.jp_study = jpStudyRes.data || [];
 
     // সিস্টেম context — agency, school, batch, branch
     const agency = agencyRes.data || {};
@@ -496,6 +502,90 @@ function flattenForDoc(student, context = {}) {
   flat.sponsor_tax_y3 = sp.tax_paid_y3 || sp.tax_y3 || "";
 
   // ═══════════════════════════════════════════════════
+  // New Student fields — 入学願書 (Application for Admission)
+  // birth_place, occupation, reason_for_study, future_plan, study_subject
+  // ═══════════════════════════════════════════════════
+  flat.birth_place = student.birth_place || "";
+  flat.occupation = student.occupation || "Student";
+  flat.reason_for_study = student.reason_for_study || "";
+  flat.future_plan = student.future_plan || "";
+  flat.study_subject = student.study_subject || "";
+
+  // ═══════════════════════════════════════════════════
+  // Detailed Education — elementary, junior_high, high_school (入学/卒業 + 所在地)
+  // school_type / level で各段階を特定してflat key化
+  // ═══════════════════════════════════════════════════
+  const eduAll = student.student_education || student.education || [];
+  const elementary = eduAll.find(e => (e.school_type || e.level || "").toLowerCase().includes("elem")) || {};
+  const juniorHigh = eduAll.find(e => (e.school_type || e.level || "").toLowerCase().includes("junior")) || {};
+  const highSchool = eduAll.find(e => (e.school_type || e.level || "").toLowerCase().includes("high") || (e.level || "").toLowerCase().includes("ssc")) || {};
+  const technical = eduAll.find(e => (e.school_type || e.level || "").toLowerCase().includes("tech")) || {};
+  const university = eduAll.find(e => (e.school_type || e.level || "").toLowerCase().includes("univ") || (e.level || "").toLowerCase().includes("bach")) || {};
+
+  flat.edu_elementary_school = elementary.school_name || "";
+  flat.edu_elementary_address = elementary.address || "";
+  flat.edu_elementary_entrance = elementary.entrance_year || "";
+  flat.edu_elementary_graduation = elementary.passing_year || elementary.year || "";
+
+  flat.edu_junior_school = juniorHigh.school_name || "";
+  flat.edu_junior_address = juniorHigh.address || "";
+  flat.edu_junior_entrance = juniorHigh.entrance_year || "";
+  flat.edu_junior_graduation = juniorHigh.passing_year || juniorHigh.year || "";
+
+  flat.edu_high_school = highSchool.school_name || "";
+  flat.edu_high_address = highSchool.address || "";
+  flat.edu_high_entrance = highSchool.entrance_year || "";
+  flat.edu_high_graduation = highSchool.passing_year || highSchool.year || "";
+
+  flat.edu_technical_school = technical.school_name || "";
+  flat.edu_technical_address = technical.address || "";
+  flat.edu_technical_entrance = technical.entrance_year || "";
+  flat.edu_technical_graduation = technical.passing_year || technical.year || "";
+
+  flat.edu_university_school = university.school_name || "";
+  flat.edu_university_address = university.address || "";
+  flat.edu_university_entrance = university.entrance_year || "";
+  flat.edu_university_graduation = university.passing_year || university.year || "";
+
+  // ═══════════════════════════════════════════════════
+  // Work Experience — 職歴 (Vocational experience)
+  // ═══════════════════════════════════════════════════
+  const workAll = student.work_experience || [];
+  workAll.forEach((w, i) => {
+    flat[`work${i+1}_company`] = w.company_name || "";
+    flat[`work${i+1}_address`] = w.address || "";
+    flat[`work${i+1}_start`] = w.start_date || "";
+    flat[`work${i+1}_end`] = w.end_date || "";
+    flat[`work${i+1}_position`] = w.position || "";
+  });
+  // Shorthand — first entry without index (backward compat)
+  const work = workAll[0] || {};
+  flat.work_company = work.company_name || "";
+  flat.work_address = work.address || "";
+  flat.work_start = work.start_date || "";
+  flat.work_end = work.end_date || "";
+  flat.work_position = work.position || "";
+
+  // ═══════════════════════════════════════════════════
+  // JP Study History — 日本語学習歴 (Japanese educational history)
+  // ═══════════════════════════════════════════════════
+  const jpStudyAll = student.jp_study || [];
+  jpStudyAll.forEach((js, i) => {
+    flat[`jp_study${i+1}_institution`] = js.institution || "";
+    flat[`jp_study${i+1}_address`] = js.address || "";
+    flat[`jp_study${i+1}_from`] = js.period_from || "";
+    flat[`jp_study${i+1}_to`] = js.period_to || "";
+    flat[`jp_study${i+1}_hours`] = js.total_hours || "";
+  });
+  // Shorthand — first entry without index
+  const jpStudy = jpStudyAll[0] || {};
+  flat.jp_study_institution = jpStudy.institution || "";
+  flat.jp_study_address = jpStudy.address || "";
+  flat.jp_study_from = jpStudy.period_from || "";
+  flat.jp_study_to = jpStudy.period_to || "";
+  flat.jp_study_hours = jpStudy.total_hours || "";
+
+  // ═══════════════════════════════════════════════════
   // Family — বাবা, মা
   // ═══════════════════════════════════════════════════
   const fam = student.student_family || [];
@@ -503,6 +593,21 @@ function flattenForDoc(student, context = {}) {
   const mother = fam.find(f => f.relation === "mother") || {};
   flat.father_dob = father.dob || ""; flat.father_occupation = father.occupation || "";
   flat.mother_dob = mother.dob || ""; flat.mother_occupation = mother.occupation || "";
+  // Family addresses — প্রতিটি সদস্যের আলাদা ঠিকানা (入学願書 format)
+  fam.forEach((m, i) => {
+    flat[`family${i+1}_name`] = m.name || m.name_en || "";
+    flat[`family${i+1}_relation`] = m.relation || "";
+    flat[`family${i+1}_dob`] = m.dob || "";
+    flat[`family${i+1}_occupation`] = m.occupation || "";
+    flat[`family${i+1}_address`] = m.address || "";
+  });
+
+  // ═══════════════════════════════════════════════════
+  // Extended Sponsor — 入学願書 additional fields
+  // ═══════════════════════════════════════════════════
+  flat.sponsor_dob = sp.dob || "";
+  flat.sponsor_company_phone = sp.company_phone || "";
+  flat.sponsor_company_address = sp.company_address || "";
 
   // ═══════════════════════════════════════════════════
   // Age — DOB থেকে বয়স

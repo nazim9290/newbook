@@ -60,13 +60,17 @@ router.get("/:id", checkPermission("students", "read"), asyncHandler(async (req,
 
   // Related data — আলাদা query (JOIN error এড়ানোর জন্য)
   const sid = req.params.id;
-  const [eduRes, examRes, famRes, sponsorRes, payRes, docRes] = await Promise.all([
+  const [eduRes, examRes, famRes, sponsorRes, payRes, docRes, workRes, jpStudyRes] = await Promise.all([
     supabase.from("student_education").select("*").eq("student_id", sid),
     supabase.from("student_jp_exams").select("*").eq("student_id", sid),
     supabase.from("student_family").select("*").eq("student_id", sid),
     supabase.from("sponsors").select("*").eq("student_id", sid).single(),
     supabase.from("payments").select("*").eq("student_id", sid).order("date", { ascending: false }),
     supabase.from("documents").select("*").eq("student_id", sid),
+    // 職歴 (Work Experience) — Resume fields
+    supabase.from("student_work_experience").select("*").eq("student_id", sid),
+    // 日本語学習歴 (JP Study History) — Resume fields
+    supabase.from("student_jp_study").select("*").eq("student_id", sid),
   ]);
 
   const decrypted = decryptSensitiveFields(student);
@@ -77,6 +81,9 @@ router.get("/:id", checkPermission("students", "read"), asyncHandler(async (req,
   decrypted.sponsor = sponsorRes.data ? decryptSensitiveFields(sponsorRes.data) : null;
   decrypted.payments = payRes.data || [];
   decrypted.documents = docRes.data || [];
+  // Resume related tables — 職歴, 日本語学習歴
+  decrypted.work_experience = workRes.data || [];
+  decrypted.jp_study = jpStudyRes.data || [];
 
   res.json(decrypted);
 }));
@@ -91,6 +98,8 @@ const STUDENT_COLUMNS = [
   "mother_name", "mother_name_en", "status", "country", "school_id", "batch_id",
   "intake", "visa_type", "source", "agent_id", "referral_info", "student_type",
   "counselor", "branch", "gdrive_folder_url", "photo_url", "internal_notes",
+  // Resume fields — Excel入学願書 support
+  "birth_place", "occupation", "reason_for_study", "future_plan", "study_subject",
 ];
 
 router.post("/", checkPermission("students", "write"), asyncHandler(async (req, res) => {
@@ -181,13 +190,15 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
       // sponsors table-এর valid columns — বাকি সব ignore
       const SPONSOR_COLS = [
         "name", "name_en", "relationship", "phone", "address", "nid",
-        "company_name", "company_address", "trade_license", "tin",
+        "company_name", "company_address", "company_phone", "trade_license", "tin",
         "annual_income_y1", "annual_income_y2", "annual_income_y3",
         "tax_y1", "tax_y2", "tax_y3",
         "tuition_jpy", "living_jpy_monthly", "payment_method", "exchange_rate",
         "fund_formation", "notes",
         // 経費支弁書 fields
         "statement", "payment_to_student", "payment_to_school", "sign_date",
+        // Resume fields — 入学願書 support
+        "dob",
       ];
       const sponsorRecord = { student_id: req.params.id };
       for (const col of SPONSOR_COLS) {
@@ -308,21 +319,24 @@ router.post("/:id/exam-result", checkPermission("students", "write"), asyncHandl
   res.status(201).json(data);
 }));
 
-// ── Education CRUD — শিক্ষাগত তথ্য ──
+// ── Education CRUD — শিক্ষাগত তথ্য (+ entrance_year, address, school_type for Resume) ──
 router.post("/:id/education", checkPermission("students", "write"), asyncHandler(async (req, res) => {
-  const { level, school_name, year, board, gpa, group_name } = req.body;
+  const { level, school_name, year, board, gpa, group_name, entrance_year, address, school_type } = req.body;
   const { data, error } = await supabase.from("student_education").insert({
     student_id: req.params.id, agency_id: req.user.agency_id,
     level, school_name, passing_year: year, board, gpa, group_name,
+    entrance_year: entrance_year || "", address: address || "", school_type: school_type || "",
   }).select().single();
   if (error) return res.status(400).json({ error: error.message });
   res.status(201).json(data);
 }));
 
 router.patch("/:id/education/:eduId", checkPermission("students", "write"), asyncHandler(async (req, res) => {
-  const { level, school_name, year, board, gpa, group_name } = req.body;
+  const { level, school_name, year, board, gpa, group_name, entrance_year, address, school_type } = req.body;
   const { data, error } = await supabase.from("student_education").update({
-    level, school_name, passing_year: year, board, gpa, group_name, updated_at: new Date().toISOString(),
+    level, school_name, passing_year: year, board, gpa, group_name,
+    entrance_year: entrance_year || "", address: address || "", school_type: school_type || "",
+    updated_at: new Date().toISOString(),
   }).eq("id", req.params.eduId).select().single();
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
@@ -336,6 +350,42 @@ router.delete("/:id/education/:eduId", checkPermission("students", "write"), asy
 // DELETE /api/students/:id/jp-exams/:examId — পরীক্ষার ফলাফল মুছুন
 router.delete("/:id/jp-exams/:examId", checkPermission("students", "write"), asyncHandler(async (req, res) => {
   await supabase.from("student_jp_exams").delete().eq("id", req.params.examId);
+  res.json({ success: true });
+}));
+
+// ── Work Experience CRUD — 職歴 (Resume support) ──
+// POST /api/students/:id/work-experience — নতুন কর্ম অভিজ্ঞতা যোগ
+router.post("/:id/work-experience", checkPermission("students", "write"), asyncHandler(async (req, res) => {
+  const { company_name, address, start_date, end_date, position } = req.body;
+  const { data, error } = await supabase.from("student_work_experience").insert({
+    student_id: req.params.id, agency_id: req.user.agency_id,
+    company_name, address, start_date, end_date, position,
+  }).select().single();
+  if (error) return res.status(400).json({ error: error.message });
+  res.status(201).json(data);
+}));
+
+// DELETE /api/students/:id/work-experience/:weId — কর্ম অভিজ্ঞতা মুছুন
+router.delete("/:id/work-experience/:weId", checkPermission("students", "write"), asyncHandler(async (req, res) => {
+  await supabase.from("student_work_experience").delete().eq("id", req.params.weId);
+  res.json({ success: true });
+}));
+
+// ── JP Study History CRUD — 日本語学習歴 (Resume support) ──
+// POST /api/students/:id/jp-study — নতুন জাপানি ভাষা শিক্ষা ইতিহাস যোগ
+router.post("/:id/jp-study", checkPermission("students", "write"), asyncHandler(async (req, res) => {
+  const { institution, address, period_from, period_to, total_hours } = req.body;
+  const { data, error } = await supabase.from("student_jp_study").insert({
+    student_id: req.params.id, agency_id: req.user.agency_id,
+    institution, address, period_from, period_to, total_hours,
+  }).select().single();
+  if (error) return res.status(400).json({ error: error.message });
+  res.status(201).json(data);
+}));
+
+// DELETE /api/students/:id/jp-study/:jsId — জাপানি ভাষা শিক্ষা ইতিহাস মুছুন
+router.delete("/:id/jp-study/:jsId", checkPermission("students", "write"), asyncHandler(async (req, res) => {
+  await supabase.from("student_jp_study").delete().eq("id", req.params.jsId);
   res.json({ success: true });
 }));
 
