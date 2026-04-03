@@ -672,6 +672,14 @@ function flattenForDoc(student, context = {}) {
   flat.sys_batch_teacher = batch.teacher || "";
   flat.sys_batch_schedule = batch.schedule || "";
 
+  // ব্যাচ শিডিউল — ক্লাসের দিন, সময়, ঘণ্টা (auto-calculated)
+  flat.sys_batch_class_days = (batch.class_days || []).join(", ");
+  flat.sys_batch_class_time = batch.class_time || "";
+  flat.sys_batch_hours_per_day = batch.class_hours_per_day || "";
+  flat.sys_batch_weekly_hours = batch.weekly_hours || "";
+  flat.sys_batch_total_classes = batch.total_classes || "";
+  flat.sys_batch_total_hours = batch.total_hours || "";
+
   // sys_today — today alias with sys_ prefix
   flat.sys_today = flat.today;
   flat.sys_today_jp = flat.today_jp;
