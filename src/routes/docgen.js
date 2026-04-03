@@ -522,30 +522,36 @@ function flattenForDoc(student, context = {}) {
   const technical = eduAll.find(e => (e.school_type || e.level || "").toLowerCase().includes("tech")) || {};
   const university = eduAll.find(e => (e.school_type || e.level || "").toLowerCase().includes("univ") || (e.level || "").toLowerCase().includes("bach")) || {};
 
-  flat.edu_elementary_school = elementary.school_name || "";
-  flat.edu_elementary_address = elementary.address || "";
-  flat.edu_elementary_entrance = elementary.entrance_year || "";
-  flat.edu_elementary_graduation = elementary.passing_year || elementary.year || "";
+  // Education helper — YYYY-MM format থেকে year, month আলাদা + duration calculate
+  const eduFlat = (prefix, rec) => {
+    const entrance = rec.entrance_year || "";
+    const graduation = rec.passing_year || rec.year || "";
+    flat[`${prefix}_school`] = rec.school_name || "";
+    flat[`${prefix}_address`] = rec.address || "";
+    flat[`${prefix}_entrance`] = entrance;
+    flat[`${prefix}_graduation`] = graduation;
+    // Sub-parts: "2009-01" → year=2009, month=1
+    if (entrance.includes("-")) {
+      const [ey, em] = entrance.split("-");
+      flat[`${prefix}_entrance_year`] = ey || "";
+      flat[`${prefix}_entrance_month`] = String(parseInt(em || "0")) || "";
+    }
+    if (graduation.includes("-")) {
+      const [gy, gm] = graduation.split("-");
+      flat[`${prefix}_graduation_year`] = gy || "";
+      flat[`${prefix}_graduation_month`] = String(parseInt(gm || "0")) || "";
+    }
+    // Duration (年) — graduation year - entrance year
+    const ey = parseInt((entrance || "").split("-")[0]);
+    const gy = parseInt((graduation || "").split("-")[0]);
+    flat[`${prefix}_duration`] = (ey && gy) ? String(gy - ey) : "";
+  };
 
-  flat.edu_junior_school = juniorHigh.school_name || "";
-  flat.edu_junior_address = juniorHigh.address || "";
-  flat.edu_junior_entrance = juniorHigh.entrance_year || "";
-  flat.edu_junior_graduation = juniorHigh.passing_year || juniorHigh.year || "";
-
-  flat.edu_high_school = highSchool.school_name || "";
-  flat.edu_high_address = highSchool.address || "";
-  flat.edu_high_entrance = highSchool.entrance_year || "";
-  flat.edu_high_graduation = highSchool.passing_year || highSchool.year || "";
-
-  flat.edu_technical_school = technical.school_name || "";
-  flat.edu_technical_address = technical.address || "";
-  flat.edu_technical_entrance = technical.entrance_year || "";
-  flat.edu_technical_graduation = technical.passing_year || technical.year || "";
-
-  flat.edu_university_school = university.school_name || "";
-  flat.edu_university_address = university.address || "";
-  flat.edu_university_entrance = university.entrance_year || "";
-  flat.edu_university_graduation = university.passing_year || university.year || "";
+  eduFlat("edu_elementary", elementary);
+  eduFlat("edu_junior", juniorHigh);
+  eduFlat("edu_high", highSchool);
+  eduFlat("edu_technical", technical);
+  eduFlat("edu_university", university);
 
   // ═══════════════════════════════════════════════════
   // Work Experience — 職歴 (Vocational experience)
@@ -584,6 +590,15 @@ function flattenForDoc(student, context = {}) {
   flat.jp_study_from = jpStudy.period_from || "";
   flat.jp_study_to = jpStudy.period_to || "";
   flat.jp_study_hours = jpStudy.total_hours || "";
+  // JP Study sub-parts — "2023-03-02" → year=2023, month=3, day=2
+  if (flat.jp_study_from && flat.jp_study_from.includes("-")) {
+    const [fy, fm, fd] = flat.jp_study_from.split("-");
+    flat.jp_study_from_year = fy || ""; flat.jp_study_from_month = String(parseInt(fm || "0")) || ""; flat.jp_study_from_day = String(parseInt(fd || "0")) || "";
+  }
+  if (flat.jp_study_to && flat.jp_study_to.includes("-")) {
+    const [ty, tm, td] = flat.jp_study_to.split("-");
+    flat.jp_study_to_year = ty || ""; flat.jp_study_to_month = String(parseInt(tm || "0")) || ""; flat.jp_study_to_day = String(parseInt(td || "0")) || "";
+  }
 
   // ═══════════════════════════════════════════════════
   // Family — বাবা, মা
