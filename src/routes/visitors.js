@@ -204,29 +204,46 @@ router.post("/:id/convert", checkPermission("visitors", "write"), asyncHandler(a
   const agencyId = req.user.agency_id;
   const studentId = await generateId(agencyId, "student");
 
+  // Visitor → Student — সব তথ্য সঠিকভাবে transfer
+  const studentData = {
+    id: studentId,
+    agency_id: agencyId,
+    name_en: visitor.name || visitor.name_en,
+    name_bn: visitor.name_bn,
+    phone: visitor.phone,
+    email: visitor.email,
+    dob: visitor.dob || null,
+    gender: visitor.gender || null,
+    blood_group: visitor.blood_group || null,
+    permanent_address: visitor.address || null,
+    source: visitor.source,
+    agent_id: visitor.agent_id || null,
+    referral_info: visitor.referral_info || null,
+    counselor: visitor.counselor || null,
+    branch: visitor.branch,
+    country: (visitor.interested_countries && visitor.interested_countries[0]) || "Japan",
+    intake: visitor.interested_intake || null,
+    internal_notes: visitor.notes || null,
+    status: "ENROLLED",
+    ...req.body, // frontend থেকে অতিরিক্ত data override
+  };
+
   const { data: student, error: sErr } = await supabase
     .from("students")
-    .insert(encryptSensitiveFields({
-      id: studentId,
-      agency_id: agencyId,
-      name_en: visitor.name || visitor.name_en,
-      name_bn: visitor.name_bn,
-      phone: visitor.phone,
-      email: visitor.email,
-      dob: visitor.dob || null,
-      gender: visitor.gender || null,
-      permanent_address: visitor.address || null,
-      source: visitor.source,
-      agent_id: visitor.agent_id || null,
-      branch: visitor.branch,
-      country: (visitor.interested_countries && visitor.interested_countries[0]) || "Japan",
-      status: "ENROLLED",
-      ...req.body,
-    }))
+    .insert(encryptSensitiveFields(studentData))
     .select()
     .single();
 
   if (sErr) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+
+  // JP Exam data transfer — visitor-এ JP cert থাকলে student_jp_exams-এ যোগ
+  if (visitor.has_jp_cert && visitor.jp_exam_type) {
+    await supabase.from("student_jp_exams").insert({
+      student_id: studentId, agency_id: agencyId,
+      exam_type: visitor.jp_exam_type, level: visitor.jp_level || null,
+      score: visitor.jp_score || null, result: "Pass",
+    }).catch(() => {});
+  }
 
   await supabase.from("visitors").update({ status: "converted", converted_student_id: student.id }).eq("id", req.params.id);
 
