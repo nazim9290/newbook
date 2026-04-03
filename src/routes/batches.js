@@ -11,8 +11,9 @@ router.use(auth);
 // Auto-calculate study hours — ক্লাসের দিন ও সময় থেকে ঘণ্টা হিসাব
 // start_date, end_date, class_days, class_hours_per_day থেকে
 // total_classes, total_hours, weekly_hours বের করে
+// holidays array পাস করলে ছুটির দিনগুলো বাদ যাবে
 // ═══════════════════════════════════════════════════════
-function calculateBatchHours(batch) {
+function calculateBatchHours(batch, holidays = []) {
   const start = new Date(batch.start_date);
   const end = new Date(batch.end_date);
   const classDays = batch.class_days || [];
@@ -26,11 +27,34 @@ function calculateBatchHours(batch) {
   const dayMap = { "Sun": 0, "Mon": 1, "Tue": 2, "Wed": 3, "Thu": 4, "Fri": 5, "Sat": 6 };
   const classDayNums = classDays.map(d => dayMap[d]).filter(n => n !== undefined);
 
-  // start → end পর্যন্ত ক্লাসের দিন গণনা
+  // ── Holiday dates Set তৈরি — O(1) lookup-এর জন্য ──
+  // fixed holidays: সরাসরি date string (YYYY-MM-DD)
+  // recurring holidays: প্রতিবছর একই MM-DD — batch range-এর সব year-এ expand
+  const holidaySet = new Set();
+  holidays.forEach(h => {
+    const hDate = typeof h.date === "string" ? h.date : (h.date ? new Date(h.date).toISOString().slice(0, 10) : null);
+    if (!hDate) return;
+    if (h.recurring) {
+      // recurring ছুটি — MM-DD অংশটা নিয়ে batch range-এর প্রতিটি year-এ যোগ করো
+      const md = hDate.slice(5); // "MM-DD"
+      for (let y = start.getFullYear(); y <= end.getFullYear(); y++) {
+        holidaySet.add(`${y}-${md}`);
+      }
+    } else {
+      // fixed ছুটি — শুধু ঐ তারিখ
+      holidaySet.add(hDate.slice(0, 10));
+    }
+  });
+
+  // start → end পর্যন্ত ক্লাসের দিন গণনা (ছুটি বাদে)
   let totalDays = 0;
   let current = new Date(start);
   while (current <= end) {
-    if (classDayNums.includes(current.getDay())) totalDays++;
+    const dateStr = current.toISOString().slice(0, 10);
+    // ক্লাসের দিন হতে হবে AND ছুটি হতে পারবে না
+    if (classDayNums.includes(current.getDay()) && !holidaySet.has(dateStr)) {
+      totalDays++;
+    }
     current.setDate(current.getDate() + 1);
   }
 
@@ -105,7 +129,9 @@ router.post("/", asyncHandler(async (req, res) => {
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
   // Auto-calculate — ক্লাসের দিন/ঘণ্টা থেকে total_classes, total_hours, weekly_hours হিসাব
-  const calculated = calculateBatchHours(data);
+  // ছুটির দিনগুলো বাদ দিয়ে হিসাব (holidays table থেকে)
+  const { data: holidays } = await supabase.from("holidays").select("date, recurring").eq("agency_id", req.user.agency_id);
+  const calculated = calculateBatchHours(data, holidays || []);
   if (calculated.total_hours) {
     const { data: updated } = await supabase.from("batches").update(calculated).eq("id", data.id).select().single();
     if (updated) Object.assign(data, updated);
@@ -141,7 +167,9 @@ router.patch("/:id", asyncHandler(async (req, res) => {
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
   // Auto-calculate — ক্লাসের দিন/ঘণ্টা থেকে total_classes, total_hours, weekly_hours হিসাব
-  const calculated = calculateBatchHours(data);
+  // ছুটির দিনগুলো বাদ দিয়ে হিসাব (holidays table থেকে)
+  const { data: holidays } = await supabase.from("holidays").select("date, recurring").eq("agency_id", req.user.agency_id);
+  const calculated = calculateBatchHours(data, holidays || []);
   if (calculated.total_hours) {
     const { data: updated } = await supabase.from("batches").update(calculated).eq("id", data.id).select().single();
     if (updated) Object.assign(data, updated);

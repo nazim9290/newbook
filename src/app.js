@@ -227,6 +227,7 @@ app.use("/api/student-portal", require("./routes/student-portal")); // স্ট
 app.use("/api/reports", require("./routes/reports"));               // রিপোর্ট ও Analytics
 app.use("/api/partners", require("./routes/partners"));             // পার্টনার এজেন্সি (B2B)
 app.use("/api/pre-departure", require("./routes/pre-departure"));   // প্রি-ডিপার্চার ও VFS
+app.use("/api/holidays", require("./routes/holidays"));             // সরকারি ছুটি ম্যানেজমেন্ট (batch calculation-এ exclude হয়)
 app.use("/api/ocr", heavyLimiter, require("./routes/ocr"));                       // OCR — জন্ম নিবন্ধন স্ক্যান (Google Vision) — heavy limit
 
 // ── 404 Handler — route না পেলে error (path leak করবে না) ──
