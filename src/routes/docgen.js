@@ -584,12 +584,15 @@ function flattenForDoc(student, context = {}) {
     flat[`jp_study${i+1}_hours`] = js.total_hours || "";
   });
   // Shorthand — first entry without index
+  // JP Study data না থাকলে agency + batch data দিয়ে auto-populate
   const jpStudy = jpStudyAll[0] || {};
-  flat.jp_study_institution = jpStudy.institution || "";
-  flat.jp_study_address = jpStudy.address || "";
-  flat.jp_study_from = jpStudy.period_from || "";
-  flat.jp_study_to = jpStudy.period_to || "";
-  flat.jp_study_hours = jpStudy.total_hours || "";
+  const ctxAgency = (context || {}).agency || {};
+  const ctxBatch = (context || {}).batch || {};
+  flat.jp_study_institution = jpStudy.institution || ctxAgency.name || "";
+  flat.jp_study_address = jpStudy.address || ctxAgency.address || "";
+  flat.jp_study_from = jpStudy.period_from || ctxBatch.start_date || "";
+  flat.jp_study_to = jpStudy.period_to || ctxBatch.end_date || "";
+  flat.jp_study_hours = jpStudy.total_hours || ctxBatch.total_hours || "";
   // JP Study sub-parts — "2023-03-02" → year=2023, month=3, day=2
   if (flat.jp_study_from && flat.jp_study_from.includes("-")) {
     const [fy, fm, fd] = flat.jp_study_from.split("-");
