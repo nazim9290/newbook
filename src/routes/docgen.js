@@ -250,8 +250,13 @@ router.post("/generate", asyncHandler(async (req, res) => {
       supabase.from("student_family").select("*").eq("student_id", student_id),
       supabase.from("sponsors").select("*").eq("student_id", student_id),
       // সিস্টেম ভ্যারিয়েবল: এজেন্সি, স্কুল, ব্যাচ, ব্রাঞ্চ fetch
+      // School: student-এর school_id → fallback school name search
       supabase.from("agencies").select("*").eq("id", req.user.agency_id).single(),
-      student.school_id ? supabase.from("schools").select("*").eq("id", student.school_id).single() : { data: null },
+      student.school_id
+        ? supabase.from("schools").select("*").eq("id", student.school_id).single()
+        : student.school
+          ? supabase.from("schools").select("*").eq("agency_id", req.user.agency_id).eq("name_en", student.school).limit(1)
+          : { data: null },
       student.batch_id ? supabase.from("batches").select("*").eq("id", student.batch_id).single() : { data: null },
       student.branch ? supabase.from("branches").select("*").eq("agency_id", req.user.agency_id).eq("name", student.branch).single() : { data: null },
     ]);
@@ -262,7 +267,7 @@ router.post("/generate", asyncHandler(async (req, res) => {
 
     // সিস্টেম context — agency, school, batch, branch
     const agency = agencyRes.data || {};
-    const school = schoolRes.data || {};
+    const school = Array.isArray(schoolRes.data) ? schoolRes.data[0] || {} : schoolRes.data || {};
     const batch = batchRes.data || {};
     const branch = branchRes.data || {};
 

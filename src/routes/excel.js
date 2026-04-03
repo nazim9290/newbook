@@ -269,11 +269,13 @@ router.post("/generate-single", asyncHandler(async (req, res) => {
     if (!student) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
 
     // ── সিস্টেম ভ্যারিয়েবল: এজেন্সি, ব্যাচ, ব্রাঞ্চ, স্কুল fetch ──
+    // School: student-এর school_id → fallback template-এর school_id
+    const schoolId = student.school_id || tmpl.school_id;
     const [agencyRes, batchRes, branchRes, schoolRes] = await Promise.all([
       supabase.from("agencies").select("*").eq("id", req.user.agency_id).single(),
       student.batch_id ? supabase.from("batches").select("*").eq("id", student.batch_id).single() : { data: null },
       student.branch ? supabase.from("branches").select("*").eq("agency_id", req.user.agency_id).eq("name", student.branch).single() : { data: null },
-      student.school_id ? supabase.from("schools").select("*").eq("id", student.school_id).single() : { data: null },
+      schoolId ? supabase.from("schools").select("*").eq("id", schoolId).single() : { data: null },
     ]);
     const sysContext = buildSystemContext(agencyRes.data, batchRes.data, branchRes.data, schoolRes.data);
 
