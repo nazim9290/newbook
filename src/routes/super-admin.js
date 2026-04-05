@@ -376,6 +376,21 @@ router.post("/default-templates", upload.single("file"), asyncHandler(async (req
   res.json(data);
 }));
 
+// PATCH /default-templates/:id/mapping — placeholder → system field mapping সংরক্ষণ
+// ⚠️ এই route /:id route-এর আগে থাকতে হবে — না হলে /:id catch করে ফেলে
+router.patch("/default-templates/:id/mapping", asyncHandler(async (req, res) => {
+  const { placeholders } = req.body || {};
+  if (!Array.isArray(placeholders)) return res.status(400).json({ error: "placeholders array required" });
+
+  const { data, error } = await supabase.from("default_templates")
+    .update({ template_data: JSON.stringify({ placeholders }), updated_at: new Date().toISOString() })
+    .eq("id", req.params.id)
+    .select().single();
+
+  if (error) return res.status(500).json({ error: "Mapping সংরক্ষণ ব্যর্থ" });
+  res.json(data);
+}));
+
 // PATCH /default-templates/:id — template আপডেট (file re-upload + placeholder re-detect)
 router.patch("/default-templates/:id", upload.single("file"), asyncHandler(async (req, res) => {
   const updates = { updated_at: new Date().toISOString() };
@@ -426,20 +441,6 @@ router.patch("/default-templates/:id", upload.single("file"), asyncHandler(async
   }
 
   const { data } = await supabase.from("default_templates").update(updates).eq("id", req.params.id).select().single();
-  res.json(data);
-}));
-
-// PATCH /default-templates/:id/mapping — placeholder → system field mapping সংরক্ষণ
-router.patch("/default-templates/:id/mapping", express.json(), asyncHandler(async (req, res) => {
-  const { placeholders } = req.body || {};
-  if (!Array.isArray(placeholders)) return res.status(400).json({ error: "placeholders array required" });
-
-  const { data, error } = await supabase.from("default_templates")
-    .update({ template_data: JSON.stringify({ placeholders }), updated_at: new Date().toISOString() })
-    .eq("id", req.params.id)
-    .select().single();
-
-  if (error) return res.status(500).json({ error: "Mapping সংরক্ষণ ব্যর্থ" });
   res.json(data);
 }));
 
