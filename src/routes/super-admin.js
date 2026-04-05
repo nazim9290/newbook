@@ -376,9 +376,55 @@ router.post("/default-templates", upload.single("file"), asyncHandler(async (req
   res.json(data);
 }));
 
-// PATCH /default-templates/:id — template আপডেট
-router.patch("/default-templates/:id", asyncHandler(async (req, res) => {
-  const updates = { ...req.body, updated_at: new Date().toISOString() };
+// PATCH /default-templates/:id — template আপডেট (file re-upload + placeholder re-detect)
+router.patch("/default-templates/:id", upload.single("file"), asyncHandler(async (req, res) => {
+  const updates = { updated_at: new Date().toISOString() };
+
+  // Text fields update
+  ["name", "name_bn", "description", "category", "sub_category", "country"].forEach(k => {
+    if (req.body[k] !== undefined) updates[k] = req.body[k];
+  });
+
+  // ── নতুন file upload হলে — file save + placeholder re-detect ──
+  if (req.file) {
+    const destDir = path.join(__dirname, "../../uploads/default-templates");
+    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+
+    const ext = path.extname(req.file.originalname);
+    const dest = path.join(destDir, `${Date.now()}${ext}`);
+    fs.renameSync(req.file.path, dest);
+    updates.file_url = `/uploads/default-templates/${path.basename(dest)}`;
+    updates.file_name = req.file.originalname;
+
+    // .docx হলে placeholder detect
+    if (req.file.originalname.endsWith(".docx")) {
+      try {
+        const AdmZip = require("adm-zip");
+        const zip = new AdmZip(dest);
+        const foundKeys = new Set();
+        const placeholders = [];
+
+        zip.getEntries().forEach(entry => {
+          if (entry.entryName.endsWith(".xml")) {
+            const cleaned = entry.getData().toString("utf8").replace(/<[^>]+>/g, "");
+            const matches = cleaned.match(/\{\{([^}]+)\}\}/g) || [];
+            matches.forEach(m => {
+              const key = m.replace(/[{}]/g, "").trim();
+              if (key && !foundKeys.has(key)) {
+                foundKeys.add(key);
+                placeholders.push({ key, placeholder: m, field: "" });
+              }
+            });
+          }
+        });
+
+        if (placeholders.length > 0) {
+          updates.template_data = JSON.stringify({ placeholders });
+        }
+      } catch (err) { console.error("[Template] Placeholder detect failed:", err.message); }
+    }
+  }
+
   const { data } = await supabase.from("default_templates").update(updates).eq("id", req.params.id).select().single();
   res.json(data);
 }));
