@@ -589,12 +589,19 @@ async function deductCredit(agencyId, userId, meta) {
 // CLAUDE HAIKU VISION — AI-powered field extraction
 // Google Vision raw text → Haiku → structured JSON
 // ═══════════════════════════════════════════════════════════════
-async function extractWithHaiku(rawText, docConfigs) {
+async function extractWithHaiku(rawText, docConfigs, expectedFields, docTypeName) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
 
   // DOC_CONFIGS থেকে সব possible field names + doc types বের করো
   const docTypes = docConfigs.map(c => `${c.id}: ${c.fields.map(f => f.key).join(", ")}`).join("\n");
+
+  // Frontend থেকে আসা expected fields — এগুলোই primary target
+  let expectedFieldsInfo = "";
+  if (expectedFields && expectedFields.length > 0) {
+    expectedFieldsInfo = `\n\nIMPORTANT — The user is filling a "${docTypeName || "document"}" form. Extract these SPECIFIC fields:\n` +
+      expectedFields.map(f => `- "${f.key}" (${f.label || f.key}) [${f.type || "text"}]`).join("\n");
+  }
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -609,10 +616,11 @@ async function extractWithHaiku(rawText, docConfigs) {
         max_tokens: 2000,
         messages: [{
           role: "user",
-          content: `You are a document data extractor for a Study Abroad CRM. Extract structured data from this OCR text.
+          content: `You are a document data extractor for a Study Abroad CRM (Bangladesh → Japan/Germany/Korea).
 
-Document types and their fields:
+Known document types and their fields:
 ${docTypes}
+${expectedFieldsInfo}
 
 OCR Text:
 ---
@@ -620,14 +628,19 @@ ${rawText.substring(0, 4000)}
 ---
 
 Instructions:
-1. Identify the document type from the list above
-2. Extract ALL matching fields from the text
-3. Dates should be in YYYY-MM-DD format
-4. Names should be in ENGLISH UPPERCASE
-5. Return ONLY valid JSON, no explanation
+1. Identify the document type
+2. Extract ALL matching fields from the text — use the exact field key names listed above
+3. For "certificate_type" field: determine what type of certificate this is (e.g., "Birth Certificate", "NID", "SSC", "HSC", "Passport", etc.)
+4. Dates: convert to YYYY-MM-DD format (e.g., "07 Oct 2001" → "2001-10-07")
+5. Names: ENGLISH UPPERCASE
+6. Addresses: combine all parts into one string
+7. For select/dropdown fields, pick the best matching option value
+8. For "issuing_authority" fields: extract the office/authority that issued the document
+9. If a field has multiple lines (like issuing authority), combine them
+10. Extract EVERY possible field — even if not 100% sure, include with best guess
 
-Response format:
-{"doc_type": "document_type_id", "fields": {"field_key": "value", ...}, "confidence": "high|medium|low"}`
+Return ONLY valid JSON:
+{"doc_type": "type_id", "fields": {"field_key": "value", ...}, "confidence": "high|medium|low"}`
         }],
       }),
     });
@@ -743,8 +756,13 @@ router.post("/scan", upload.single("file"), async (req, res) => {
     let result = null;
     let engine = "regex";
 
+    // Frontend থেকে আসা expected fields ও doc type name
+    let expectedFields = [];
+    const docTypeName = req.body?.doc_type_name || "";
+    try { expectedFields = JSON.parse(req.body?.expected_fields || "[]"); } catch {}
+
     if (process.env.ANTHROPIC_API_KEY) {
-      result = await extractWithHaiku(fullText, DOC_CONFIGS);
+      result = await extractWithHaiku(fullText, DOC_CONFIGS, expectedFields, docTypeName);
       if (result && Object.keys(result.fields).length >= 3) {
         engine = "haiku";
         console.log(`[OCR] Haiku extracted ${Object.keys(result.fields).length} fields (${result.confidence})`);
