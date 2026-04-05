@@ -19,8 +19,9 @@ router.get("/", checkPermission("students", "read"), asyncHandler(async (req, re
   const safePage = Math.max(parseInt(page) || 1, 1);
   const offset = (safePage - 1) * limit;
 
-  // batch ও school এর নাম সহ fetch করো (join)
-  let query = supabase.from("students").select("*, batches(name), schools(name_en)", { count: "exact" }).eq("agency_id", req.user.agency_id);
+  // student list query — school/batch নাম students table-এই denormalized আছে (school, batch text fields)
+  // schools(name_en) JOIN করলে name_en ambiguous হয় search-এ — তাই JOIN সরানো
+  let query = supabase.from("students").select("*", { count: "exact" }).eq("agency_id", req.user.agency_id);
 
   if (search) {
     query = query.or(`name_en.ilike.%${search}%,phone.ilike.%${search}%,id.ilike.%${search}%`);
