@@ -430,8 +430,8 @@ router.patch("/default-templates/:id", upload.single("file"), asyncHandler(async
 }));
 
 // PATCH /default-templates/:id/mapping — placeholder → system field mapping সংরক্ষণ
-router.patch("/default-templates/:id/mapping", asyncHandler(async (req, res) => {
-  const { placeholders } = req.body;
+router.patch("/default-templates/:id/mapping", express.json(), asyncHandler(async (req, res) => {
+  const { placeholders } = req.body || {};
   if (!Array.isArray(placeholders)) return res.status(400).json({ error: "placeholders array required" });
 
   const { data, error } = await supabase.from("default_templates")
