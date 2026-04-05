@@ -949,7 +949,20 @@ STRICT RULES:
 - Formal, sincere, and natural tone
 - Each paragraph must be self-contained and focused on its designated topic only
 - Do not mix topics between paragraphs
-- Word count: 350–420 words total`;
+- Word count: 350–420 words total
+
+HUMANIZE — CRITICAL:
+- Write like a real Bangladeshi student wrote it, NOT like AI generated
+- Use simple, natural English — avoid complex vocabulary and flowery language
+- Vary sentence lengths — mix short and long sentences naturally
+- Avoid overused AI phrases: "furthermore", "moreover", "in addition", "it is worth noting", "I am writing to express", "embark on a journey", "pursue my passion", "hone my skills"
+- Avoid starting multiple sentences with "I" — vary sentence structure
+- Include small personal touches that feel genuine (e.g., "My father encouraged me", "I first became interested when...")
+- Use contractions occasionally (I've, I'm, it's) to sound natural
+- Keep it slightly imperfect — a real student letter is not perfectly polished
+- Sound motivated but not dramatic — no "burning desire" or "lifelong dream"
+- Each paragraph should flow naturally into the next, like a real person telling their story
+- The overall tone should feel like a sincere, thoughtful student — not a marketing brochure`;
 
   const systemPrompt = customPrompt || defaultPrompt;
 
