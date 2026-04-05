@@ -247,6 +247,60 @@ router.patch("/agencies/:id/fee", asyncHandler(async (req, res) => {
 }));
 
 // ═══════════════════════════════════════════════════
+// OCR Credits — SuperAdmin credit management
+// ═══════════════════════════════════════════════════
+
+// POST /agencies/:id/credits — agency-তে OCR credit যোগ
+router.post("/agencies/:id/credits", asyncHandler(async (req, res) => {
+  const { amount, description } = req.body;
+  const credits = Math.max(0, Number(amount) || 0);
+  if (credits <= 0) return res.status(400).json({ error: "সঠিক credit পরিমাণ দিন" });
+
+  // বর্তমান balance আনো
+  const { data: agency } = await supabase.from("agencies").select("ocr_credits, name").eq("id", req.params.id).single();
+  if (!agency) return res.status(404).json({ error: "Agency পাওয়া যায়নি" });
+
+  const newBalance = (agency.ocr_credits || 0) + credits;
+
+  // Agency balance আপডেট
+  await supabase.from("agencies").update({ ocr_credits: newBalance }).eq("id", req.params.id);
+
+  // Transaction log — credit add record
+  await supabase.from("ocr_credit_log").insert({
+    agency_id: req.params.id, amount: credits, balance_after: newBalance,
+    type: "topup", description: description || `SuperAdmin credit topup: ${credits}`,
+    created_by: req.user.id,
+  });
+
+  res.json({ success: true, credits: newBalance, agency: agency.name });
+}));
+
+// GET /agencies/:id/ocr-usage — agency-র OCR usage history
+router.get("/agencies/:id/ocr-usage", asyncHandler(async (req, res) => {
+  const { data: usage } = await supabase.from("ocr_usage")
+    .select("*").eq("agency_id", req.params.id)
+    .order("created_at", { ascending: false }).limit(200);
+  const { data: creditLog } = await supabase.from("ocr_credit_log")
+    .select("*").eq("agency_id", req.params.id)
+    .order("created_at", { ascending: false }).limit(200);
+  res.json({ usage: usage || [], creditLog: creditLog || [] });
+}));
+
+// GET /ocr-summary — সব agency-র OCR credit summary
+router.get("/ocr-summary", asyncHandler(async (req, res) => {
+  const { data: agencies } = await supabase.from("agencies")
+    .select("id, name, subdomain, ocr_credits, status");
+  // প্রতি agency-র মোট scan count
+  const { data: usageCounts } = await supabase.from("ocr_usage")
+    .select("agency_id").then(() => null).catch(() => null);
+
+  // Simple approach — agency list with credits
+  res.json((agencies || []).map(a => ({
+    ...a, total_scans: 0, // frontend-এ count করবে usage API থেকে
+  })));
+}));
+
+// ═══════════════════════════════════════════════════
 // Default Templates — গ্লোবাল টেমপ্লেট ম্যানেজমেন্ট
 // ═══════════════════════════════════════════════════
 

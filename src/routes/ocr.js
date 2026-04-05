@@ -539,8 +539,140 @@ function detectAndParse(text) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// CREDIT SYSTEM HELPERS
+// ═══════════════════════════════════════════════════════════════
+const supabase = require("../lib/supabase");
+
+// Agency-র OCR credit balance চেক
+async function getOcrCredits(agencyId) {
+  const { data } = await supabase.from("agencies").select("ocr_credits").eq("id", agencyId).single();
+  return data?.ocr_credits || 0;
+}
+
+// Credit deduct + usage log + transaction log
+async function deductCredit(agencyId, userId, meta) {
+  // Credit 1 কমাও
+  await supabase.rpc("decrement_ocr_credits", { agency_id_input: agencyId, amount_input: 1 }).catch(() => {
+    // RPC না থাকলে manual update
+    supabase.from("agencies").update({ ocr_credits: supabase.raw("ocr_credits - 1") }).eq("id", agencyId).catch(() => {});
+  });
+
+  // নতুন balance আনো
+  const newBalance = Math.max(0, (await getOcrCredits(agencyId)) - 0); // already decremented
+
+  // Usage log — কোন document কে scan করলো
+  await supabase.from("ocr_usage").insert({
+    agency_id: agencyId, user_id: userId,
+    doc_type: meta.docType || "unknown", engine: meta.engine || "haiku",
+    credits_used: 1, confidence: meta.confidence || "low",
+    fields_extracted: meta.fieldsCount || 0, file_name: meta.fileName || "",
+  }).catch(() => {});
+
+  // Transaction log — credit deduct record
+  await supabase.from("ocr_credit_log").insert({
+    agency_id: agencyId, amount: -1, balance_after: newBalance,
+    type: "scan", description: `OCR scan: ${meta.docType || "unknown"} (${meta.engine})`,
+    created_by: userId,
+  }).catch(() => {});
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CLAUDE HAIKU VISION — AI-powered field extraction
+// Google Vision raw text → Haiku → structured JSON
+// ═══════════════════════════════════════════════════════════════
+async function extractWithHaiku(rawText, docConfigs) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+
+  // DOC_CONFIGS থেকে সব possible field names + doc types বের করো
+  const docTypes = docConfigs.map(c => `${c.id}: ${c.fields.map(f => f.key).join(", ")}`).join("\n");
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 2000,
+        messages: [{
+          role: "user",
+          content: `You are a document data extractor for a Study Abroad CRM. Extract structured data from this OCR text.
+
+Document types and their fields:
+${docTypes}
+
+OCR Text:
+---
+${rawText.substring(0, 4000)}
+---
+
+Instructions:
+1. Identify the document type from the list above
+2. Extract ALL matching fields from the text
+3. Dates should be in YYYY-MM-DD format
+4. Names should be in ENGLISH UPPERCASE
+5. Return ONLY valid JSON, no explanation
+
+Response format:
+{"doc_type": "document_type_id", "fields": {"field_key": "value", ...}, "confidence": "high|medium|low"}`
+        }],
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("[Haiku] API error:", response.status);
+      return null;
+    }
+
+    const result = await response.json();
+    const text = result.content?.[0]?.text || "";
+
+    // JSON parse — Haiku response থেকে structured data বের করো
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    return {
+      docType: parsed.doc_type || "unknown",
+      fields: parsed.fields || {},
+      confidence: parsed.confidence || "medium",
+      engine: "haiku",
+    };
+  } catch (err) {
+    console.error("[Haiku Error]", err.message);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GET /api/ocr/credits — agency-র বর্তমান credit balance
+// ═══════════════════════════════════════════════════════════════
+router.get("/credits", async (req, res) => {
+  try {
+    const credits = await getOcrCredits(req.user.agency_id);
+    res.json({ credits });
+  } catch { res.json({ credits: 0 }); }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// GET /api/ocr/usage — agency-র OCR usage history
+// ═══════════════════════════════════════════════════════════════
+router.get("/usage", async (req, res) => {
+  try {
+    const { data } = await supabase.from("ocr_usage")
+      .select("*").eq("agency_id", req.user.agency_id)
+      .order("created_at", { ascending: false }).limit(100);
+    res.json(data || []);
+  } catch { res.json([]); }
+});
+
+// ═══════════════════════════════════════════════════════════════
 // রাউট হ্যান্ডলার — POST /api/ocr/scan
-// ফাইল আপলোড → Vision API → text extract → auto-detect → parsed fields return
+// Credit check → Google Vision OCR → Haiku AI extraction → fallback regex
 // ═══════════════════════════════════════════════════════════════
 
 router.post("/scan", upload.single("file"), async (req, res) => {
@@ -549,55 +681,96 @@ router.post("/scan", upload.single("file"), async (req, res) => {
   const filePath = req.file.path;
 
   try {
+    // ── Step 0: Credit check — credit না থাকলে scan করতে দেওয়া হবে না ──
+    const credits = await getOcrCredits(req.user.agency_id);
+    if (credits <= 0) {
+      return res.status(402).json({
+        error: "OCR credit শেষ — অ্যাডমিনের সাথে যোগাযোগ করুন",
+        code: "NO_CREDITS",
+        credits: 0,
+      });
+    }
+
     const imageBuffer = fs.readFileSync(filePath);
     const base64Image = imageBuffer.toString("base64");
 
-    const apiKey = process.env.GOOGLE_VISION_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: "GOOGLE_VISION_API_KEY not configured" });
-
     const base64SizeMB = (base64Image.length * 3 / 4) / (1024 * 1024);
-    console.log(`[OCR] File: ${req.file.originalname}, Size: ${base64SizeMB.toFixed(2)}MB`);
+    console.log(`[OCR] File: ${req.file.originalname}, Size: ${base64SizeMB.toFixed(2)}MB, Credits: ${credits}`);
     if (base64SizeMB > 8) return res.status(400).json({ error: "Image too large — max 8MB" });
 
-    // Google Vision API কল — 30 সেকেন্ড timeout সহ
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
+    // ── Step 1: Google Vision OCR — raw text extract (ফ্রি 1000/মাস) ──
+    const visionApiKey = process.env.GOOGLE_VISION_API_KEY;
+    let fullText = "";
 
-    let response;
-    try {
-      response = await fetch(
-        `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ requests: [{ image: { content: base64Image }, features: [{ type: "DOCUMENT_TEXT_DETECTION" }] }] }),
-          signal: controller.signal,
-        }
-      );
-    } catch (fetchErr) {
-      clearTimeout(timeout);
-      console.error("[OCR] Vision API error:", fetchErr.cause?.code || fetchErr.message);
-      return res.status(502).json({ error: "Google Vision API connection failed — try again" });
+    if (visionApiKey) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+      try {
+        const response = await fetch(
+          `https://vision.googleapis.com/v1/images:annotate?key=${visionApiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ requests: [{ image: { content: base64Image }, features: [{ type: "DOCUMENT_TEXT_DETECTION" }] }] }),
+            signal: controller.signal,
+          }
+        );
+        clearTimeout(timeout);
+        const data = await response.json();
+        fullText = data.responses?.[0]?.fullTextAnnotation?.text || "";
+      } catch (fetchErr) {
+        clearTimeout(timeout);
+        console.error("[OCR] Vision API error:", fetchErr.message);
+      }
     }
-    clearTimeout(timeout);
 
-    const data = await response.json();
-    if (data.error) { console.error("[OCR] API error:", data.error.message); throw new Error(data.error.message); }
+    if (!fullText.trim()) {
+      return res.status(400).json({ error: "No text detected — upload a clearer image" });
+    }
 
-    const fullText = data.responses?.[0]?.fullTextAnnotation?.text || "";
-    // Debug log disabled in production — sensitive data
-    // console.log("[OCR] Raw text:", fullText.substring(0, 100));
-    if (!fullText.trim()) return res.status(400).json({ error: "No text detected — upload a clearer image" });
+    // ── Step 2: Claude Haiku AI extraction (primary) ──
+    let result = null;
+    let engine = "regex";
 
-    // স্বয়ংক্রিয়ভাবে document type চিনে fields parse করো
-    const { docType, fields } = detectAndParse(fullText);
+    if (process.env.ANTHROPIC_API_KEY) {
+      result = await extractWithHaiku(fullText, DOC_CONFIGS);
+      if (result && Object.keys(result.fields).length >= 3) {
+        engine = "haiku";
+        console.log(`[OCR] Haiku extracted ${Object.keys(result.fields).length} fields (${result.confidence})`);
+      } else {
+        result = null; // Haiku fail — fallback এ যাও
+      }
+    }
 
+    // ── Step 3: Regex fallback — Haiku fail হলে বা API key না থাকলে ──
+    if (!result) {
+      const parsed = detectAndParse(fullText);
+      result = {
+        docType: parsed.docType,
+        fields: parsed.fields,
+        confidence: parsed.fields._confidence || "low",
+        engine: "regex",
+      };
+      engine = "regex";
+      console.log(`[OCR] Regex fallback: ${parsed.docType}, ${Object.keys(parsed.fields).length} fields`);
+    }
+
+    // ── Step 4: Credit deduct + usage log ──
+    const fieldsCount = Object.keys(result.fields).filter(k => !k.startsWith("_")).length;
+    await deductCredit(req.user.agency_id, req.user.id, {
+      docType: result.docType, engine, confidence: result.confidence,
+      fieldsCount, fileName: req.file.originalname,
+    });
+
+    // ── Response ──
     res.json({
       success: true,
       raw_text: fullText,
-      doc_type: docType,
-      extracted_fields: fields,
-      confidence: fields._confidence || "low",
+      doc_type: result.docType,
+      extracted_fields: result.fields,
+      confidence: result.confidence,
+      engine,
+      credits_remaining: Math.max(0, credits - 1),
     });
 
   } catch (err) {
