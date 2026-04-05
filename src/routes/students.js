@@ -811,6 +811,17 @@ router.post("/:id/generate-study-purpose", checkPermission("students", "write"),
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: "AI API key configured নেই" });
 
+  // ── Credit check — প্রতি generation-এ 5 credit লাগে ──
+  const AI_CREDITS = 5;
+  const { data: agencyCredits } = await supabase.from("agencies").select("ocr_credits").eq("id", req.user.agency_id).single();
+  const balance = agencyCredits?.ocr_credits || 0;
+  if (balance < AI_CREDITS) {
+    return res.status(402).json({
+      error: `AI credit অপর্যাপ্ত (${balance}/${AI_CREDITS})`,
+      code: "NO_CREDITS", credits: balance, required: AI_CREDITS,
+    });
+  }
+
   // ── Student data আনো — AI prompt-এ ব্যবহার হবে ──
   const { data: student } = await supabase
     .from("students")
@@ -946,6 +957,26 @@ STRICT RULES:
       .eq("id", req.params.id)
       .eq("agency_id", req.user.agency_id);
 
+    // ── Credit deduct (5 credits) — generation সফল হলেই কাটবে ──
+    const { pool } = supabase;
+    try {
+      await pool.query("UPDATE agencies SET ocr_credits = GREATEST(0, ocr_credits - $1) WHERE id = $2", [AI_CREDITS, req.user.agency_id]);
+      // Usage log
+      await supabase.from("ocr_usage").insert({
+        agency_id: req.user.agency_id, user_id: req.user.id,
+        doc_type: "purpose_of_study", engine: "haiku",
+        credits_used: AI_CREDITS, confidence: "high",
+        fields_extracted: 1, file_name: student.name_en || "",
+      });
+      // Credit transaction log
+      const newBalance = balance - AI_CREDITS;
+      await supabase.from("ocr_credit_log").insert({
+        agency_id: req.user.agency_id, amount: -AI_CREDITS, balance_after: newBalance,
+        type: "ai_generate", description: `Purpose of Study: ${student.name_en}`,
+        created_by: req.user.id,
+      });
+    } catch (e) { console.error("[Credit Deduct]", e.message); }
+
     // Activity log
     logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "students",
       recordId: req.params.id, description: `AI Purpose of Study generated: ${student.name_en}`, ip: req.ip }).catch(() => {});
@@ -954,6 +985,8 @@ STRICT RULES:
       success: true,
       reason_for_study: purposeText,
       word_count: purposeText.split(/\s+/).length,
+      credits_used: AI_CREDITS,
+      credits_remaining: Math.max(0, balance - AI_CREDITS),
     });
 
   } catch (err) {
