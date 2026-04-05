@@ -306,6 +306,25 @@ router.post("/generate", asyncHandler(async (req, res) => {
       return res.status(400).json({ error: "Template file পাওয়া যায়নি: " + tmplPath });
     }
 
+    // ── Pre-process: :jp modifier-এ long text AI translate (async) ──
+    // resolveValue sync — তাই আগেই translate করে flat-এ cache করি
+    const jpTranslateCache = {};
+    const placeholderList = tmplData?.placeholders || [];
+    for (const p of placeholderList) {
+      const field = p.field || p.key || "";
+      if (field.includes(":jp")) {
+        const base = field.split(":")[0];
+        const val = String(flat[base] || "");
+        // Long text (50+ chars) → AI translate, short → resolveValue-এ JP_MAP handle করবে
+        if (val.length >= 50) {
+          console.log(`[DocGen] AI translating ${base} (${val.length} chars)...`);
+          jpTranslateCache[base] = await translateToJapanese(val);
+        }
+      }
+    }
+    // Translated values flat-এ inject — :jp resolve করলে translated version পাবে
+    Object.entries(jpTranslateCache).forEach(([k, v]) => { flat[k + "_jp"] = v; });
+
     // Replace {{placeholders}} in .docx
     // .docx is a zip of XML files — simple text replace in the XML
     const JSZip = require("jszip") || null;
@@ -742,7 +761,7 @@ function resolveValue(flat, key) {
     if (mod === "first") { const parts = val.trim().split(/\s+/); return parts[0] || ""; }
     if (mod === "last") { const parts = val.trim().split(/\s+/); return parts.slice(1).join(" ") || ""; }
 
-    // Built-in Japanese translations
+    // Built-in Japanese translations — short values
     if (mod === "jp") {
       const JP_MAP = {
         "Male": "男", "Female": "女", "Other": "その他",
@@ -753,12 +772,56 @@ function resolveValue(flat, key) {
         "Individual": "個人", "Company": "法人",
         "Science": "理系", "Commerce": "商業", "Arts": "文系",
       };
-      return JP_MAP[val] || val;
+      // Short value → JP_MAP lookup
+      if (JP_MAP[val]) return JP_MAP[val];
+      // Long text → pre-translated cache check (base_jp key-তে রাখা হয়)
+      if (flat[base + "_jp"]) return flat[base + "_jp"];
+      // Date check — YYYY-MM-DD format হলে Japanese date-এ convert
+      if (val.match(/^\d{4}-\d{2}-\d{2}/)) {
+        const [y, m, d] = val.split("-");
+        return `${y}年${parseInt(m)}月${parseInt((d || "").slice(0, 2))}日`;
+      }
+      return val;
     }
 
     return val;
   }
   return flat[key] ?? "";
+}
+
+// ═══════════════════════════════════════════════════════
+// AI Japanese Translation — long text (Purpose of Study etc.)
+// Claude Haiku দিয়ে English → Japanese translate
+// Result cache হয় — পরবর্তীতে API call লাগে না
+// ═══════════════════════════════════════════════════════
+async function translateToJapanese(text) {
+  if (!text || text.length < 20) return text;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return text;
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 2000,
+        messages: [{
+          role: "user",
+          content: `Translate the following English text to natural Japanese. This is a "Purpose of Study" letter for a Japanese student visa application. Use formal Japanese (です/ます form). Keep paragraph structure. Return ONLY the Japanese translation, nothing else.\n\n${text}`
+        }],
+      }),
+    });
+    if (!response.ok) return text;
+    const result = await response.json();
+    return result.content?.[0]?.text || text;
+  } catch {
+    return text;
+  }
 }
 
 // Simple HTML for PDF fallback
