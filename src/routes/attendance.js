@@ -60,7 +60,7 @@ router.post("/save", asyncHandler(async (req, res) => {
     .upsert(rows, { onConflict: "student_id,date" })
     .select();
 
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি" });
+  if (error) { console.error("[Attendance Save]", error.message, error.details); return res.status(400).json({ error: "সার্ভার ত্রুটি: " + error.message }); }
 
   // Cache invalidate — attendance সেভ হলে cache মুছে দাও
   cache.invalidate(req.user.agency_id);
