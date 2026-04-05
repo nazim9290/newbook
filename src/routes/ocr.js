@@ -564,19 +564,23 @@ async function deductCredit(agencyId, userId, meta) {
   const newBalance = await getOcrCredits(agencyId);
 
   // Usage log — কোন document কে scan করলো
-  await supabase.from("ocr_usage").insert({
-    agency_id: agencyId, user_id: userId,
-    doc_type: meta.docType || "unknown", engine: meta.engine || "haiku",
-    credits_used: CREDITS_PER_SCAN, confidence: meta.confidence || "low",
-    fields_extracted: meta.fieldsCount || 0, file_name: meta.fileName || "",
-  }).catch(() => {});
+  try {
+    await supabase.from("ocr_usage").insert({
+      agency_id: agencyId, user_id: userId,
+      doc_type: meta.docType || "unknown", engine: meta.engine || "haiku",
+      credits_used: CREDITS_PER_SCAN, confidence: meta.confidence || "low",
+      fields_extracted: meta.fieldsCount || 0, file_name: meta.fileName || "",
+    });
+  } catch (e) { console.error("[OCR Usage Log]", e.message); }
 
   // Transaction log — credit deduct record
-  await supabase.from("ocr_credit_log").insert({
-    agency_id: agencyId, amount: -CREDITS_PER_SCAN, balance_after: newBalance,
-    type: "scan", description: `OCR scan: ${meta.docType || "unknown"} (${meta.engine})`,
-    created_by: userId,
-  }).catch(() => {});
+  try {
+    await supabase.from("ocr_credit_log").insert({
+      agency_id: agencyId, amount: -CREDITS_PER_SCAN, balance_after: newBalance,
+      type: "scan", description: `OCR scan: ${meta.docType || "unknown"} (${meta.engine})`,
+      created_by: userId,
+    });
+  } catch (e) { console.error("[OCR Credit Log]", e.message); }
 
   return newBalance;
 }
