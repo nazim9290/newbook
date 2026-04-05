@@ -122,8 +122,34 @@ router.post("/:id/fields", checkPermission("documents", "write"), asyncHandler(a
   res.json(data);
 }));
 
-// GET /api/documents/cross-validate/:studentId — compare fields across docs
+// GET /api/documents/cross-validate/:studentId — Student Profile vs Documents compare
+// Source of Truth: Student Profile-এর data (এজেন্সি ইনপুট) — documents-এর data সেটার সাথে মিলাবে
 router.get("/cross-validate/:studentId", checkPermission("documents", "read"), asyncHandler(async (req, res) => {
+  // ── Step 1: Student Profile data আনো (source of truth) ──
+  const { data: student } = await supabase
+    .from("students")
+    .select("name_en, father_name, father_name_en, mother_name, mother_name_en, dob, permanent_address, current_address, phone, passport_number, nid, gender")
+    .eq("id", req.params.studentId)
+    .eq("agency_id", req.user.agency_id)
+    .single();
+
+  if (!student) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
+
+  // Student Profile → field map (normalize করে)
+  const profileData = {
+    name_en: student.name_en || "",
+    father_name: student.father_name_en || student.father_name || "",
+    mother_name: student.mother_name_en || student.mother_name || "",
+    dob: student.dob || "",
+    permanent_address: student.permanent_address || "",
+    current_address: student.current_address || "",
+    phone: student.phone || "",
+    passport_number: student.passport_number || "",
+    nid: student.nid || "",
+    gender: student.gender || "",
+  };
+
+  // ── Step 2: সব document-এর field data আনো ──
   const { data: docs, error } = await supabase
     .from("documents")
     .select("id, doc_type, document_fields(field_name, field_value)")
@@ -132,25 +158,81 @@ router.get("/cross-validate/:studentId", checkPermission("documents", "read"), a
 
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
-  // Compare common fields across documents
-  const fieldMap = {};
-  for (const doc of docs) {
-    for (const f of doc.document_fields || []) {
-      if (!fieldMap[f.field_name]) fieldMap[f.field_name] = [];
-      fieldMap[f.field_name].push({ doc_type: doc.doc_type, doc_id: doc.id, value: f.field_value });
-    }
-  }
+  // ── docdata table থেকেও check (alternative storage) ──
+  const { data: docdata } = await supabase
+    .from("student_doc_data")
+    .select("doc_type_id, field_data")
+    .eq("student_id", req.params.studentId)
+    .eq("agency_id", req.user.agency_id);
+
+  // ── Step 3: Compare — Profile data vs Document data ──
+  // তুলনাযোগ্য fields — student profile key → document field key variations
+  const COMPARE_FIELDS = [
+    { profileKey: "name_en", docKeys: ["name_en", "full_name", "name", "applicant_name"], label: "Name (EN)" },
+    { profileKey: "father_name", docKeys: ["father_name", "father_en", "fathers_name", "father"], label: "Father's Name" },
+    { profileKey: "mother_name", docKeys: ["mother_name", "mother_en", "mothers_name", "mother"], label: "Mother's Name" },
+    { profileKey: "dob", docKeys: ["dob", "date_of_birth", "birth_date"], label: "Date of Birth" },
+    { profileKey: "permanent_address", docKeys: ["permanent_address", "address", "present_address"], label: "Permanent Address" },
+    { profileKey: "current_address", docKeys: ["current_address", "present_address"], label: "Current Address" },
+    { profileKey: "passport_number", docKeys: ["passport_number", "passport_no", "passport"], label: "Passport Number" },
+    { profileKey: "nid", docKeys: ["nid", "nid_number", "national_id"], label: "NID" },
+    { profileKey: "gender", docKeys: ["gender", "sex"], label: "Gender" },
+  ];
 
   const mismatches = [];
-  for (const [field, entries] of Object.entries(fieldMap)) {
-    if (entries.length < 2) continue;
-    const values = [...new Set(entries.map((e) => e.value))];
-    if (values.length > 1) {
-      mismatches.push({ field, entries });
+  const matches = [];
+
+  for (const cf of COMPARE_FIELDS) {
+    const profileValue = (profileData[cf.profileKey] || "").toString().trim().toLowerCase();
+    if (!profileValue) continue; // profile-এ data নেই — compare করার দরকার নেই
+
+    // document_fields table থেকে match খোঁজা
+    for (const doc of (docs || [])) {
+      for (const f of (doc.document_fields || [])) {
+        const fName = (f.field_name || "").toLowerCase();
+        if (!cf.docKeys.includes(fName)) continue;
+        const docValue = (f.field_value || "").toString().trim().toLowerCase();
+        if (!docValue) continue;
+
+        if (docValue !== profileValue) {
+          mismatches.push({
+            field: cf.label,
+            profile_value: profileData[cf.profileKey],
+            doc_type: doc.doc_type || "Unknown",
+            doc_value: f.field_value,
+          });
+        } else {
+          matches.push({ field: cf.label, doc_type: doc.doc_type });
+        }
+      }
+    }
+
+    // docdata table থেকেও check
+    for (const dd of (docdata || [])) {
+      const fd = dd.field_data || {};
+      for (const dk of cf.docKeys) {
+        const docValue = (fd[dk] || "").toString().trim().toLowerCase();
+        if (!docValue) continue;
+        if (docValue !== profileValue) {
+          mismatches.push({
+            field: cf.label,
+            profile_value: profileData[cf.profileKey],
+            doc_type: dd.doc_type_id || "Document",
+            doc_value: fd[dk],
+          });
+        } else {
+          matches.push({ field: cf.label, doc_type: dd.doc_type_id });
+        }
+      }
     }
   }
 
-  res.json({ mismatches, total_docs: docs.length });
+  res.json({
+    mismatches,
+    matches_count: matches.length,
+    total_docs: (docs || []).length + (docdata || []).length,
+    profile: profileData,
+  });
 }));
 
 module.exports = router;
