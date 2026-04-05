@@ -46,13 +46,18 @@ router.post("/save", asyncHandler(async (req, res) => {
   if (records.length > 200) return res.status(400).json({ error: "একসাথে সর্বোচ্চ ২০০ record" });
 
   const agencyId = req.user.agency_id;
+  // marked_by UUID — user ID UUID না হলে null রাখি (crash prevent)
+  const isValidUuid = (s) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+  const markedBy = isValidUuid(req.user.id) ? req.user.id : null;
+  const batchId = isValidUuid(req.body.batch_id) ? req.body.batch_id : null;
+
   const rows = records.map((r) => ({
     date,
     student_id: r.student_id,
     status: r.status,
-    batch_id: req.body.batch_id || null,
+    batch_id: batchId,
     agency_id: agencyId,
-    marked_by: req.user.id,
+    marked_by: markedBy,
   }));
 
   const { data, error } = await supabase
