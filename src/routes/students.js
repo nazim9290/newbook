@@ -864,11 +864,10 @@ router.post("/:id/generate-study-purpose", checkPermission("students", "write"),
 
   // ── Validation — required fields check ──
   const missing = [];
-  if (!student.name_en) missing.push("Full Name");
-  if (!student.dob) missing.push("Date of Birth");
-  if (!student.study_subject) missing.push("Study Subject (জাপানে কি পড়তে চায়)");
-  if (!(education || []).length) missing.push("Education (SSC/HSC)");
-  if (!schoolName) missing.push("Japanese School");
+  if (!student.name_en) missing.push("Full Name (Profile → Personal Info)");
+  if (!student.dob) missing.push("Date of Birth (Profile → Personal Info)");
+  if (!(education || []).length) missing.push("Education — SSC/HSC (Profile → Education → Add)");
+  if (!schoolName) missing.push("Japanese School (Profile → Destination Info → School)");
 
   if (missing.length > 0) {
     return res.status(400).json({
