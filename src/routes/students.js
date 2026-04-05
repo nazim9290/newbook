@@ -868,7 +868,6 @@ router.post("/:id/generate-study-purpose", checkPermission("students", "write"),
   if (!student.dob) missing.push("Date of Birth");
   if (!student.study_subject) missing.push("Study Subject (জাপানে কি পড়তে চায়)");
   if (!(education || []).length) missing.push("Education (SSC/HSC)");
-  if (!(jpExams || []).length && !(jpStudy || []).length) missing.push("Japanese Language (Exam or Study History)");
   if (!schoolName) missing.push("Japanese School");
 
   if (missing.length > 0) {
@@ -882,8 +881,14 @@ router.post("/:id/generate-study-purpose", checkPermission("students", "write"),
   // ── Student context — AI-কে student-এর সব data দেওয়া হচ্ছে ──
   const age = student.dob ? Math.floor((Date.now() - new Date(student.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : "";
   const jpExamInfo = (jpExams || []).map(e => `${e.exam_type} ${e.level} (${e.result})`).join(", ") || "None";
-  const jpStudyInfo = (jpStudy || []).map(s => `${s.institution} (${s.hours || "?"} hours)`).join(", ") || "None";
-  const totalJpHours = (jpStudy || []).reduce((sum, s) => sum + (parseInt(s.hours) || 0), 0);
+  // JP Study — record থাকলে সেটা, না থাকলে agency-ই default training provider (180 hours)
+  const hasJpStudy = (jpStudy || []).length > 0;
+  const jpStudyInfo = hasJpStudy
+    ? (jpStudy || []).map(s => `${s.institution} (${s.hours || "?"} hours)`).join(", ")
+    : `${agencyName} (180 hours)`;
+  const totalJpHours = hasJpStudy
+    ? (jpStudy || []).reduce((sum, s) => sum + (parseInt(s.hours) || 0), 0)
+    : 180;
 
   // ── Education sorting — সর্বশেষ শিক্ষা আগে, subject/group সহ ──
   const eduLevels = { "Masters": 6, "Bachelor": 5, "Degree": 5, "Honours": 5, "Diploma": 4, "HSC": 3, "Alim": 3, "SSC": 2, "Dakhil": 2, "Other": 1 };
