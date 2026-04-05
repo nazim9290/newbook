@@ -309,6 +309,7 @@ router.post("/generate", asyncHandler(async (req, res) => {
     // ── Pre-process: :jp modifier-এ long text AI translate (async) ──
     // resolveValue sync — তাই আগেই translate করে flat-এ cache করি
     const jpTranslateCache = {};
+    const tmplData = typeof tmpl.template_data === "string" ? (() => { try { return JSON.parse(tmpl.template_data); } catch { return {}; } })() : (tmpl.template_data || {});
     const placeholderList = tmplData?.placeholders || [];
     for (const p of placeholderList) {
       const field = p.field || p.key || "";
