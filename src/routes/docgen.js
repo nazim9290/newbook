@@ -340,8 +340,21 @@ router.post("/generate", asyncHandler(async (req, res) => {
       entries.forEach(entry => {
         if (entry.entryName.endsWith(".xml") || entry.entryName.endsWith(".rels")) {
           let content = entry.getData().toString("utf8");
-          // Replace {{key}} — but in docx XML, {{key}} might be split across XML tags
-          // First try simple replace
+
+          // ── Step 1: XML tag দিয়ে ভাঙা placeholder জোড়া লাগানো ──
+          // Word {{ ও }} এর মাঝে spellcheck/formatting tag ঢুকায়
+          // {{<tags>reason_for_study<tags>}} → {{reason_for_study}}
+          content = content.replace(/\{\{((?:<[^>]+>)*)([\w\s:_]+?)((?:<[^>]+>)*)\}\}/g, (match, pre, key, post) => {
+            return `{{${key.replace(/<[^>]+>/g, "").trim()}}}`;
+          });
+          // আরো complex split: <w:t>{{</w:t>...<w:t>key</w:t>...<w:t>}}</w:t>
+          // </w:t> ও <w:t> এর মাঝে placeholder key খুঁজে জোড়া লাগানো
+          content = content.replace(/<w:t[^>]*>\{\{<\/w:t>(.*?)<w:t[^>]*>\}\}<\/w:t>/gs, (match, inner) => {
+            const key = inner.replace(/<[^>]+>/g, "").trim();
+            return `<w:t>{{${key}}}</w:t>`;
+          });
+
+          // ── Step 2: Clean {{key}} replace ──
           let replaced = content.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
             const k = key.trim();
             return resolveValue(flat, k) || "";
