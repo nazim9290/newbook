@@ -862,14 +862,15 @@ router.post("/:id/generate-study-purpose", checkPermission("students", "write"),
   const agencyName = agency?.name || "";
   const customPrompt = agency?.settings?.study_purpose_prompt || "";
 
-  // ── Validation — required fields check ──
+  // ── Validation — required fields check (force=true হলে skip) ──
+  const force = req.body?.force === true;
   const missing = [];
   if (!student.name_en) missing.push("Full Name (Profile → Personal Info)");
   if (!student.dob) missing.push("Date of Birth (Profile → Personal Info)");
   if (!(education || []).length) missing.push("Education — SSC/HSC (Profile → Education → Add)");
   if (!schoolName) missing.push("Japanese School (Profile → Destination Info → School)");
 
-  if (missing.length > 0) {
+  if (missing.length > 0 && !force) {
     return res.status(400).json({
       error: "Purpose of Study generate করতে নিচের তথ্যগুলো আগে পূরণ করুন",
       code: "MISSING_FIELDS",
