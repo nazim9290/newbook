@@ -550,30 +550,35 @@ async function getOcrCredits(agencyId) {
 }
 
 // Credit deduct + usage log + transaction log
+// প্রতি scan-এ 5 credit deduct (৳1 = 1 credit, ৳5/scan)
+const CREDITS_PER_SCAN = 5;
+
 async function deductCredit(agencyId, userId, meta) {
-  // Credit 1 কমাও
-  await supabase.rpc("decrement_ocr_credits", { agency_id_input: agencyId, amount_input: 1 }).catch(() => {
-    // RPC না থাকলে manual update
-    supabase.from("agencies").update({ ocr_credits: supabase.raw("ocr_credits - 1") }).eq("id", agencyId).catch(() => {});
-  });
+  // Credit 5 কমাও — raw SQL দিয়ে atomic update
+  const { pool } = supabase;
+  try {
+    await pool.query("UPDATE agencies SET ocr_credits = GREATEST(0, ocr_credits - $1) WHERE id = $2", [CREDITS_PER_SCAN, agencyId]);
+  } catch (e) { console.error("[OCR Credit Deduct]", e.message); }
 
   // নতুন balance আনো
-  const newBalance = Math.max(0, (await getOcrCredits(agencyId)) - 0); // already decremented
+  const newBalance = await getOcrCredits(agencyId);
 
   // Usage log — কোন document কে scan করলো
   await supabase.from("ocr_usage").insert({
     agency_id: agencyId, user_id: userId,
     doc_type: meta.docType || "unknown", engine: meta.engine || "haiku",
-    credits_used: 1, confidence: meta.confidence || "low",
+    credits_used: CREDITS_PER_SCAN, confidence: meta.confidence || "low",
     fields_extracted: meta.fieldsCount || 0, file_name: meta.fileName || "",
   }).catch(() => {});
 
   // Transaction log — credit deduct record
   await supabase.from("ocr_credit_log").insert({
-    agency_id: agencyId, amount: -1, balance_after: newBalance,
+    agency_id: agencyId, amount: -CREDITS_PER_SCAN, balance_after: newBalance,
     type: "scan", description: `OCR scan: ${meta.docType || "unknown"} (${meta.engine})`,
     created_by: userId,
   }).catch(() => {});
+
+  return newBalance;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -681,13 +686,15 @@ router.post("/scan", upload.single("file"), async (req, res) => {
   const filePath = req.file.path;
 
   try {
-    // ── Step 0: Credit check — credit না থাকলে scan করতে দেওয়া হবে না ──
+    // ── Step 0: Credit check — প্রতি scan-এ 5 credit লাগে ──
+    const CREDITS_PER_SCAN = 5;
     const credits = await getOcrCredits(req.user.agency_id);
-    if (credits <= 0) {
+    if (credits < CREDITS_PER_SCAN) {
       return res.status(402).json({
-        error: "OCR credit শেষ — অ্যাডমিনের সাথে যোগাযোগ করুন",
+        error: `OCR credit অপর্যাপ্ত (${credits}/${CREDITS_PER_SCAN}) — অ্যাডমিনের সাথে যোগাযোগ করুন`,
         code: "NO_CREDITS",
-        credits: 0,
+        credits,
+        required: CREDITS_PER_SCAN,
       });
     }
 
@@ -755,9 +762,9 @@ router.post("/scan", upload.single("file"), async (req, res) => {
       console.log(`[OCR] Regex fallback: ${parsed.docType}, ${Object.keys(parsed.fields).length} fields`);
     }
 
-    // ── Step 4: Credit deduct + usage log ──
+    // ── Step 4: Credit deduct (5 credit/scan) + usage log ──
     const fieldsCount = Object.keys(result.fields).filter(k => !k.startsWith("_")).length;
-    await deductCredit(req.user.agency_id, req.user.id, {
+    const remainingCredits = await deductCredit(req.user.agency_id, req.user.id, {
       docType: result.docType, engine, confidence: result.confidence,
       fieldsCount, fileName: req.file.originalname,
     });
@@ -770,7 +777,8 @@ router.post("/scan", upload.single("file"), async (req, res) => {
       extracted_fields: result.fields,
       confidence: result.confidence,
       engine,
-      credits_remaining: Math.max(0, credits - 1),
+      credits_used: CREDITS_PER_SCAN,
+      credits_remaining: remainingCredits,
     });
 
   } catch (err) {
