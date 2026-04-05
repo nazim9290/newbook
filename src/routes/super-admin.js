@@ -89,7 +89,7 @@ router.post("/agencies", asyncHandler(async (req, res) => {
   if (!name || !subdomain || !admin_email || !admin_password) {
     return res.status(400).json({ error: "নাম, subdomain, admin email ও password আবশ্যক" });
   }
-  if (admin_password.length < 8) return res.status(400).json({ error: "Password কমপক্ষে ৮ অক্ষর" });
+  if (admin_password.length < 6) return res.status(400).json({ error: "Password কমপক্ষে ৬ অক্ষর" });
 
   // Subdomain unique কিনা check
   const { data: existing } = await supabase.from("agencies").select("id").eq("subdomain", subdomain).single();
