@@ -857,30 +857,59 @@ router.post("/:id/generate-study-purpose", checkPermission("students", "write"),
     if (school) { schoolName = school.name_en || schoolName; schoolCity = school.city || ""; }
   }
 
-  // ── Agency custom prompt (settings থেকে) ──
-  const { data: agency } = await supabase.from("agencies").select("settings").eq("id", req.user.agency_id).single();
+  // ── Agency info আনো — current institution হিসেবে agency name ব্যবহার হবে ──
+  const { data: agency } = await supabase.from("agencies").select("name, settings").eq("id", req.user.agency_id).single();
+  const agencyName = agency?.name || "";
   const customPrompt = agency?.settings?.study_purpose_prompt || "";
+
+  // ── Validation — required fields check ──
+  const missing = [];
+  if (!student.name_en) missing.push("Full Name");
+  if (!student.dob) missing.push("Date of Birth");
+  if (!student.study_subject) missing.push("Study Subject (জাপানে কি পড়তে চায়)");
+  if (!(education || []).length) missing.push("Education (SSC/HSC)");
+  if (!(jpExams || []).length && !(jpStudy || []).length) missing.push("Japanese Language (Exam or Study History)");
+  if (!schoolName) missing.push("Japanese School");
+
+  if (missing.length > 0) {
+    return res.status(400).json({
+      error: "Purpose of Study generate করতে নিচের তথ্যগুলো আগে পূরণ করুন",
+      code: "MISSING_FIELDS",
+      missing_fields: missing,
+    });
+  }
 
   // ── Student context — AI-কে student-এর সব data দেওয়া হচ্ছে ──
   const age = student.dob ? Math.floor((Date.now() - new Date(student.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : "";
   const jpExamInfo = (jpExams || []).map(e => `${e.exam_type} ${e.level} (${e.result})`).join(", ") || "None";
   const jpStudyInfo = (jpStudy || []).map(s => `${s.institution} (${s.hours || "?"} hours)`).join(", ") || "None";
-  const eduInfo = (education || []).map(e => `${e.level}: ${e.school_name} (${e.year || ""}, GPA: ${e.gpa || ""})`).join("; ") || "None";
+  const totalJpHours = (jpStudy || []).reduce((sum, s) => sum + (parseInt(s.hours) || 0), 0);
+
+  // ── Education sorting — সর্বশেষ শিক্ষা আগে, subject/group সহ ──
+  const eduLevels = { "Masters": 6, "Bachelor": 5, "Degree": 5, "Honours": 5, "Diploma": 4, "HSC": 3, "Alim": 3, "SSC": 2, "Dakhil": 2, "Other": 1 };
+  const sortedEdu = (education || []).sort((a, b) => (eduLevels[b.level] || 0) - (eduLevels[a.level] || 0));
+  const lastEdu = sortedEdu[0] || {};
+  const eduInfo = sortedEdu.map(e => `${e.level}: ${e.school_name || ""} (Year: ${e.year || "?"}, GPA: ${e.gpa || "?"}, Subject: ${e.group_name || "General"})`).join("; ");
 
   const studentContext = `
 Student Information:
-- Full Name: ${student.name_en || ""}
-- Age: ${age}
-- Country: ${student.nationality || student.country || "Bangladesh"}
-- Gender: ${student.gender || ""}
-- Education: ${eduInfo}
+- Full Name: ${student.name_en}
+- Age: ${age} years old
+- Gender: ${student.gender || "Male"}
+- Country of Birth: ${student.nationality || "Bangladesh"}
+- Last Education Level: ${lastEdu.level || "HSC"} (${lastEdu.group_name || "General"})
+- Last Education Institution: ${lastEdu.school_name || ""}
+- Education Subject/Group: ${lastEdu.group_name || "General"}
+- Full Education History: ${eduInfo}
+- Current Institution (Agency/Academy): ${agencyName}
+- Study Subject in Japan: ${student.study_subject || "Japanese Language"}
 - Japanese Language Exams: ${jpExamInfo}
 - Japanese Study History: ${jpStudyInfo}
-- Target Country: ${student.country || "Japan"}
+- Total Japanese Training Hours: ${totalJpHours || "150+"}
+- Daily Self-Study Hours: 2 hours
+- Japanese School in Japan: ${schoolName}${schoolCity ? ` (${schoolCity}, Japan)` : ""}
+- Target Country: Japan
 - Visa Type: ${student.visa_type || "Language Student"}
-- Japanese School: ${schoolName}${schoolCity ? ` (${schoolCity})` : ""}
-- Study Subject: ${student.study_subject || "Japanese Language"}
-- Batch/Intake: ${student.intake || student.batch || ""}
 `;
 
   // ── Default system prompt — agency customize না করলে এটা ব্যবহার হবে ──
