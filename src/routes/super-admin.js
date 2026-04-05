@@ -211,8 +211,13 @@ router.get("/pricing", asyncHandler(async (req, res) => {
 
 // PATCH /pricing — pricing config আপডেট
 router.patch("/pricing", asyncHandler(async (req, res) => {
-  const { per_student_fee, trial_days } = req.body;
-  const value = { per_student_fee: Number(per_student_fee) || 3000, trial_days: Number(trial_days) || 14, currency: "BDT" };
+  const { per_student_fee, trial_days, ocr_credit_price } = req.body;
+  const value = {
+    per_student_fee: Number(per_student_fee) || 3000,
+    trial_days: Number(trial_days) || 14,
+    ocr_credit_price: Number(ocr_credit_price) || 5,
+    currency: "BDT",
+  };
   await supabase.from("platform_settings").upsert({ key: "pricing", value, updated_at: new Date().toISOString() }, { onConflict: "key" });
   res.json({ success: true, pricing: value });
 }));
