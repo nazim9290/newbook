@@ -802,4 +802,164 @@ router.post("/:id/portal-access", checkPermission("students", "write"), asyncHan
   res.json(data);
 }));
 
+// ═══════════════════════════════════════════════════════
+// POST /api/students/:id/generate-study-purpose
+// AI দিয়ে "Purpose of Study" letter generate করে student record-এ save
+// প্রথমবার generate → save → পরবর্তীতে saved data ব্যবহার হবে
+// ═══════════════════════════════════════════════════════
+router.post("/:id/generate-study-purpose", checkPermission("students", "write"), asyncHandler(async (req, res) => {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: "AI API key configured নেই" });
+
+  // ── Student data আনো — AI prompt-এ ব্যবহার হবে ──
+  const { data: student } = await supabase
+    .from("students")
+    .select("*")
+    .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id)
+    .single();
+  if (!student) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
+
+  // ── JP Exam data আনো ──
+  const { data: jpExams } = await supabase
+    .from("student_jp_exams")
+    .select("exam_type, level, score, result")
+    .eq("student_id", req.params.id);
+
+  // ── JP Study history আনো ──
+  const { data: jpStudy } = await supabase
+    .from("student_jp_study")
+    .select("institution, hours")
+    .eq("student_id", req.params.id);
+
+  // ── Education আনো ──
+  const { data: education } = await supabase
+    .from("student_education")
+    .select("level, school_name, year, gpa, group_name")
+    .eq("student_id", req.params.id);
+
+  // ── School info ──
+  let schoolName = student.school || "";
+  let schoolCity = "";
+  if (student.school_id) {
+    const { data: school } = await supabase.from("schools").select("name_en, city").eq("id", student.school_id).single();
+    if (school) { schoolName = school.name_en || schoolName; schoolCity = school.city || ""; }
+  }
+
+  // ── Agency custom prompt (settings থেকে) ──
+  const { data: agency } = await supabase.from("agencies").select("settings").eq("id", req.user.agency_id).single();
+  const customPrompt = agency?.settings?.study_purpose_prompt || "";
+
+  // ── Student context — AI-কে student-এর সব data দেওয়া হচ্ছে ──
+  const age = student.dob ? Math.floor((Date.now() - new Date(student.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : "";
+  const jpExamInfo = (jpExams || []).map(e => `${e.exam_type} ${e.level} (${e.result})`).join(", ") || "None";
+  const jpStudyInfo = (jpStudy || []).map(s => `${s.institution} (${s.hours || "?"} hours)`).join(", ") || "None";
+  const eduInfo = (education || []).map(e => `${e.level}: ${e.school_name} (${e.year || ""}, GPA: ${e.gpa || ""})`).join("; ") || "None";
+
+  const studentContext = `
+Student Information:
+- Full Name: ${student.name_en || ""}
+- Age: ${age}
+- Country: ${student.nationality || student.country || "Bangladesh"}
+- Gender: ${student.gender || ""}
+- Education: ${eduInfo}
+- Japanese Language Exams: ${jpExamInfo}
+- Japanese Study History: ${jpStudyInfo}
+- Target Country: ${student.country || "Japan"}
+- Visa Type: ${student.visa_type || "Language Student"}
+- Japanese School: ${schoolName}${schoolCity ? ` (${schoolCity})` : ""}
+- Study Subject: ${student.study_subject || "Japanese Language"}
+- Batch/Intake: ${student.intake || student.batch || ""}
+`;
+
+  // ── Default system prompt — agency customize না করলে এটা ব্যবহার হবে ──
+  const defaultPrompt = `You are a professional academic writer specializing in Japanese student visa applications.
+
+Your ONLY task is to write a "Purpose of Study" letter.
+
+You MUST always write EXACTLY 6 paragraphs in this fixed order:
+
+PARAGRAPH 1 — Self Introduction
+Write about: full name, age, country of birth, completed exams/degrees, current institution and subject, and future academic goal.
+
+PARAGRAPH 2 — Purpose of Studying [Subject]
+Write about: why the student chose this specific subject, what skills and knowledge it provides, career opportunities (employment + entrepreneurship), and salary/professional value.
+
+PARAGRAPH 3 — Reasons for Choosing Japan
+Write about: Japan's excellence in this field, international value of a Japanese degree, part-time work opportunities, internal scholarship availability, JLPT and job market connection, and Japan's economic strength (3rd largest economy).
+
+PARAGRAPH 4 — Japanese Language Preparation
+Write about: which JLPT level completed, name of language academy, total training hours, and daily self-study practice hours.
+
+PARAGRAPH 5 — School Admission & Expectation
+Write about: name of the Japanese language school, its location/city, quality of teachers, and the student's hope and belief that this school will support their academic dream.
+
+PARAGRAPH 6 — Future Plan & Commitment
+Write about: commitment to disciplined and hardworking life in Japan, plan to excel academically, intention to work at a Japanese company after graduation, and long-term settlement plan in Japan.
+
+STRICT RULES:
+- Always write exactly 6 paragraphs — no more, no less
+- No bullet points — flowing prose only
+- No subject line, no greeting (do not write "Dear Sir/Madam")
+- Formal, sincere, and natural tone
+- Each paragraph must be self-contained and focused on its designated topic only
+- Do not mix topics between paragraphs
+- Word count: 350–420 words total`;
+
+  const systemPrompt = customPrompt || defaultPrompt;
+
+  try {
+    // ── Claude Haiku API call — Purpose of Study generate ──
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1500,
+        messages: [{
+          role: "user",
+          content: `${systemPrompt}\n\n${studentContext}\n\nWrite the Purpose of Study letter now. Return ONLY the letter text, nothing else.`
+        }],
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("[AI] Study purpose generation failed:", response.status);
+      return res.status(502).json({ error: "AI generation ব্যর্থ" });
+    }
+
+    const result = await response.json();
+    const purposeText = result.content?.[0]?.text || "";
+
+    if (!purposeText.trim()) return res.status(500).json({ error: "AI empty response" });
+
+    // ── Student record-এ save — পরবর্তীতে আর AI call লাগবে না ──
+    await supabase.from("students")
+      .update({
+        reason_for_study: purposeText,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", req.params.id)
+      .eq("agency_id", req.user.agency_id);
+
+    // Activity log
+    logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "students",
+      recordId: req.params.id, description: `AI Purpose of Study generated: ${student.name_en}`, ip: req.ip }).catch(() => {});
+
+    res.json({
+      success: true,
+      reason_for_study: purposeText,
+      word_count: purposeText.split(/\s+/).length,
+    });
+
+  } catch (err) {
+    console.error("[AI Error]", err.message);
+    res.status(500).json({ error: "AI generation failed: " + err.message });
+  }
+}));
+
 module.exports = router;
