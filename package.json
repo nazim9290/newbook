@@ -9,6 +9,7 @@
     "start": "node src/app.js"
   },
   "dependencies": {
+    "@sentry/node": "^10.47.0",
     "@supabase/supabase-js": "^2.49.4",
     "adm-zip": "^0.5.16",
     "bcryptjs": "^2.4.3",

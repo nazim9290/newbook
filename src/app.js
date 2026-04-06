@@ -9,8 +9,16 @@
  */
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
+const Sentry = require("@sentry/node");
 const express = require("express");
 const cors = require("cors");
+
+// ── Sentry — Backend error monitoring ──
+Sentry.init({
+  dsn: "https://adb80ce086a7c84fe884b97034217bd0@o4511123819331584.ingest.de.sentry.io/4511170818146384",
+  environment: process.env.NODE_ENV || "production",
+  tracesSampleRate: 0.2,
+});
 const cookieParser = require("cookie-parser");
 const rateLimit = require("express-rate-limit");
 
@@ -234,6 +242,9 @@ app.use("/api/ocr", heavyLimiter, require("./routes/ocr"));                     
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
 });
+
+// ── Sentry Error Handler — error Sentry-তে পাঠায় ──
+Sentry.setupExpressErrorHandler(app);
 
 // ── Error Handler — unexpected error ধরতে (DB details client-এ পাঠায় না) ──
 app.use((err, req, res, next) => {
