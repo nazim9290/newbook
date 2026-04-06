@@ -317,14 +317,32 @@ router.post("/generate", asyncHandler(async (req, res) => {
       if (field.includes(":jp")) {
         const base = field.split(":")[0];
         const val = String(flat[base] || "");
-        // Long text (50+ chars) → AI translate, short → resolveValue-এ JP_MAP handle করবে
         if (val.length >= 50) {
-          console.log(`[DocGen] AI translating ${base} (${val.length} chars)...`);
-          jpTranslateCache[base] = await translateToJapanese(val);
+          // ── Cache check — student record-এ আগে translate হয়ে থাকলে সেটা ব্যবহার ──
+          const cacheKey = `${base}_jp`;
+          const cachedJp = decrypted[cacheKey] || student[cacheKey] || "";
+          // Cache valid = source text না বদলালে (hash match)
+          const sourceHash = require("crypto").createHash("md5").update(val).digest("hex").slice(0, 8);
+          const cachedHash = decrypted[`${cacheKey}_hash`] || student[`${cacheKey}_hash`] || "";
+
+          if (cachedJp && cachedHash === sourceHash) {
+            console.log(`[DocGen] JP cache hit: ${base} (${cachedJp.length} chars)`);
+            jpTranslateCache[base] = cachedJp;
+          } else {
+            console.log(`[DocGen] AI translating ${base} (${val.length} chars)...`);
+            const translated = await translateToJapanese(val);
+            jpTranslateCache[base] = translated;
+            // ── Student record-এ cache save — পরেরবার AI call লাগবে না ──
+            try {
+              await supabase.from("students").update({
+                [cacheKey]: translated,
+                [`${cacheKey}_hash`]: sourceHash,
+              }).eq("id", student_id);
+            } catch (e) { console.error("[JP Cache Save]", e.message); }
+          }
         }
       }
     }
-    // Translated values flat-এ inject — :jp resolve করলে translated version পাবে
     Object.entries(jpTranslateCache).forEach(([k, v]) => { flat[k + "_jp"] = v; });
 
     // Replace {{placeholders}} in .docx
