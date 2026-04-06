@@ -309,8 +309,9 @@ router.post("/generate", asyncHandler(async (req, res) => {
     // ── Pre-process: :jp modifier-এ long text AI translate (async) ──
     // resolveValue sync — তাই আগেই translate করে flat-এ cache করি
     const jpTranslateCache = {};
-    const tmplData = typeof tmpl.template_data === "string" ? (() => { try { return JSON.parse(tmpl.template_data); } catch { return {}; } })() : (tmpl.template_data || {});
-    const placeholderList = tmplData?.placeholders || [];
+    // Mapping data — field_mappings বা placeholders বা template_data থেকে পড়ি
+    const parseJSON = (val) => { if (!val) return []; if (typeof val === "string") try { return JSON.parse(val); } catch { return []; } return Array.isArray(val) ? val : val?.placeholders || []; };
+    const placeholderList = parseJSON(tmpl.field_mappings) || parseJSON(tmpl.placeholders) || parseJSON(tmpl.template_data?.placeholders) || [];
     for (const p of placeholderList) {
       const field = p.field || p.key || "";
       if (field.includes(":jp")) {
@@ -354,17 +355,24 @@ router.post("/generate", asyncHandler(async (req, res) => {
             return `<w:t>{{${key}}}</w:t>`;
           });
 
-          // ── Step 2: Clean {{key}} replace ──
+          // ── Step 2: Mapping lookup — placeholder key → mapped field (with modifier) ──
+          // placeholderList-এ mapping আছে: { key: "reason_for_study", field: "reason_for_study:jp" }
+          const getMappedField = (rawKey) => {
+            const p = placeholderList.find(pl => pl.key === rawKey);
+            return p?.field || rawKey; // mapping থাকলে field ব্যবহার, না থাকলে raw key
+          };
+
           let replaced = content.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
             const k = key.trim();
-            return resolveValue(flat, k) || "";
+            const mappedField = getMappedField(k);
+            return resolveValue(flat, mappedField) || "";
           });
 
           // Handle split placeholders: {, {, k, e, y, }, } across <w:r> tags
-          // Remove XML tags between {{ and }}
           replaced = replaced.replace(/\{(?:<[^>]+>)*\{(?:<[^>]+>)*([^}<]+?)(?:<[^>]+>)*\}(?:<[^>]+>)*\}/g, (match, key) => {
             const k = key.replace(/<[^>]+>/g, "").trim();
-            return resolveValue(flat, k) || "";
+            const mappedField = getMappedField(k);
+            return resolveValue(flat, mappedField) || "";
           });
 
           zip.updateFile(entry.entryName, Buffer.from(replaced, "utf8"));
