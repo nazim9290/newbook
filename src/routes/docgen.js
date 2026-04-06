@@ -365,7 +365,14 @@ router.post("/generate", asyncHandler(async (req, res) => {
           let replaced = content.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
             const k = key.trim();
             const mappedField = getMappedField(k);
-            return resolveValue(flat, mappedField) || "";
+            let val = resolveValue(flat, mappedField) || "";
+            // Long text-এ \n\n (paragraph break) → Word XML paragraph break
+            // \n (single line break) → Word XML line break
+            if (val.includes("\n")) {
+              val = val.replace(/\n\n/g, "</w:t></w:r></w:p><w:p><w:r><w:t>")
+                       .replace(/\n/g, "</w:t><w:br/><w:t>");
+            }
+            return val;
           });
 
           // Handle split placeholders: {, {, k, e, y, }, } across <w:r> tags
