@@ -256,11 +256,13 @@ router.post("/:id/convert", checkPermission("visitors", "write"), asyncHandler(a
 
   // JP Exam data transfer — visitor-এ JP cert থাকলে student_jp_exams-এ যোগ
   if (visitor.has_jp_cert && visitor.jp_exam_type) {
-    await supabase.from("student_jp_exams").insert({
-      student_id: studentId, agency_id: agencyId,
-      exam_type: visitor.jp_exam_type, level: visitor.jp_level || null,
-      score: visitor.jp_score || null, result: "Pass",
-    }).catch(() => {});
+    try {
+      await supabase.from("student_jp_exams").insert({
+        student_id: studentId, agency_id: agencyId,
+        exam_type: visitor.jp_exam_type, level: visitor.jp_level || null,
+        score: visitor.jp_score || null, result: "Pass",
+      });
+    } catch (jpErr) { console.error("[JP Exam Transfer]", jpErr.message); }
   }
 
   await supabase.from("visitors").update({ status: "converted", converted_student_id: student.id }).eq("id", req.params.id);
