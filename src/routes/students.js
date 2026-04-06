@@ -950,7 +950,9 @@ STRICT RULES:
 - Formal, sincere, and natural tone
 - Each paragraph must be self-contained and focused on its designated topic only
 - Do not mix topics between paragraphs
-- Word count: 350–420 words total
+- Word count: STRICTLY 300–350 words total — MUST fit in ONE page
+- Each paragraph should be 3-5 sentences MAXIMUM — keep it concise
+- Separate each paragraph with a blank line
 
 HUMANIZE — CRITICAL:
 - Write like a real Bangladeshi student wrote it, NOT like AI generated
