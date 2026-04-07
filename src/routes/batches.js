@@ -123,7 +123,7 @@ router.get("/:id", asyncHandler(async (req, res) => {
 router.post("/", asyncHandler(async (req, res) => {
   // class_days string হিসেবে আসলে JSON parse করতে হবে
   const body = { ...req.body };
-  console.log("[Batch Create] body keys:", Object.keys(body), "class_days type:", typeof body.class_days, "class_days:", body.class_days);
+  console.log("[Batch Create]", JSON.stringify(body).substring(0, 500));
   if (typeof body.class_days === "string") {
     try { body.class_days = JSON.parse(body.class_days); } catch { body.class_days = []; }
   }
