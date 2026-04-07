@@ -184,7 +184,7 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
     .select()
     .single();
 
-  if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[DB] update students:", error.message, "| body keys:", Object.keys(updates).join(",")); return res.status(400).json({ error: error.message || "সার্ভার ত্রুটি" }); }
 
   // ── Sponsor upsert — frontend sponsor object থাকলে sponsors table-এ save ──
   if (body.sponsor && typeof body.sponsor === "object") {
