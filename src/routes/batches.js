@@ -111,9 +111,10 @@ router.get("/:id", asyncHandler(async (req, res) => {
     .select("*, students(name_en, phone, status)")
     .eq("batch_id", req.params.id);
 
-  // Class tests
+  // Class tests — scores সহ load
   const { data: tests } = await supabase.from("class_tests")
-    .select("*").eq("batch_id", req.params.id).order("date", { ascending: false });
+    .select("*, class_test_scores(student_id, score)")
+    .eq("batch_id", req.params.id).order("date", { ascending: false });
 
   res.json({ ...batch, enrollments: enrollments || [], tests: tests || [] });
 }));
@@ -239,28 +240,94 @@ router.post("/:id/enroll", asyncHandler(async (req, res) => {
   res.status(201).json(data);
 }));
 
-// POST /api/batches/:id/tests — ক্লাস টেস্ট যোগ
+// POST /api/batches/:id/tests — ক্লাস টেস্ট যোগ (total_marks + individual scores)
 router.post("/:id/tests", asyncHandler(async (req, res) => {
-  const { test_name, date, avg_score, scores } = req.body;
+  const { test_name, date, total_marks, scores } = req.body;
   if (!test_name) return res.status(400).json({ error: "টেস্টের নাম দিন" });
+
+  // class_tests table-এ test তৈরি
   const { data, error } = await supabase.from("class_tests").insert({
+    agency_id: req.user.agency_id,
     batch_id: req.params.id,
     test_name, date: date || null,
-    avg_score: avg_score || 0,
-    scores: scores ? JSON.stringify(scores) : "{}",
+    total_marks: total_marks || 100,
   }).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
-  // Cache invalidate — ক্লাস টেস্ট যোগ হলে cache মুছে দাও
+  // class_test_scores table-এ প্রতি student-এর score insert
+  if (scores && typeof scores === "object") {
+    const scoreRows = Object.entries(scores)
+      .filter(([, v]) => v !== "" && v !== null && v !== undefined)
+      .map(([student_id, score]) => ({ test_id: data.id, student_id, score: parseInt(score) || 0 }));
+    if (scoreRows.length > 0) {
+      const { error: scoreErr } = await supabase.from("class_test_scores").insert(scoreRows);
+      if (scoreErr) console.error("[DB class_test_scores]", scoreErr.message);
+    }
+  }
+
+  // Cache invalidate
   cache.invalidate(req.user.agency_id);
 
-  res.status(201).json(data);
+  // Activity log
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "class_tests",
+    recordId: data.id, description: `Class test: ${test_name}`, ip: req.ip }).catch(() => {});
+
+  // scores সহ return
+  const { data: full } = await supabase.from("class_tests")
+    .select("*, class_test_scores(student_id, score)")
+    .eq("id", data.id).single();
+  res.status(201).json(full || data);
 }));
 
-// GET /api/batches/:id/tests — ক্লাস টেস্ট তালিকা
+// PUT /api/batches/:id/tests/:testId — ক্লাস টেস্ট আপডেট
+router.put("/:id/tests/:testId", asyncHandler(async (req, res) => {
+  const { test_name, date, total_marks, scores } = req.body;
+
+  // class_tests table আপডেট
+  const updates = {};
+  if (test_name !== undefined) updates.test_name = test_name;
+  if (date !== undefined) updates.date = date || null;
+  if (total_marks !== undefined) updates.total_marks = total_marks;
+
+  if (Object.keys(updates).length > 0) {
+    const { error } = await supabase.from("class_tests").update(updates)
+      .eq("id", req.params.testId).eq("agency_id", req.user.agency_id);
+    if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "আপডেট ব্যর্থ" }); }
+  }
+
+  // scores আপডেট — পুরানো মুছে নতুন insert (upsert)
+  if (scores && typeof scores === "object") {
+    const scoreRows = Object.entries(scores)
+      .filter(([, v]) => v !== "" && v !== null && v !== undefined)
+      .map(([student_id, score]) => ({ test_id: req.params.testId, student_id, score: parseInt(score) || 0 }));
+    // পুরানো scores মুছে দাও
+    await supabase.from("class_test_scores").delete().eq("test_id", req.params.testId);
+    // নতুন scores insert
+    if (scoreRows.length > 0) {
+      const { error: scoreErr } = await supabase.from("class_test_scores").insert(scoreRows);
+      if (scoreErr) console.error("[DB class_test_scores]", scoreErr.message);
+    }
+  }
+
+  // Cache invalidate
+  cache.invalidate(req.user.agency_id);
+
+  // Activity log
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "class_tests",
+    recordId: req.params.testId, description: `Class test updated: ${test_name || ""}`, ip: req.ip }).catch(() => {});
+
+  // Full data return
+  const { data: full } = await supabase.from("class_tests")
+    .select("*, class_test_scores(student_id, score)")
+    .eq("id", req.params.testId).single();
+  res.json(full);
+}));
+
+// GET /api/batches/:id/tests — ক্লাস টেস্ট তালিকা (scores সহ)
 router.get("/:id/tests", asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("class_tests")
-    .select("*").eq("batch_id", req.params.id).order("date", { ascending: false });
+    .select("*, class_test_scores(student_id, score)")
+    .eq("batch_id", req.params.id).order("date", { ascending: false });
   if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data || []);
 }));
