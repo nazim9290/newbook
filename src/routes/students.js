@@ -339,10 +339,22 @@ router.post("/:id/payments", checkPermission("students", "write"), asyncHandler(
   res.status(201).json(data);
 }));
 
-// POST /api/students/:id/exam-result — JLPT/NAT পরীক্ষার ফলাফল save
+// POST /api/students/:id/exam-result — JLPT/NAT পরীক্ষার ফলাফল save/update
 router.post("/:id/exam-result", checkPermission("students", "write"), asyncHandler(async (req, res) => {
-  const { exam_type, level, score, result, exam_date } = req.body;
+  const { exam_type, level, score, result, exam_date, exam_id } = req.body;
   if (!exam_type) return res.status(400).json({ error: "পরীক্ষার ধরন দিন" });
+
+  // exam_id থাকলে update, না থাকলে insert
+  if (exam_id) {
+    const { data, error } = await supabase.from("student_jp_exams").update({
+      exam_type, level, score: score || null, result: result || null,
+      exam_date: exam_date || null,
+    }).eq("id", exam_id).eq("agency_id", req.user.agency_id).select().single();
+    if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "আপডেট ব্যর্থ" }); }
+    return res.json(data);
+  }
+
+  // নতুন insert
   const { data, error } = await supabase.from("student_jp_exams").insert({
     student_id: req.params.id,
     agency_id: req.user.agency_id,
