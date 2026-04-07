@@ -11,7 +11,7 @@ router.use(auth);
 // GET /api/tasks — agency_id ফিল্টার সহ
 router.get("/", checkPermission("tasks", "read"), asyncHandler(async (req, res) => {
   const { status, assigned_to, priority } = req.query;
-  let query = supabase.from("tasks").select("*")
+  let query = supabase.from("tasks").select("*, students(name_en), schools(name_en)")
     .eq("agency_id", req.user.agency_id)
     .order("due_date");
   if (status && status !== "All") query = query.eq("status", status);
