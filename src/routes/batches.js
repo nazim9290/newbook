@@ -81,16 +81,31 @@ router.get("/", asyncHandler(async (req, res) => {
     try {
       const pool = supabase.pool;
       const batchIds = data.map(b => b.id);
-      const { rows: counts } = await pool.query(
-        `SELECT batch_id, COUNT(*)::int AS count
-         FROM batch_students
-         WHERE batch_id = ANY($1)
-         GROUP BY batch_id`,
-        [batchIds]
-      );
+      const [{ rows: counts }, { rows: passed }] = await Promise.all([
+        pool.query(
+          `SELECT batch_id, COUNT(*)::int AS count
+           FROM batch_students
+           WHERE batch_id = ANY($1)
+           GROUP BY batch_id`,
+          [batchIds]
+        ),
+        // পরীক্ষায় পাস — batch-এর enrolled students-দের মধ্যে কতজন exam pass করেছে
+        pool.query(
+          `SELECT bs.batch_id, COUNT(DISTINCT e.student_id)::int AS passed
+           FROM batch_students bs
+           JOIN student_jp_exams e ON e.student_id = bs.student_id AND e.result = 'Passed'
+           WHERE bs.batch_id = ANY($1)
+           GROUP BY bs.batch_id`,
+          [batchIds]
+        ),
+      ]);
       const countMap = Object.fromEntries(counts.map(r => [r.batch_id, r.count]));
-      data.forEach(b => b.enrolledCount = countMap[b.id] || 0);
-    } catch { data.forEach(b => b.enrolledCount = 0); }
+      const passedMap = Object.fromEntries(passed.map(r => [r.batch_id, r.passed]));
+      data.forEach(b => {
+        b.enrolledCount = countMap[b.id] || 0;
+        b.passedCount = passedMap[b.id] || 0;
+      });
+    } catch { data.forEach(b => { b.enrolledCount = 0; b.passedCount = 0; }); }
   }
 
   res.json(data);
