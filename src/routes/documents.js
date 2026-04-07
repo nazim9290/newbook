@@ -181,12 +181,16 @@ router.get("/cross-validate/:studentId", checkPermission("documents", "read"), a
     doc.fields = docFields.filter(f => f.document_id === doc.id);
   });
 
-  // ── document_data table থেকেও check (DocType system storage) ──
+  // ── document_data table থেকেও check (DocType system storage) — doc_type name সহ ──
   const { data: docdata } = await supabase
     .from("document_data")
-    .select("doc_type_id, field_data")
+    .select("doc_type_id, field_data, doc_types(name)")
     .eq("student_id", req.params.studentId)
     .eq("agency_id", req.user.agency_id);
+  // doc_type name resolve
+  (docdata || []).forEach(dd => {
+    dd.doc_type_name = dd.doc_types?.name || dd.doc_type_id;
+  });
 
   // ── Step 3: Compare — Profile data vs Document data ──
   // তুলনাযোগ্য fields — student profile key → document field key variations
@@ -246,11 +250,11 @@ router.get("/cross-validate/:studentId", checkPermission("documents", "read"), a
           mismatches.push({
             field: cf.label,
             profile_value: profileData[cf.profileKey],
-            doc_type: dd.doc_type_id || "Document",
+            doc_type: dd.doc_type_name || "Document",
             doc_value: fd[dk],
           });
         } else {
-          matches.push({ field: cf.label, doc_type: dd.doc_type_id });
+          matches.push({ field: cf.label, doc_type: dd.doc_type_name });
         }
       }
     }
