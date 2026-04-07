@@ -130,9 +130,15 @@ router.post("/", asyncHandler(async (req, res) => {
     if (req.body[col] !== undefined) record[col] = req.body[col];
   }
   if (!record.branch) record.branch = req.user.branch || "Main";
-  // class_days string → JSON parse
-  if (typeof record.class_days === "string") {
-    try { record.class_days = JSON.parse(record.class_days); } catch { record.class_days = []; }
+  // class_days → JSONB column-এ stringify করে পাঠাতে হবে
+  if (record.class_days) {
+    if (typeof record.class_days === "string") {
+      // already string — validate JSON
+      try { JSON.parse(record.class_days); } catch { record.class_days = "[]"; }
+    } else {
+      // array → stringify
+      record.class_days = JSON.stringify(record.class_days);
+    }
   }
   const { data, error } = await supabase.from("batches").insert(record).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
