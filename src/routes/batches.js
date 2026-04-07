@@ -121,10 +121,15 @@ router.get("/:id", asyncHandler(async (req, res) => {
 // POST /api/batches — নতুন ব্যাচ তৈরি
 // agency_id JWT থেকে auto-set, branch frontend থেকে আসে
 router.post("/", asyncHandler(async (req, res) => {
+  // class_days string হিসেবে আসলে JSON parse করতে হবে
+  const body = { ...req.body };
+  if (typeof body.class_days === "string") {
+    try { body.class_days = JSON.parse(body.class_days); } catch { body.class_days = []; }
+  }
   const record = {
-    ...req.body,
+    ...body,
     agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001",
-    branch: req.body.branch || req.user.branch || "Main",
+    branch: body.branch || req.user.branch || "Main",
   };
   const { data, error } = await supabase.from("batches").insert(record).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
