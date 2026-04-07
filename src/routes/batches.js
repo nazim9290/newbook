@@ -123,15 +123,17 @@ router.get("/:id", asyncHandler(async (req, res) => {
 router.post("/", asyncHandler(async (req, res) => {
   // class_days string হিসেবে আসলে JSON parse করতে হবে
   const body = { ...req.body };
-  console.log("[Batch Create]", JSON.stringify(body).substring(0, 500));
-  if (typeof body.class_days === "string") {
-    try { body.class_days = JSON.parse(body.class_days); } catch { body.class_days = []; }
+  // Valid batch columns only — unknown keys filter out
+  const BATCH_COLS = ["name","country","level","start_date","end_date","capacity","schedule","teacher","status","class_days","class_hours_per_day","class_time","branch"];
+  const record = { agency_id: req.user.agency_id };
+  for (const col of BATCH_COLS) {
+    if (req.body[col] !== undefined) record[col] = req.body[col];
   }
-  const record = {
-    ...body,
-    agency_id: req.user.agency_id || "a0000000-0000-0000-0000-000000000001",
-    branch: body.branch || req.user.branch || "Main",
-  };
+  if (!record.branch) record.branch = req.user.branch || "Main";
+  // class_days string → JSON parse
+  if (typeof record.class_days === "string") {
+    try { record.class_days = JSON.parse(record.class_days); } catch { record.class_days = []; }
+  }
   const { data, error } = await supabase.from("batches").insert(record).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
