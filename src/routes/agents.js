@@ -12,6 +12,21 @@ router.get("/", checkPermission("agents", "read"), asyncHandler(async (req, res)
   if (status && status !== "All") q = q.eq("status", status);
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+
+  // প্রতি agent-এ রেফার করা students count ও তালিকা যোগ
+  if (data && data.length > 0) {
+    try {
+      const agentIds = data.map(a => a.id);
+      const { data: referred } = await supabase.from("students")
+        .select("id, name_en, agent_id, status")
+        .in("agent_id", agentIds);
+      // agent-ভিত্তিক group
+      data.forEach(a => {
+        a.students = (referred || []).filter(s => s.agent_id === a.id);
+      });
+    } catch { data.forEach(a => { a.students = []; }); }
+  }
+
   res.json(data);
 }));
 
