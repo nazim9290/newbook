@@ -222,11 +222,12 @@ router.post("/:id/enroll", asyncHandler(async (req, res) => {
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
   // ── student.batch ও batch_id sync — ব্যাচ নাম ও ID student record-এ সেট ──
-  await supabase.from("students")
-    .update({ batch: batch.name, batch_id: batch.id })
-    .eq("id", student_id)
-    .eq("agency_id", req.user.agency_id)
-    .catch(() => {});
+  try {
+    await supabase.from("students")
+      .update({ batch: batch.name, batch_id: batch.id })
+      .eq("id", student_id)
+      .eq("agency_id", req.user.agency_id);
+  } catch (e) { console.error("[Batch Sync]", e.message); }
 
   // Cache invalidate — enrollment হলে cache মুছে দাও
   cache.invalidate(req.user.agency_id);
