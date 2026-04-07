@@ -275,6 +275,27 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
     } catch (e) { console.error("[Batch Sync]", e.message); }
   }
 
+  // ── Partner sync — partner_id পরিবর্তন হলে partner_students junction table আপডেট ──
+  if (body.partner_id !== undefined && data) {
+    try {
+      // পুরনো partner link মুছে দাও
+      await supabase.from("partner_students").delete().eq("student_id", req.params.id);
+      // নতুন partner_id থাকলে junction record তৈরি
+      if (body.partner_id) {
+        // partner-এর commission_rate দিয়ে fee set
+        const { data: partner } = await supabase.from("partner_agencies").select("commission_rate").eq("id", body.partner_id).single();
+        await supabase.from("partner_students").insert({
+          partner_id: body.partner_id,
+          student_id: req.params.id,
+          student_name: data.name_en || "",
+          fee: partner?.commission_rate || 0,
+          paid: 0,
+          status: "active",
+        });
+      }
+    } catch (e) { console.error("[Partner Sync]", e.message); }
+  }
+
   // ── School sync — school name থেকে school_id, বা school_id থেকে name sync ──
   if (body.school && !body.school_id) {
     // নাম দিয়ে school_id খুঁজো
