@@ -171,6 +171,11 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
   if (body.father) updates.father_name = body.father;
   if (body.mother) updates.mother_name = body.mother;
 
+  // UUID columns — empty string হলে null করো (PostgreSQL UUID type empty string accept করে না)
+  ["school_id", "batch_id", "agent_id", "partner_id", "assignee_id"].forEach(k => {
+    if (updates[k] === "") updates[k] = null;
+  });
+
   // প্রতিটি save-এ updated_at নতুন করে সেট — পরবর্তী conflict check-এর জন্য
   updates.updated_at = new Date().toISOString();
 
