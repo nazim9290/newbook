@@ -113,7 +113,7 @@ router.get("/:id", asyncHandler(async (req, res) => {
 
   // Class tests — scores সহ load
   const { data: tests } = await supabase.from("class_tests")
-    .select("*, class_test_scores(student_id, score)")
+    .select("*, class_test_scores!test_id(student_id, score)")
     .eq("batch_id", req.params.id).order("date", { ascending: false });
 
   res.json({ ...batch, enrollments: enrollments || [], tests: tests || [] });
@@ -274,7 +274,7 @@ router.post("/:id/tests", asyncHandler(async (req, res) => {
 
   // scores সহ return
   const { data: full } = await supabase.from("class_tests")
-    .select("*, class_test_scores(student_id, score)")
+    .select("*, class_test_scores!test_id(student_id, score)")
     .eq("id", data.id).single();
   res.status(201).json(full || data);
 }));
@@ -318,7 +318,7 @@ router.put("/:id/tests/:testId", asyncHandler(async (req, res) => {
 
   // Full data return
   const { data: full } = await supabase.from("class_tests")
-    .select("*, class_test_scores(student_id, score)")
+    .select("*, class_test_scores!test_id(student_id, score)")
     .eq("id", req.params.testId).single();
   res.json(full);
 }));
@@ -326,7 +326,7 @@ router.put("/:id/tests/:testId", asyncHandler(async (req, res) => {
 // GET /api/batches/:id/tests — ক্লাস টেস্ট তালিকা (scores সহ)
 router.get("/:id/tests", asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("class_tests")
-    .select("*, class_test_scores(student_id, score)")
+    .select("*, class_test_scores!test_id(student_id, score)")
     .eq("batch_id", req.params.id).order("date", { ascending: false });
   if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   res.json(data || []);

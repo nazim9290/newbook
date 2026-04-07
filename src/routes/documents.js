@@ -150,17 +150,33 @@ router.get("/cross-validate/:studentId", checkPermission("documents", "read"), a
   };
 
   // ── Step 2: সব document-এর field data আনো ──
+  // documents table — extracted_data (OCR থেকে) + document_fields (manual input)
   const { data: docs, error } = await supabase
     .from("documents")
-    .select("id, doc_type, document_fields(field_name, field_value)")
+    .select("id, doc_type, extracted_data")
     .eq("agency_id", req.user.agency_id)
     .eq("student_id", req.params.studentId);
 
-  if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  if (error) { console.error("[Cross-Validate] documents query:", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
-  // ── docdata table থেকেও check (alternative storage) ──
+  // document_fields table — আলাদা query (FK hint সমস্যা এড়াতে)
+  let docFields = [];
+  if (docs && docs.length > 0) {
+    const docIds = docs.map(d => d.id);
+    const { data: fields } = await supabase
+      .from("document_fields")
+      .select("document_id, field_name, field_value")
+      .in("document_id", docIds);
+    docFields = fields || [];
+  }
+  // প্রতি document-এ fields attach
+  (docs || []).forEach(doc => {
+    doc.fields = docFields.filter(f => f.document_id === doc.id);
+  });
+
+  // ── document_data table থেকেও check (DocType system storage) ──
   const { data: docdata } = await supabase
-    .from("student_doc_data")
+    .from("document_data")
     .select("doc_type_id, field_data")
     .eq("student_id", req.params.studentId)
     .eq("agency_id", req.user.agency_id);
@@ -186,21 +202,27 @@ router.get("/cross-validate/:studentId", checkPermission("documents", "read"), a
     const profileValue = (profileData[cf.profileKey] || "").toString().trim().toLowerCase();
     if (!profileValue) continue; // profile-এ data নেই — compare করার দরকার নেই
 
-    // document_fields table থেকে match খোঁজা
+    // document_fields + extracted_data থেকে match খোঁজা
     for (const doc of (docs || [])) {
-      for (const f of (doc.document_fields || [])) {
+      // document_fields table থেকে
+      for (const f of (doc.fields || [])) {
         const fName = (f.field_name || "").toLowerCase();
         if (!cf.docKeys.includes(fName)) continue;
         const docValue = (f.field_value || "").toString().trim().toLowerCase();
         if (!docValue) continue;
-
         if (docValue !== profileValue) {
-          mismatches.push({
-            field: cf.label,
-            profile_value: profileData[cf.profileKey],
-            doc_type: doc.doc_type || "Unknown",
-            doc_value: f.field_value,
-          });
+          mismatches.push({ field: cf.label, profile_value: profileData[cf.profileKey], doc_type: doc.doc_type || "Unknown", doc_value: f.field_value });
+        } else {
+          matches.push({ field: cf.label, doc_type: doc.doc_type });
+        }
+      }
+      // extracted_data (OCR) থেকেও check
+      const ed = doc.extracted_data || {};
+      for (const dk of cf.docKeys) {
+        const docValue = (ed[dk] || "").toString().trim().toLowerCase();
+        if (!docValue) continue;
+        if (docValue !== profileValue) {
+          mismatches.push({ field: cf.label, profile_value: profileData[cf.profileKey], doc_type: doc.doc_type || "Unknown", doc_value: ed[dk] });
         } else {
           matches.push({ field: cf.label, doc_type: doc.doc_type });
         }
