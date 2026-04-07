@@ -21,7 +21,7 @@ const SCHOOL_COLS = [
   "name_en", "name_jp", "country", "city", "prefecture", "postal_code", "address",
   "contact_person", "contact_email", "contact_phone", "website",
   ...NUMERIC_COLS,
-  "min_jp_level", "interview_type", "has_dormitory",
+  "min_jp_level", "interview_type", "has_dormitory", "immigration_bureau",
   "deadline_april", "deadline_october", "status", "notes",
 ];
 
