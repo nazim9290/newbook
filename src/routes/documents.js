@@ -135,18 +135,25 @@ router.get("/cross-validate/:studentId", checkPermission("documents", "read"), a
 
   if (!student) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
 
-  // Student Profile → field map (normalize করে)
+  // Encrypted fields decrypt করো
+  const { decryptSensitiveFields } = require("../lib/crypto");
+  const dec = decryptSensitiveFields(student);
+
+  // DOB format — ISO → YYYY-MM-DD
+  const formatDate = (d) => { if (!d) return ""; const s = String(d); return s.length > 10 ? s.slice(0, 10) : s; };
+
+  // Student Profile → field map (decrypt ও normalize করে)
   const profileData = {
-    name_en: student.name_en || "",
-    father_name: student.father_name_en || student.father_name || "",
-    mother_name: student.mother_name_en || student.mother_name || "",
-    dob: student.dob || "",
-    permanent_address: student.permanent_address || "",
-    current_address: student.current_address || "",
-    phone: student.phone || "",
-    passport_number: student.passport_number || "",
-    nid: student.nid || "",
-    gender: student.gender || "",
+    name_en: dec.name_en || "",
+    father_name: dec.father_name_en || dec.father_name || "",
+    mother_name: dec.mother_name_en || dec.mother_name || "",
+    dob: formatDate(dec.dob),
+    permanent_address: dec.permanent_address || "",
+    current_address: dec.current_address || "",
+    phone: dec.phone || "",
+    passport_number: dec.passport_number || "",
+    nid: dec.nid || "",
+    gender: dec.gender || "",
   };
 
   // ── Step 2: সব document-এর field data আনো ──
