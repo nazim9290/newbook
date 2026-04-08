@@ -23,6 +23,11 @@ router.get("/", checkPermission("students", "read"), asyncHandler(async (req, re
   // schools(name_en) JOIN করলে name_en ambiguous হয় search-এ — তাই JOIN সরানো
   let query = supabase.from("students").select("*", { count: "exact" }).eq("agency_id", req.user.agency_id);
 
+  // Branch-based access — counselor/staff শুধু নিজের branch-এর student দেখবে
+  const { getBranchFilter } = require("../lib/branchFilter");
+  const userBranch = getBranchFilter(req.user);
+  if (userBranch) query = query.eq("branch", userBranch);
+
   if (search) {
     query = query.or(`name_en.ilike.%${search}%,phone.ilike.%${search}%,id.ilike.%${search}%`);
   }

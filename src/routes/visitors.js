@@ -21,6 +21,11 @@ router.get("/", checkPermission("visitors", "read"), asyncHandler(async (req, re
 
   let query = supabase.from("visitors").select("*", { count: "exact" }).eq("agency_id", req.user.agency_id);
 
+  // Branch-based access — counselor/staff শুধু নিজের branch-এর visitor দেখবে
+  const { getBranchFilter } = require("../lib/branchFilter");
+  const userBranch = getBranchFilter(req.user);
+  if (userBranch) query = query.eq("branch", userBranch);
+
   if (search) {
     query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
   }
