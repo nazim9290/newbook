@@ -6,7 +6,8 @@ const { checkPermission } = require("../middleware/checkPermission");
 const router = express.Router();
 router.use(auth);
 
-router.get("/", checkPermission("agents", "read"), asyncHandler(async (req, res) => {
+// GET — সব authenticated user agent list পড়তে পারবে (dropdown/reference-এর জন্য)
+router.get("/", asyncHandler(async (req, res) => {
   const { status } = req.query;
   let q = supabase.from("agents").select("*").eq("agency_id", req.user.agency_id).order("name");
   if (status && status !== "All") q = q.eq("status", status);
