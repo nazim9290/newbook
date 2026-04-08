@@ -72,7 +72,11 @@ router.get("/", asyncHandler(async (req, res) => {
   const { status, branch } = req.query;
   let query = supabase.from("batches").select("*").eq("agency_id", req.user.agency_id).order("start_date", { ascending: false });
   if (status && status !== "All") query = query.eq("status", status);
-  if (branch && branch !== "All") query = query.eq("branch", branch);
+  // Branch-based access — counselor/staff শুধু নিজের branch-এর batch দেখবে
+  const { getBranchFilter } = require("../lib/branchFilter");
+  const userBranch = getBranchFilter(req.user);
+  if (userBranch) query = query.eq("branch", userBranch);
+  else if (branch && branch !== "All") query = query.eq("branch", branch);
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 

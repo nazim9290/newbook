@@ -10,6 +10,7 @@ const router = express.Router();
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const supabase = require("../lib/supabase");
+const { logActivity } = require("../lib/activityLog");
 
 // ── GET /api/partners — সব partner এজেন্সি + student count + revenue ──
 router.get("/", auth, asyncHandler(async (req, res) => {
@@ -79,6 +80,7 @@ router.post("/", auth, asyncHandler(async (req, res) => {
   }).select().single();
 
   if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "partners", recordId: data.id, description: `পার্টনার তৈরি: ${data.name}`, ip: req.ip }).catch(() => {});
   res.status(201).json(data);
 }));
 
@@ -101,6 +103,7 @@ router.patch("/:id", auth, asyncHandler(async (req, res) => {
     .select().single();
 
   if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "partners", recordId: req.params.id, description: `পার্টনার আপডেট: ${data.name}`, ip: req.ip }).catch(() => {});
   res.json(data);
 }));
 
