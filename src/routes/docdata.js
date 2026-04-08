@@ -10,6 +10,7 @@ const supabase = require("../lib/supabase");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { getBranchFilter } = require("../lib/branchFilter");
+const { logActivity } = require("../lib/activityLog");
 
 const router = express.Router();
 router.use(auth);
@@ -158,6 +159,16 @@ router.post("/save", asyncHandler(async (req, res) => {
     .single();
 
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // ── Activity Log — কে কখন কোন document আপডেট করেছে ──
+  const docName = data?.doc_types?.name || doc_type_id;
+  logActivity({
+    agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "documents",
+    recordId: data?.id || student_id,
+    description: `ডকুমেন্ট আপডেট: ${docName} — ${student_id} (by ${req.user.name || req.user.email || "Staff"})`,
+    ip: req.ip,
+  }).catch(() => {});
+
   res.json(data);
 }));
 

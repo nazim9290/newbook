@@ -255,6 +255,8 @@ app.use((err, req, res, next) => {
 
 // ── Server Start ──
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`AgencyBook API running on http://localhost:${PORT}`);
+  // HQ branch cache load — branch-based access control
+  try { const { loadHqBranches } = require("./lib/branchFilter"); const supabase = require("./lib/supabase"); await loadHqBranches(supabase); } catch (e) { console.error("[HQ Cache]", e.message); }
 });
