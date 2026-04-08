@@ -20,10 +20,10 @@ const fs = require("fs");
 // ── PostgreSQL Connection Pool ──
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 100,
-  idleTimeoutMillis: 30000,
+  max: 20,                    // ৪ PM2 instance × ২০ = ৮০ (PostgreSQL max_connections ২০০-এর মধ্যে safe)
+  idleTimeoutMillis: 30000,   // ৩০ সেকেন্ড idle থাকলে connection বন্ধ
   connectionTimeoutMillis: 5000,
-  statement_timeout: 30000,  // ৩০ সেকেন্ডের বেশি query বন্ধ হবে
+  statement_timeout: 30000,   // ৩০ সেকেন্ডের বেশি query বন্ধ হবে
 });
 
 // পুল মনিটরিং
