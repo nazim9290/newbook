@@ -28,22 +28,22 @@ router.get("/income", checkPermission("accounts", "read"), asyncHandler(async (r
   const { count: total, error: countError } = await countQuery;
   if (countError) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
-  // পেজিনেটেড ডেটা query
-  let query = supabase.from("payments").select("*, students(name_en)").eq("agency_id", req.user.agency_id).order("created_at", { ascending: false }).range(offset, offset + limit - 1);
+  // Cursor-based pagination
+  const { applyCursor, buildResponse } = require("../lib/cursorPagination");
+  let query = supabase.from("payments").select("*, students(name_en)").eq("agency_id", req.user.agency_id);
   if (month) query = query.ilike("created_at", `${month}%`);
   if (branch && branch !== "All") query = query.eq("branch", branch);
+  query = applyCursor(query, req.query, { sortCol: "created_at", ascending: false });
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
-  // payments → income format mapping
   const mapped = (data || []).map(p => ({
     ...p,
     date: p.created_at ? (p.created_at instanceof Date ? p.created_at.toISOString().slice(0, 10) : String(p.created_at).slice(0, 10)) : "",
     studentName: p.students?.name_en || p.student_id || "—",
   }));
 
-  // পেজিনেশন সহ response
-  res.json({ data: mapped, total: total || 0, page, limit });
+  res.json(buildResponse(mapped, req.query, { sortCol: "created_at", total: total || 0 }));
 }));
 
 // POST /api/accounts/income — payments table-এ insert (agency prefix receipt নম্বর সহ)
@@ -81,15 +81,16 @@ router.get("/expenses", checkPermission("accounts", "read"), asyncHandler(async 
   const { count: total, error: countError } = await countQuery;
   if (countError) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
-  // পেজিনেটেড ডেটা query
-  let query = supabase.from("expenses").select("*").eq("agency_id", req.user.agency_id).order("date", { ascending: false }).range(offset, offset + limit - 1);
+  // Cursor-based pagination
+  const { applyCursor, buildResponse } = require("../lib/cursorPagination");
+  let query = supabase.from("expenses").select("*").eq("agency_id", req.user.agency_id);
   if (month) query = query.ilike("date", `${month}%`);
   if (branch && branch !== "All") query = query.eq("branch", branch);
+  query = applyCursor(query, req.query, { sortCol: "date", ascending: false });
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
-  // পেজিনেশন সহ response
-  res.json({ data, total: total || 0, page, limit });
+  res.json(buildResponse(data || [], req.query, { sortCol: "date", total: total || 0 }));
 }));
 
 // POST /api/accounts/expenses
@@ -133,15 +134,16 @@ router.get("/payments", checkPermission("accounts", "read"), asyncHandler(async 
   const { count: total, error: countError } = await countQuery;
   if (countError) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
-  // পেজিনেটেড ডেটা query
-  let query = supabase.from("payments").select("*, students(name_en)").eq("agency_id", req.user.agency_id).order("date", { ascending: false }).range(offset, offset + limit - 1);
+  // Cursor-based pagination
+  const { applyCursor: ac, buildResponse: br } = require("../lib/cursorPagination");
+  let query = supabase.from("payments").select("*, students(name_en)").eq("agency_id", req.user.agency_id);
   if (student_id) query = query.eq("student_id", student_id);
   if (branchFilter) query = query.eq("branch", branchFilter);
+  query = ac(query, req.query, { sortCol: "date", ascending: false });
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
-  // পেজিনেশন সহ response
-  res.json({ data, total: total || 0, page, limit });
+  res.json(br(data || [], req.query, { sortCol: "date", total: total || 0 }));
 }));
 
 // POST /api/accounts/payments

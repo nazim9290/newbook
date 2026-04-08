@@ -41,16 +41,17 @@ router.get("/", checkPermission("documents", "read"), asyncHandler(async (req, r
   const { count: total, error: countError } = await countQuery;
   if (countError) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
-  // পেজিনেটেড ডেটা query
-  let query = supabase.from("documents").select("*, students(name_en)").eq("agency_id", req.user.agency_id).order("updated_at", { ascending: false }).range(offset, offset + limit - 1);
+  // Cursor-based pagination
+  const { applyCursor, buildResponse } = require("../lib/cursorPagination");
+  let query = supabase.from("documents").select("*, students(name_en)").eq("agency_id", req.user.agency_id);
   if (student_id) query = query.eq("student_id", student_id);
   if (status && status !== "All") query = query.eq("status", status);
   if (branchStudentIds) query = query.in("student_id", branchStudentIds);
+  query = applyCursor(query, req.query, { sortCol: "updated_at", ascending: false });
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
-  // পেজিনেশন সহ response
-  res.json({ data, total: total || 0, page, limit });
+  res.json(buildResponse(data || [], req.query, { sortCol: "updated_at", total: total || 0 }));
 }));
 
 // POST /api/documents

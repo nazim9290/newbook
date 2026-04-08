@@ -12,15 +12,11 @@ const cache = require("../lib/cache");
 const router = express.Router();
 router.use(auth);
 
-// GET /api/students — list with search + filters
+// GET /api/students — list with search + filters (cursor-based pagination)
 router.get("/", checkPermission("students", "read"), asyncHandler(async (req, res) => {
-  const { search, status, country, batch, school, branch, page = 1, limit: rawLimit = 50 } = req.query;
-  const limit = Math.min(Math.max(parseInt(rawLimit) || 50, 1), 100); // সর্বোচ্চ ১০০
-  const safePage = Math.max(parseInt(page) || 1, 1);
-  const offset = (safePage - 1) * limit;
+  const { search, status, country, batch, school, branch } = req.query;
+  const { applyCursor, buildResponse } = require("../lib/cursorPagination");
 
-  // student list query — school/batch নাম students table-এই denormalized আছে (school, batch text fields)
-  // schools(name_en) JOIN করলে name_en ambiguous হয় search-এ — তাই JOIN সরানো
   let query = supabase.from("students").select("*", { count: "exact" }).eq("agency_id", req.user.agency_id);
 
   // Branch-based access — counselor/staff শুধু নিজের branch-এর student দেখবে
@@ -37,7 +33,8 @@ router.get("/", checkPermission("students", "read"), asyncHandler(async (req, re
   if (school && school !== "All") query = query.eq("school", school);
   if (branch && branch !== "All") query = query.eq("branch", branch);
 
-  query = query.order("created_at", { ascending: false }).range(offset, offset + limit - 1);
+  // Cursor-based pagination — cursor=timestamp অথবা page=N (backward compatible)
+  query = applyCursor(query, req.query, { sortCol: "created_at", ascending: false });
 
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
@@ -45,15 +42,16 @@ router.get("/", checkPermission("students", "read"), asyncHandler(async (req, re
   // DB fields → frontend field mapping
   const mapped = (data || []).map(s => ({
     ...s,
-    batch: s.batches?.name || s.batch || "",      // frontend batch (name) চায়
-    school: s.schools?.name_en || s.school || "",  // frontend school (name) চায়
-    passport: s.passport_number || "",              // frontend passport চায়
+    batch: s.batches?.name || s.batch || "",
+    school: s.schools?.name_en || s.school || "",
+    passport: s.passport_number || "",
     father: s.father_name || "",
     mother: s.mother_name || "",
     created: s.created_at ? (s.created_at instanceof Date ? s.created_at.toISOString().slice(0, 10) : String(s.created_at).slice(0, 10)) : "",
   }));
 
-  res.json({ data: decryptMany(mapped), total: count, page: +page, limit: +limit });
+  const response = buildResponse(decryptMany(mapped), req.query, { sortCol: "created_at", total: count });
+  res.json(response);
 }));
 
 // GET /api/students/:id — single student with related data

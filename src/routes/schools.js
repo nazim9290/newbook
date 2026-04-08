@@ -25,23 +25,22 @@ const SCHOOL_COLS = [
   "deadline_april", "deadline_october", "status", "notes",
 ];
 
-// GET /api/schools — search, filter, pagination সহ
+// GET /api/schools — search, filter, cursor-based pagination
 router.get("/", checkPermission("schools", "read"), asyncHandler(async (req, res) => {
-  const { country, search, page = 1, limit: rawLimit = 50 } = req.query;
-  const limit = Math.min(Math.max(parseInt(rawLimit) || 50, 1), 100); // সর্বোচ্চ ১০০
-  const safePage = Math.max(parseInt(page) || 1, 1);
-  const offset = (safePage - 1) * limit;
+  const { country, search } = req.query;
+  const { applyCursor, buildResponse } = require("../lib/cursorPagination");
 
   let query = supabase.from("schools").select("*", { count: "exact" }).eq("agency_id", req.user.agency_id);
   if (search) {
     query = query.or(`name_en.ilike.%${search}%,name_jp.ilike.%${search}%,city.ilike.%${search}%`);
   }
   if (country && country !== "All") query = query.eq("country", country);
-  query = query.order("name_en").range(offset, offset + limit - 1);
+
+  query = applyCursor(query, req.query, { sortCol: "name_en", ascending: true });
 
   const { data, error, count } = await query;
   if (error) return dbError(res, error, "schools.list", 500);
-  res.json({ data: data || [], total: count, page: +page, limit: +limit });
+  res.json(buildResponse(data || [], req.query, { sortCol: "name_en", total: count }));
 }));
 
 // POST /api/schools — নতুন স্কুল (numeric fields sanitize সহ)

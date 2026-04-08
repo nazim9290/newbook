@@ -11,17 +11,14 @@ const cache = require("../lib/cache");
 const router = express.Router();
 router.use(auth);
 
-// GET /api/visitors — search, filter, pagination সহ
-// সাপোর্টেড params: search, status, status_in (comma-separated), exclude_status, branch, page, limit
+// GET /api/visitors — search, filter, cursor-based pagination
 router.get("/", checkPermission("visitors", "read"), asyncHandler(async (req, res) => {
-  const { search, status, status_in, exclude_status, branch, page = 1, limit: rawLimit = 50 } = req.query;
-  const limit = Math.min(Math.max(parseInt(rawLimit) || 50, 1), 100); // সর্বোচ্চ ১০০
-  const safePage = Math.max(parseInt(page) || 1, 1);
-  const offset = (safePage - 1) * limit;
+  const { search, status, status_in, exclude_status, branch } = req.query;
+  const { applyCursor, buildResponse } = require("../lib/cursorPagination");
 
   let query = supabase.from("visitors").select("*", { count: "exact" }).eq("agency_id", req.user.agency_id);
 
-  // Branch-based access — counselor/staff শুধু নিজের branch-এর visitor দেখবে
+  // Branch-based access
   const { getBranchFilter } = require("../lib/branchFilter");
   const userBranch = getBranchFilter(req.user);
   if (userBranch) query = query.eq("branch", userBranch);
@@ -29,36 +26,35 @@ router.get("/", checkPermission("visitors", "read"), asyncHandler(async (req, re
   if (search) {
     query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
   }
-  // একাধিক status সাপোর্ট — status_in=Interested,Thinking
   if (status_in) {
     const statuses = status_in.split(",").filter(Boolean);
     if (statuses.length > 0) query = query.in("status", statuses);
   } else if (status && status !== "All") {
     query = query.eq("status", status);
   }
-  // নির্দিষ্ট status বাদ দাও — exclude_status=Enrolled
   if (exclude_status) {
     const excluded = exclude_status.split(",").filter(Boolean);
     excluded.forEach(s => { query = query.neq("status", s); });
   }
   if (branch && branch !== "All") query = query.eq("branch", branch);
 
-  query = query.order("created_at", { ascending: false }).range(offset, offset + limit - 1);
+  // Cursor-based pagination
+  query = applyCursor(query, req.query, { sortCol: "created_at", ascending: false });
 
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
-  // DB columns → frontend field names mapping
   const mapped = (data || []).map(v => ({
     ...v,
-    name_en: v.name_en || v.name,        // frontend name_en চায়
-    date: v.visit_date || v.date,          // frontend date চায়
-    lastFollowUp: v.last_follow_up,        // frontend lastFollowUp চায়
+    name_en: v.name_en || v.name,
+    date: v.visit_date || v.date,
+    lastFollowUp: v.last_follow_up,
     interested_countries: v.interested_countries || [],
     interested_intake: v.interested_intake || "",
   }));
 
-  res.json({ data: decryptMany(mapped), total: count });
+  const response = buildResponse(decryptMany(mapped), req.query, { sortCol: "created_at", total: count });
+  res.json(response);
 }));
 
 // POST /api/visitors — নতুন visitor তৈরি (agency prefix ID সহ)
