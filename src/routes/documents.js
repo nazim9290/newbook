@@ -85,6 +85,10 @@ router.patch("/:id", checkPermission("documents", "write"), asyncHandler(async (
 
 // GET /api/documents/:id/fields — get document extracted fields for cross-validation
 router.get("/:id/fields", checkPermission("documents", "read"), asyncHandler(async (req, res) => {
+  // agency ownership verify — document এই agency-র কিনা
+  const { data: doc } = await supabase.from("documents").select("id").eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
+  if (!doc) return res.status(403).json({ error: "এই ডকুমেন্ট আপনার এজেন্সির নয়" });
+
   const { data, error } = await supabase
     .from("document_fields")
     .select("*")
@@ -103,6 +107,10 @@ const SENSITIVE_DOC_FIELDS = ["nid", "passport_number", "father_en", "mother_en"
 
 // POST /api/documents/:id/fields — save extracted fields
 router.post("/:id/fields", checkPermission("documents", "write"), asyncHandler(async (req, res) => {
+  // agency ownership verify
+  const { data: doc } = await supabase.from("documents").select("id").eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
+  if (!doc) return res.status(403).json({ error: "এই ডকুমেন্ট আপনার এজেন্সির নয়" });
+
   const { fields } = req.body; // [{ field_name, field_value }]
   const rows = fields.map((f) => ({
     document_id: req.params.id,

@@ -14,6 +14,8 @@ router.use(auth);
 // GET /api/accounts/income — payments table থেকে income (student fee collections)
 router.get("/income", checkPermission("accounts", "read"), asyncHandler(async (req, res) => {
   const { month, branch } = req.query;
+  // month format validation — YYYY-MM (SQL injection prevention)
+  if (month && !/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: "Invalid month format (YYYY-MM)" });
 
   // পেজিনেশন প্যারামিটার — ডিফল্ট page=1, limit=50, সর্বোচ্চ ৫০০
   const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -67,6 +69,7 @@ router.post("/income", checkPermission("accounts", "write"), asyncHandler(async 
 // GET /api/accounts/expenses
 router.get("/expenses", checkPermission("accounts", "read"), asyncHandler(async (req, res) => {
   const { month, branch } = req.query;
+  if (month && !/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: "Invalid month format (YYYY-MM)" });
 
   // পেজিনেশন প্যারামিটার — ডিফল্ট page=1, limit=50, সর্বোচ্চ ৫০০
   const page = Math.max(1, parseInt(req.query.page) || 1);

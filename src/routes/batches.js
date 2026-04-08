@@ -128,12 +128,15 @@ router.get("/:id", asyncHandler(async (req, res) => {
   const { data: enrollments } = await supabase
     .from("batch_students")
     .select("*, students(name_en, phone, status)")
-    .eq("batch_id", req.params.id);
+    .eq("batch_id", req.params.id)
+    .eq("agency_id", req.user.agency_id);
 
-  // Class tests — scores সহ load
+  // Class tests — scores সহ load (agency_id filter — cross-agency data leak prevention)
   const { data: tests } = await supabase.from("class_tests")
     .select("*, class_test_scores!test_id(student_id, score)")
-    .eq("batch_id", req.params.id).order("date", { ascending: false });
+    .eq("batch_id", req.params.id)
+    .eq("agency_id", req.user.agency_id)
+    .order("date", { ascending: false });
 
   res.json({ ...batch, enrollments: enrollments || [], tests: tests || [] });
 }));
