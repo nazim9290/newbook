@@ -30,7 +30,7 @@ router.get("/", auth, asyncHandler(async (req, res) => {
 
 // ── PATCH /api/users/:id — ইউজার আপডেট (role, branch, is_active, password reset) ──
 router.patch("/:id", auth, asyncHandler(async (req, res) => {
-  const { name, phone, role, branch, is_active, permissions, password } = req.body;
+  const { name, phone, role, branch, designation, is_active, permissions, password } = req.body;
 
   // ── Optimistic Lock — concurrent edit protection ──
   const clientUpdatedAt = req.body.updated_at;
@@ -46,6 +46,7 @@ router.patch("/:id", auth, asyncHandler(async (req, res) => {
   if (phone !== undefined) update.phone = phone;
   if (role !== undefined) update.role = role;
   if (branch !== undefined) update.branch = branch;
+  if (designation !== undefined) update.designation = designation;
   if (is_active !== undefined) update.is_active = is_active;
   if (permissions !== undefined) update.permissions = typeof permissions === "string" ? permissions : JSON.stringify(permissions);
 
