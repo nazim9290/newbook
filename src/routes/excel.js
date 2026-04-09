@@ -1157,12 +1157,23 @@ function parseTemplateForAI(workbook) {
         const merge = mergeMap[ref];
 
         if (text || (isEmpty && merge)) {
+          // Type classification:
+          // label = form label (氏名, Date of birth, etc.)
+          // suffix = year/month/day suffix (年, 月, 日)
+          // data = cell that contains actual student data (should be replaced)
+          // data_candidate = empty cell where data should go
+          let type = "other";
+          if (isEmpty) type = "data_candidate";
+          else if (isLabel(text)) type = "label";
+          else if (/^[年月日]$/.test(text)) type = "suffix";
+          else if (!isEmpty && !isLabel(text) && text.length > 0) type = "data"; // student data
+
           cells.push({
             ref,
             text: text || "",
             isEmpty,
             mergeRange: merge?.range || null,
-            type: isEmpty ? "data_candidate" : (isLabel(text) ? "label" : (/^[年月日]$/.test(text) ? "suffix" : "other")),
+            type,
           });
         }
       }
@@ -1194,19 +1205,20 @@ function buildAIPrompt(sheetData) {
     `[${g.group}]: ${g.fields.map(f => f.key).join(", ")}`
   ).join("\n");
 
-  // Cell map — compact format, label + adjacent empty cells only (token optimization)
-  // শুধু label cells ও তাদের পাশের empty cells রাখো — বাকি skip
+  // Cell map — label + data/empty cells (token optimization)
+  // label, suffix, data (filled student data), data_candidate (empty) সব include
   const sheetText = sheetData.map(s => {
     const lines = [`\n=== Sheet: ${s.sheet} ===`];
-    const labelRefs = new Set(s.cells.filter(c => c.type === "label" || c.type === "suffix").map(c => c.ref));
-    // Label + adjacent empty cell pairs only
     s.cells.forEach(c => {
       if (c.type === "label" || c.type === "suffix") {
         lines.push(`${c.ref}: "${c.text}" [${c.type}]`);
-      } else if (c.isEmpty) {
+      } else if (c.type === "data_candidate") {
         lines.push(`${c.ref}: [EMPTY${c.mergeRange ? `, merged ${c.mergeRange}` : ""}]`);
+      } else if (c.type === "data") {
+        // Filled data — truncate long values, mask encrypted hashes
+        const display = c.text.length > 40 ? c.text.substring(0, 30) + "..." : c.text;
+        lines.push(`${c.ref}: "${display}" [data${c.mergeRange ? `, merged ${c.mergeRange}` : ""}]`);
       }
-      // Skip "other" type cells (data that's already filled in)
     });
     return lines.join("\n");
   }).join("\n");
@@ -1219,7 +1231,7 @@ function buildAIPrompt(sheetData) {
 
   return `You are an expert at analyzing Japanese school admission forms (入学願書, 経費支弁書, 履歴書) and study abroad application templates.
 
-TASK: Analyze this Excel template and identify which empty cells should contain student data placeholders. For each data entry cell, suggest the correct system field.
+TASK: Analyze this Excel template and identify which cells should contain student data placeholders. The template may be BLANK (empty data cells) or FILLED (with sample student data). For BOTH empty cells and cells with existing data, suggest the correct system field to replace them with placeholders.
 
 AVAILABLE SYSTEM FIELDS:
 ${fieldList}
@@ -1233,9 +1245,10 @@ TEMPLATE STRUCTURE:
 ${truncatedSheetText}
 
 RULES:
-1. Only map EMPTY cells that are clearly meant for student data entry
+1. Map BOTH empty cells AND cells with existing student data (type="data") — replace them with placeholders
 2. Use spatial context: labels are typically to the LEFT or ABOVE data cells
-3. Japanese date pattern: 生年月日 followed by [EMPTY]年[EMPTY]月[EMPTY]日 → use dob:year, dob:month, dob:day
+3. Cells marked [data] contain sample student info — they should ALSO be mapped to the correct field
+4. Japanese date pattern: 生年月日 followed by [EMPTY]年[EMPTY]月[EMPTY]日 → use dob:year, dob:month, dob:day
 4. Education sections (学歴): school name, location, entrance date, graduation date pattern
 5. Sponsor sections (経費支弁者): map to sponsor_* fields
 6. If a label says ふりがな or カタカナ → name_katakana
@@ -1243,6 +1256,9 @@ RULES:
 8. Merged empty cells = one data field (use the master cell ref)
 9. Set confidence: "high" if label clearly matches, "medium" if ambiguous, "low" if uncertain
 10. Skip cells meant for stamps (印), photos (写真), office use (事務使用)
+11. If a cell has encrypted/hash-like text (long hex strings), it should STILL be mapped if adjacent to a known label
+12. For family sections: father_name_en, father_dob, father_occupation, mother_name_en, mother_dob, mother_occupation
+13. For sponsor (経費支弁者) sections: sponsor_name, sponsor_name_en, sponsor_relationship, sponsor_phone, sponsor_address, sponsor_company, sponsor_income_y1/y2/y3, sponsor_tax_y1/y2/y3
 
 Return ONLY a valid JSON array:
 [{"cellRef":"B3","sheet":"Sheet1","field":"name_en","modifier":"","confidence":"high","reasoning":"Adjacent to 氏名 label"}]`;
