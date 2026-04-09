@@ -417,9 +417,10 @@ async function fillSingleStudentFromBuffer(templateBuffer, mappings, student, sy
   const flat = { ...flattenStudent(student), ...sysContext };
 
   // সব sheet-এর সব cell scan করো — {{...}} থাকলে replace করো
+  // includeEmpty: true — merged cell-এর master cell empty হলেও scan করবে
   workbook.eachSheet((sheet) => {
-    sheet.eachRow({ includeEmpty: false }, (row) => {
-      row.eachCell({ includeEmpty: false }, (cell) => {
+    sheet.eachRow({ includeEmpty: true }, (row) => {
+      row.eachCell({ includeEmpty: true }, (cell) => {
         const text = getCellText(cell);
         if (text && text.includes("{{")) {
           // সব {{key}} replace করো — sub-field support (:year, :month, :day, :first, :last)
@@ -487,14 +488,57 @@ function flattenStudent(student) {
   flat.blood_group = flat.blood_group || "";
   flat.name_katakana = flat.name_katakana || "";
 
+  // Study plan fields — DB-তে students table-এ সরাসরি আছে
+  flat.reason_for_study = flat.reason_for_study || student.reason_for_study || "";
+  flat.future_plan = flat.future_plan || student.future_plan || "";
+  flat.study_subject = flat.study_subject || student.study_subject || "";
+
+  // Additional personal fields
+  flat.birth_place = flat.birth_place || student.birth_place || "";
+  flat.occupation = flat.occupation || student.occupation || "";
+  flat.emergency_contact = flat.emergency_contact || student.emergency_contact || "";
+  flat.emergency_phone = flat.emergency_phone || student.emergency_phone || "";
+
   // Education: SSC, HSC, Honours
   const edu = student.student_education || student.education || [];
   const ssc = edu.find(e => (e.level || "").toLowerCase().includes("ssc")) || {};
   const hsc = edu.find(e => (e.level || "").toLowerCase().includes("hsc")) || {};
   const honours = edu.find(e => (e.level || "").toLowerCase().includes("hon") || (e.level || "").toLowerCase().includes("bach")) || {};
-  flat.edu_ssc_school = ssc.school_name || ""; flat.edu_ssc_year = ssc.year || ""; flat.edu_ssc_board = ssc.board || ""; flat.edu_ssc_gpa = ssc.gpa || ""; flat.edu_ssc_subject = ssc.subject_group || "";
-  flat.edu_hsc_school = hsc.school_name || ""; flat.edu_hsc_year = hsc.year || ""; flat.edu_hsc_board = hsc.board || ""; flat.edu_hsc_gpa = hsc.gpa || ""; flat.edu_hsc_subject = hsc.subject_group || "";
-  flat.edu_honours_school = honours.school_name || ""; flat.edu_honours_year = honours.year || ""; flat.edu_honours_gpa = honours.gpa || ""; flat.edu_honours_subject = honours.subject_group || "";
+  flat.edu_ssc_school = ssc.school_name || ""; flat.edu_ssc_year = ssc.passing_year || ssc.year || ""; flat.edu_ssc_board = ssc.board || ""; flat.edu_ssc_gpa = ssc.gpa || ""; flat.edu_ssc_subject = ssc.subject_group || ssc.group_name || "";
+  flat.edu_ssc_address = ssc.address || "";
+  flat.edu_ssc_entrance = ssc.entrance_year || "";
+  flat.edu_hsc_school = hsc.school_name || ""; flat.edu_hsc_year = hsc.passing_year || hsc.year || ""; flat.edu_hsc_board = hsc.board || ""; flat.edu_hsc_gpa = hsc.gpa || ""; flat.edu_hsc_subject = hsc.subject_group || hsc.group_name || "";
+  flat.edu_hsc_address = hsc.address || "";
+  flat.edu_hsc_entrance = hsc.entrance_year || "";
+  flat.edu_honours_school = honours.school_name || ""; flat.edu_honours_year = honours.passing_year || honours.year || ""; flat.edu_honours_gpa = honours.gpa || ""; flat.edu_honours_subject = honours.subject_group || honours.group_name || "";
+  flat.edu_honours_address = honours.address || "";
+  flat.edu_honours_entrance = honours.entrance_year || "";
+
+  // Japanese form education: Elementary (小学校), Junior High (中学校), High School (高等学校), Technical (専門学校), Junior College (短期大学), University (大学)
+  const elementary = edu.find(e => /elementary|primary|小学/i.test(e.level || "") || /elementary/i.test(e.school_type || "")) || {};
+  const junior = edu.find(e => /junior.*high|中学/i.test(e.level || "") || /junior/i.test(e.school_type || "")) || {};
+  const highSchool = edu.find(e => /^high|高等/i.test(e.level || "") || /^high/i.test(e.school_type || "")) || {};
+  const technical = edu.find(e => /technical|専門/i.test(e.level || "") || /technical/i.test(e.school_type || "")) || {};
+  const juniorCollege = edu.find(e => /junior.*college|短期/i.test(e.level || "") || /junior.*college/i.test(e.school_type || "")) || {};
+  const university = edu.find(e => /university|college.*univ|大学/i.test(e.level || "") || /university/i.test(e.school_type || "")) || {};
+
+  // Each level: school, address, entrance_year/month, graduation_year/month, years (在学年数)
+  const eduMap = { elementary, junior, highSchool: highSchool, technical, juniorCollege, university };
+  for (const [prefix, e] of Object.entries(eduMap)) {
+    const p = `edu_${prefix}`;
+    flat[`${p}_school`] = e.school_name || "";
+    flat[`${p}_address`] = e.address || "";
+    flat[`${p}_entrance`] = e.entrance_year || "";
+    flat[`${p}_entrance_month`] = e.entrance_month || "";
+    flat[`${p}_graduation`] = e.passing_year || e.graduation_year || "";
+    flat[`${p}_graduation_month`] = e.graduation_month || e.passing_month || "";
+    // 在学年数 (years of study) — entrance から graduation まで
+    if (e.entrance_year && (e.passing_year || e.graduation_year)) {
+      flat[`${p}_years`] = String(parseInt(e.passing_year || e.graduation_year) - parseInt(e.entrance_year));
+    } else {
+      flat[`${p}_years`] = "";
+    }
+  }
 
   // JP Exams
   const jp = (student.student_jp_exams || [])[0] || {};
@@ -509,12 +553,31 @@ function flattenStudent(student) {
   flat.sponsor_income_y1 = sp.annual_income_y1 || ""; flat.sponsor_income_y2 = sp.annual_income_y2 || ""; flat.sponsor_income_y3 = sp.annual_income_y3 || "";
   flat.sponsor_tax_y1 = sp.tax_y1 || ""; flat.sponsor_tax_y2 = sp.tax_y2 || ""; flat.sponsor_tax_y3 = sp.tax_y3 || "";
 
+  // Sponsor extended
+  flat.sponsor_dob = sp.dob || "";
+  flat.sponsor_nid = sp.nid || "";
+  flat.sponsor_tin = sp.tin || "";
+  flat.sponsor_company_phone = sp.company_phone || "";
+  flat.sponsor_company_address = sp.company_address || "";
+
   // Family
   const fam = student.student_family || [];
   const father = fam.find(f => f.relation === "father") || {};
   const mother = fam.find(f => f.relation === "mother") || {};
   flat.father_dob = father.dob || ""; flat.father_occupation = father.occupation || "";
+  flat.father_phone = father.phone || flat.father_phone || "";
   flat.mother_dob = mother.dob || ""; flat.mother_occupation = mother.occupation || "";
+  flat.mother_phone = mother.phone || flat.mother_phone || "";
+
+  // Family detailed (family1, family2, family3)
+  fam.forEach((f, i) => {
+    const idx = i + 1;
+    flat[`family${idx}_name`] = f.name || "";
+    flat[`family${idx}_relation`] = f.relation || "";
+    flat[`family${idx}_dob`] = f.dob || "";
+    flat[`family${idx}_occupation`] = f.occupation || "";
+    flat[`family${idx}_address`] = f.address || "";
+  });
 
   // Age from DOB
   if (flat.dob) {
