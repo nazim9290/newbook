@@ -1092,4 +1092,410 @@ const SYSTEM_FIELDS = [
   ]},
 ];
 
+// ================================================================
+// AI Excel Analysis — Template-এ placeholder auto-detect
+// ExcelJS parse → structured cell map → Claude Haiku → suggestions
+// ================================================================
+
+// সব field keys একটি flat list-এ — AI prompt-এ ব্যবহার হবে
+const ALL_FIELD_KEYS = SYSTEM_FIELDS.flatMap(g => g.fields.map(f => f.key));
+
+/**
+ * parseTemplateForAI — Excel workbook থেকে সব cell + merge info extract
+ * AI-friendly structured format-এ convert করে
+ */
+function parseTemplateForAI(workbook) {
+  const sheets = [];
+
+  workbook.eachSheet((sheet) => {
+    const sheetName = sheet.name;
+    // Merge ranges collect
+    const merges = (sheet.model?.merges || []).map(m => {
+      // ExcelJS merge format: "A1:D1" or { top, left, bottom, right }
+      if (typeof m === "string") return m;
+      if (m.model) return m.model;
+      return null;
+    }).filter(Boolean);
+
+    // Merge lookup — কোন cell কোন range-এর অংশ
+    const mergeMap = {};
+    merges.forEach(range => {
+      const r = typeof range === "string" ? range : `${colLetter(range.left)}${range.top}:${colLetter(range.right)}${range.bottom}`;
+      const parts = r.split(":");
+      if (parts.length !== 2) return;
+      // Master cell = top-left (first part)
+      mergeMap[parts[0]] = { range: r, isMaster: true };
+      // Parse range to mark slave cells
+      const [startCell, endCell] = parts;
+      const startMatch = startCell.match(/^([A-Z]+)(\d+)$/);
+      const endMatch = endCell.match(/^([A-Z]+)(\d+)$/);
+      if (!startMatch || !endMatch) return;
+      const startCol = colToNum(startMatch[1]), endCol = colToNum(endMatch[1]);
+      const startRow = parseInt(startMatch[2]), endRow = parseInt(endMatch[2]);
+      for (let r = startRow; r <= endRow; r++) {
+        for (let c = startCol; c <= endCol; c++) {
+          const ref = `${colLetter(c)}${r}`;
+          if (ref !== parts[0]) mergeMap[ref] = { range: `${parts[0]}:${parts[1]}`, isMaster: false, master: parts[0] };
+        }
+      }
+    });
+
+    const cells = [];
+    const maxRow = sheet.rowCount || 100;
+    const maxCol = sheet.columnCount || 20;
+
+    for (let row = 1; row <= Math.min(maxRow, 200); row++) {
+      for (let col = 1; col <= Math.min(maxCol, 30); col++) {
+        const cell = sheet.getCell(row, col);
+        const text = getCellText(cell);
+        const ref = `${colLetter(col)}${row}`;
+
+        // Slave cells skip — শুধু master cell report করব
+        if (mergeMap[ref] && !mergeMap[ref].isMaster) continue;
+
+        const isEmpty = !text;
+        const merge = mergeMap[ref];
+
+        if (text || (isEmpty && merge)) {
+          cells.push({
+            ref,
+            text: text || "",
+            isEmpty,
+            mergeRange: merge?.range || null,
+            type: isEmpty ? "data_candidate" : (isLabel(text) ? "label" : (/^[年月日]$/.test(text) ? "suffix" : "other")),
+          });
+        }
+      }
+    }
+
+    // Empty cell যেগুলো merge নয় কিন্তু label-এর পাশে — data candidate হিসেবে mark
+    // (AI নিজেই বুঝবে, তাই এখানে basic classification যথেষ্ট)
+
+    sheets.push({ sheet: sheetName, cells, merges: merges.map(m => typeof m === "string" ? m : `${colLetter(m.left)}${m.top}:${colLetter(m.right)}${m.bottom}`) });
+  });
+
+  return sheets;
+}
+
+// Column letter → number helper (A=1, B=2, ... Z=26, AA=27)
+function colToNum(letters) {
+  let n = 0;
+  for (const ch of letters.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n;
+}
+
+/**
+ * buildAIPrompt — Cell map + system fields → Claude prompt
+ * Token-efficient compact format ব্যবহার করে
+ */
+function buildAIPrompt(sheetData) {
+  // System fields list — compact
+  const fieldList = SYSTEM_FIELDS.map(g =>
+    `[${g.group}]: ${g.fields.map(f => f.key).join(", ")}`
+  ).join("\n");
+
+  // Cell map — compact table format (token optimization)
+  const sheetText = sheetData.map(s => {
+    const lines = [`\n=== Sheet: ${s.sheet} ===`];
+    let prevRow = 0;
+    s.cells.forEach(c => {
+      const row = parseInt(c.ref.replace(/[A-Z]+/, ""));
+      if (row !== prevRow && prevRow > 0) lines.push(""); // row break
+      prevRow = row;
+
+      if (c.isEmpty) {
+        lines.push(`${c.ref}: [EMPTY${c.mergeRange ? `, merged ${c.mergeRange}` : ""}]`);
+      } else {
+        lines.push(`${c.ref}: "${c.text}" [${c.type}]`);
+      }
+    });
+    return lines.join("\n");
+  }).join("\n");
+
+  return `You are an expert at analyzing Japanese school admission forms (入学願書, 経費支弁書, 履歴書) and study abroad application templates.
+
+TASK: Analyze this Excel template and identify which empty cells should contain student data placeholders. For each data entry cell, suggest the correct system field.
+
+AVAILABLE SYSTEM FIELDS:
+${fieldList}
+
+AVAILABLE MODIFIERS (append to field key):
+- :year, :month, :day — for date fields split into separate year/month/day cells
+- :first, :last — for name fields split into first/last name
+- :jp — Japanese date format (年月日)
+
+TEMPLATE STRUCTURE:
+${sheetText}
+
+RULES:
+1. Only map EMPTY cells that are clearly meant for student data entry
+2. Use spatial context: labels are typically to the LEFT or ABOVE data cells
+3. Japanese date pattern: 生年月日 followed by [EMPTY]年[EMPTY]月[EMPTY]日 → use dob:year, dob:month, dob:day
+4. Education sections (学歴): school name, location, entrance date, graduation date pattern
+5. Sponsor sections (経費支弁者): map to sponsor_* fields
+6. If a label says ふりがな or カタカナ → name_katakana
+7. If a label says ローマ字 or Alphabet → name_en
+8. Merged empty cells = one data field (use the master cell ref)
+9. Set confidence: "high" if label clearly matches, "medium" if ambiguous, "low" if uncertain
+10. Skip cells meant for stamps (印), photos (写真), office use (事務使用)
+
+Return ONLY a valid JSON array:
+[{"cellRef":"B3","sheet":"Sheet1","field":"name_en","modifier":"","confidence":"high","reasoning":"Adjacent to 氏名 label"}]`;
+}
+
+/**
+ * analyzeWithClaude — Claude Haiku API call
+ * OCR route-এর extractWithHaiku() pattern follow করে
+ */
+async function analyzeWithClaude(sheetData) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    console.error("[AI Excel] ANTHROPIC_API_KEY not set");
+    return null;
+  }
+
+  const prompt = buildAIPrompt(sheetData);
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 4000,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("[AI Excel] API error:", response.status, await response.text().catch(() => ""));
+      return null;
+    }
+
+    const result = await response.json();
+    const text = result.content?.[0]?.text || "";
+
+    // JSON array extract — [...] pattern
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      console.error("[AI Excel] No JSON array in response");
+      return null;
+    }
+
+    const suggestions = JSON.parse(jsonMatch[0]);
+
+    // Validate — শুধু known field keys রাখো
+    const validated = suggestions.filter(s => {
+      const baseField = (s.field || "").split(":")[0];
+      return ALL_FIELD_KEYS.includes(baseField) || ALL_FIELD_KEYS.includes(s.field);
+    }).map(s => ({
+      cellRef: s.cellRef || s.cell,
+      sheet: s.sheet || "",
+      field: s.field || "",
+      modifier: s.modifier || "",
+      confidence: ["high", "medium", "low"].includes(s.confidence) ? s.confidence : "medium",
+      reasoning: s.reasoning || "",
+    }));
+
+    // Token usage log
+    const usage = result.usage || {};
+    console.log(`[AI Excel] ${validated.length} suggestions, tokens: ${usage.input_tokens || "?"}in/${usage.output_tokens || "?"}out`);
+
+    return {
+      suggestions: validated,
+      stats: {
+        total: validated.length,
+        high: validated.filter(s => s.confidence === "high").length,
+        medium: validated.filter(s => s.confidence === "medium").length,
+        low: validated.filter(s => s.confidence === "low").length,
+      },
+      usage,
+    };
+  } catch (err) {
+    console.error("[AI Excel Error]", err.message);
+    return null;
+  }
+}
+
+// ================================================================
+// POST /api/excel/ai-analyze
+// Upload বা existing template → AI analysis → suggestions return
+// ================================================================
+router.post("/ai-analyze", upload.single("file"), asyncHandler(async (req, res) => {
+  const { agency_id } = req.user;
+  let templateBuffer = null;
+  let templateId = null;
+  let schoolName = "";
+
+  // Option 1: existing template ID
+  if (req.body.template_id) {
+    templateId = req.body.template_id;
+    const { data: tmpl } = await supabase.from("excel_templates").select("*").eq("id", templateId).eq("agency_id", agency_id).single();
+    if (!tmpl) return res.status(404).json({ error: "Template not found" });
+    templateBuffer = getTemplateBuffer(tmpl.file_url || tmpl.file_path);
+    schoolName = tmpl.school_name || "";
+    if (!templateBuffer) return res.status(400).json({ error: "Template file not found on server" });
+  }
+  // Option 2: new file upload
+  else if (req.file) {
+    templateBuffer = fs.readFileSync(req.file.path);
+    schoolName = req.body.school_name || req.file.originalname;
+  }
+  else {
+    return res.status(400).json({ error: "template_id or file required" });
+  }
+
+  // ExcelJS দিয়ে workbook load
+  const workbook = new ExcelJS.Workbook();
+  try {
+    await workbook.xlsx.load(templateBuffer);
+  } catch (err) {
+    return res.status(400).json({ error: "Excel file parse failed: " + err.message });
+  }
+
+  // Stage 1-2: Parse cells + merge info
+  const sheetData = parseTemplateForAI(workbook);
+  const totalCells = sheetData.reduce((s, sh) => s + sh.cells.length, 0);
+
+  if (totalCells === 0) {
+    return res.status(400).json({ error: "Empty Excel file — no cells found" });
+  }
+
+  // Stage 3: Claude AI analysis
+  const aiResult = await analyzeWithClaude(sheetData);
+
+  if (!aiResult) {
+    // Fallback: rule-based detection
+    console.log("[AI Excel] AI failed, falling back to rule-based detection");
+    const allCells = [];
+    workbook.eachSheet((sheet) => {
+      sheet.eachRow({ includeEmpty: false }, (row, rowNum) => {
+        row.eachCell({ includeEmpty: false }, (cell, colNum) => {
+          allCells.push({ sheet: sheet.name, row: rowNum, col: colNum, text: getCellText(cell) });
+        });
+      });
+    });
+    const fallback = detectMappings(allCells, workbook);
+    return res.json({
+      suggestions: fallback.map(m => ({
+        cellRef: m.cell, sheet: m.sheet, field: m.field || "",
+        modifier: "", confidence: m.field ? "medium" : "low",
+        reasoning: `Rule-based: label "${m.label}"`,
+        label: m.label,
+      })),
+      stats: { total: fallback.length, high: 0, medium: fallback.filter(m => m.field).length, low: fallback.filter(m => !m.field).length },
+      engine: "rule-based",
+    });
+  }
+
+  // Label enrich — cell text label যোগ করো suggestion-এ
+  const cellTextMap = {};
+  sheetData.forEach(sh => sh.cells.forEach(c => { cellTextMap[`${sh.sheet}:${c.ref}`] = c.text; }));
+  aiResult.suggestions.forEach(s => {
+    // Label: adjacent label cell-এর text (AI reasoning থেকে বা cell map থেকে)
+    if (!s.label) {
+      // পাশের cell-এ label খোঁজো
+      const match = (s.reasoning || "").match(/(?:Adjacent to|next to|label)\s+"?([^"]+)"?/i);
+      s.label = match ? match[1] : "";
+    }
+  });
+
+  res.json({ ...aiResult, engine: "claude-haiku", schoolName });
+}));
+
+// ================================================================
+// POST /api/excel/ai-insert-placeholders
+// Approved suggestions → Excel-এ {{placeholder}} insert → save template
+// ================================================================
+router.post("/ai-insert-placeholders", upload.single("file"), asyncHandler(async (req, res) => {
+  const { agency_id } = req.user;
+  const { template_id, suggestions, school_name } = req.body;
+  const parsedSuggestions = typeof suggestions === "string" ? JSON.parse(suggestions) : suggestions;
+
+  if (!parsedSuggestions || !parsedSuggestions.length) {
+    return res.status(400).json({ error: "No suggestions provided" });
+  }
+
+  // Template buffer load
+  let templateBuffer = null;
+  let tmpl = null;
+
+  if (template_id) {
+    const { data } = await supabase.from("excel_templates").select("*").eq("id", template_id).eq("agency_id", agency_id).single();
+    if (!data) return res.status(404).json({ error: "Template not found" });
+    tmpl = data;
+    templateBuffer = getTemplateBuffer(data.file_url || data.file_path);
+  } else if (req.file) {
+    templateBuffer = fs.readFileSync(req.file.path);
+  }
+
+  if (!templateBuffer) return res.status(400).json({ error: "Template file not found" });
+
+  // Workbook load
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(templateBuffer);
+
+  // Stage 4: Insert {{placeholders}} into approved cells
+  const inserted = [];
+  parsedSuggestions.forEach(s => {
+    if (!s.cellRef || !s.field) return;
+    const sheetName = s.sheet;
+    const sheet = sheetName ? workbook.getWorksheet(sheetName) : workbook.worksheets[0];
+    if (!sheet) return;
+
+    try {
+      const cell = sheet.getCell(s.cellRef);
+      // Style preserve
+      const oldStyle = cell.style ? JSON.parse(JSON.stringify(cell.style)) : {};
+      // Placeholder build
+      const placeholder = s.modifier ? `{{${s.field}${s.modifier}}}` : `{{${s.field}}}`;
+      cell.value = placeholder;
+      cell.style = oldStyle;
+      inserted.push({ cellRef: s.cellRef, sheet: sheetName || sheet.name, field: s.field, modifier: s.modifier || "", placeholder });
+    } catch (err) {
+      console.error(`[AI Insert] Cell ${s.cellRef} error:`, err.message);
+    }
+  });
+
+  // Save modified file
+  const buffer = await workbook.xlsx.writeBuffer();
+  const fileName = `ai_${Date.now()}_${sanitize(school_name || "template")}.xlsx`;
+  const filePath = path.join(__dirname, "../../uploads/excel-templates", fileName);
+
+  // uploads/excel-templates dir ensure
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(filePath, Buffer.from(buffer));
+
+  // DB record — create or update
+  const mappings = inserted.map(s => ({
+    cell: s.cellRef, sheet: s.sheet, label: s.label || "", field: s.field, modifier: s.modifier || "", placeholder: s.placeholder,
+  }));
+
+  if (tmpl) {
+    // Update existing template
+    await supabase.from("excel_templates").update({
+      mappings, total_fields: inserted.length, mapped_fields: inserted.length,
+      file_url: filePath, file_path: filePath, file_name: fileName,
+      ai_analysis: parsedSuggestions,
+    }).eq("id", template_id);
+    return res.json({ ...tmpl, mappings, total_fields: inserted.length, mapped_fields: inserted.length, file_name: fileName });
+  } else {
+    // New template
+    const { data: newTmpl, error } = await supabase.from("excel_templates").insert({
+      agency_id, school_name: school_name || "AI Template",
+      file_name: fileName, file_url: filePath, file_path: filePath,
+      mappings, total_fields: inserted.length, mapped_fields: inserted.length,
+      ai_analysis: parsedSuggestions,
+    }).select().single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json(newTmpl);
+  }
+}));
+
 module.exports = router;
