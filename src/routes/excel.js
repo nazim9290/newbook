@@ -416,6 +416,10 @@ async function fillSingleStudentFromBuffer(templateBuffer, mappings, student, sy
   // Flatten student data + system context merge
   const flat = { ...flattenStudent(student), ...sysContext };
 
+  // Debug — কোন keys আছে log করো (প্রথমবার generate করলে দেখা যাবে)
+  const availableKeys = Object.keys(flat).filter(k => flat[k]);
+  console.log(`[Excel Generate] Student: ${student.name_en || student.id}, available keys: ${availableKeys.length}, sample:`, availableKeys.slice(0, 20).join(", "));
+
   // সব sheet-এর সব cell scan করো — {{...}} থাকলে replace করো
   // includeEmpty: true — merged cell-এর master cell empty হলেও scan করবে
   workbook.eachSheet((sheet) => {
@@ -663,13 +667,56 @@ function looksEncrypted(val) {
   return /^[a-f0-9]{24}:[a-f0-9]{32}:[a-f0-9]+$/i.test(val);
 }
 
+// ── Key alias map — template-এ যেকোনো নাম লিখলে সঠিক flat key-তে resolve হবে ──
+const KEY_ALIASES = {
+  placeofbirth: "birth_place", place_of_birth: "birth_place",
+  st_phone: "phone", telephone: "phone", tel: "phone",
+  full_name: "name_en", fullname: "name_en", alphabet: "name_en",
+  katakana: "name_katakana",
+  sex: "gender",
+  birthday: "dob", dateofbirth: "dob", date_of_birth: "dob",
+  passport: "passport_number", passport_no: "passport_number",
+  address: "permanent_address", registered_address: "permanent_address",
+  present_address: "current_address",
+  spouse: "spouse_name", spouse_name: "spouse_name",
+  father: "father_name_en", father_name: "father_name_en",
+  mother: "mother_name_en", mother_name: "mother_name_en",
+  father_occupation: "father_occupation", father_dob: "father_dob",
+  mother_occupation: "mother_occupation", mother_dob: "mother_dob",
+  // Education aliases — AI বিভিন্ন নামে দিতে পারে
+  edu_elelementary_name: "edu_elementary_school", edu_elementary_name: "edu_elementary_school",
+  edu_elelementary_add: "edu_elementary_address", edu_elementary_add: "edu_elementary_address",
+  edu_junior_name: "edu_junior_school", edu_junior_add: "edu_junior_address",
+  edu_hsc_add: "edu_hsc_address", edu_hsc_name: "edu_hsc_school",
+  edu_technical_name: "edu_technical_school", edu_technical_add: "edu_technical_address",
+  edu_university_name: "edu_university_school", edu_university_add: "edu_university_address",
+  edu_juniorcollege_name: "edu_juniorCollege_school", edu_juniorcollege_add: "edu_juniorCollege_address",
+  // Sponsor
+  sponsor: "sponsor_name_en",
+  // JP
+  jlpt: "jp_level", jlpt_level: "jp_level", jlpt_score: "jp_score",
+  // Study
+  reason_for_study: "reason_for_study", purpose_of_study: "reason_for_study",
+  study_plan: "reason_for_study", future_plan: "future_plan",
+  // System
+  agency_name: "sys_agency_name", agency_address: "sys_agency_address",
+  school_name: "sys_school_name", school_name_jp: "sys_school_name_jp",
+};
+
 function resolveFieldValue(flat, fieldKey) {
   if (!fieldKey) return "";
 
   // Sub-field check: "dob:year", "name_en:first", etc.
   if (fieldKey.includes(":")) {
     const [baseKey, modifier] = fieldKey.split(":");
-    const rawValue = flat[baseKey] ?? "";
+    // Base key alias resolve
+    const resolvedBase = KEY_ALIASES[baseKey.toLowerCase()] || baseKey;
+    let rawValue = flat[resolvedBase] ?? flat[baseKey] ?? "";
+    // Case-insensitive fallback
+    if (!rawValue) {
+      const lk = resolvedBase.toLowerCase();
+      for (const [k, v] of Object.entries(flat)) { if (k.toLowerCase() === lk && v) { rawValue = v; break; } }
+    }
     if (!rawValue) return "";
 
     // Date modifiers
@@ -703,7 +750,19 @@ function resolveFieldValue(flat, fieldKey) {
     return rawValue; // unknown modifier → full value
   }
 
-  // No modifier → direct value
+  // No modifier → direct value, with alias + case-insensitive fallback
+  if (flat[fieldKey] !== undefined && flat[fieldKey] !== "") return flat[fieldKey];
+
+  // Alias lookup
+  const alias = KEY_ALIASES[fieldKey.toLowerCase()];
+  if (alias && flat[alias] !== undefined && flat[alias] !== "") return flat[alias];
+
+  // Case-insensitive search — flat keys-এ exact match না পেলে
+  const lowerKey = fieldKey.toLowerCase();
+  for (const [k, v] of Object.entries(flat)) {
+    if (k.toLowerCase() === lowerKey && v !== undefined && v !== "") return v;
+  }
+
   return flat[fieldKey] ?? "";
 }
 
