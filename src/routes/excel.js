@@ -207,10 +207,10 @@ router.post("/generate", asyncHandler(async (req, res) => {
     if (tErr) return res.status(404).json({ error: "Template পাওয়া যায়নি" });
     if (!tmpl.mappings || !tmpl.mappings.length) return res.status(400).json({ error: "কোনো mapping নেই" });
 
-    // Get students — basic select (JOIN tables আলাদাভাবে handle হবে)
+    // Get students — related tables JOIN
     const { data: students, error: sErr } = await supabase
       .from("students")
-      .select("*")
+      .select("*, student_education(*), student_jp_exams(*), student_family(*), sponsors(*)")
       .in("id", student_ids)
       .eq("agency_id", req.user.agency_id);
     if (sErr) { console.error("[DB]", sErr.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
@@ -262,7 +262,7 @@ router.post("/generate-single", asyncHandler(async (req, res) => {
 
     const { data: student } = await supabase
       .from("students")
-      .select("*")
+      .select("*, student_education(*), student_jp_exams(*), student_family(*), sponsors(*)")
       .eq("id", student_id)
       .eq("agency_id", req.user.agency_id)
       .single();
