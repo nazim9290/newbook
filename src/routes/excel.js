@@ -1194,23 +1194,28 @@ function buildAIPrompt(sheetData) {
     `[${g.group}]: ${g.fields.map(f => f.key).join(", ")}`
   ).join("\n");
 
-  // Cell map — compact table format (token optimization)
+  // Cell map — compact format, label + adjacent empty cells only (token optimization)
+  // শুধু label cells ও তাদের পাশের empty cells রাখো — বাকি skip
   const sheetText = sheetData.map(s => {
     const lines = [`\n=== Sheet: ${s.sheet} ===`];
-    let prevRow = 0;
+    const labelRefs = new Set(s.cells.filter(c => c.type === "label" || c.type === "suffix").map(c => c.ref));
+    // Label + adjacent empty cell pairs only
     s.cells.forEach(c => {
-      const row = parseInt(c.ref.replace(/[A-Z]+/, ""));
-      if (row !== prevRow && prevRow > 0) lines.push(""); // row break
-      prevRow = row;
-
-      if (c.isEmpty) {
-        lines.push(`${c.ref}: [EMPTY${c.mergeRange ? `, merged ${c.mergeRange}` : ""}]`);
-      } else {
+      if (c.type === "label" || c.type === "suffix") {
         lines.push(`${c.ref}: "${c.text}" [${c.type}]`);
+      } else if (c.isEmpty) {
+        lines.push(`${c.ref}: [EMPTY${c.mergeRange ? `, merged ${c.mergeRange}` : ""}]`);
       }
+      // Skip "other" type cells (data that's already filled in)
     });
     return lines.join("\n");
   }).join("\n");
+
+  // Token limit — prompt খুব বড় হলে truncate
+  const maxPromptChars = 12000;
+  const truncatedSheetText = sheetText.length > maxPromptChars
+    ? sheetText.substring(0, maxPromptChars) + "\n... (truncated, analyze what's visible)"
+    : sheetText;
 
   return `You are an expert at analyzing Japanese school admission forms (入学願書, 経費支弁書, 履歴書) and study abroad application templates.
 
@@ -1225,7 +1230,7 @@ AVAILABLE MODIFIERS (append to field key):
 - :jp — Japanese date format (年月日)
 
 TEMPLATE STRUCTURE:
-${sheetText}
+${truncatedSheetText}
 
 RULES:
 1. Only map EMPTY cells that are clearly meant for student data entry
@@ -1266,27 +1271,51 @@ async function analyzeWithClaude(sheetData) {
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 4000,
+        max_tokens: 8000,
         messages: [{ role: "user", content: prompt }],
       }),
     });
 
     if (!response.ok) {
-      console.error("[AI Excel] API error:", response.status, await response.text().catch(() => ""));
+      const errText = await response.text().catch(() => "");
+      console.error("[AI Excel] API error:", response.status, errText.substring(0, 200));
       return null;
     }
 
     const result = await response.json();
     const text = result.content?.[0]?.text || "";
+    console.log("[AI Excel] Response length:", text.length, "chars, first 200:", text.substring(0, 200));
 
-    // JSON array extract — [...] pattern
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
-      console.error("[AI Excel] No JSON array in response");
+    // JSON extract — multiple strategies
+    // 1. Markdown code block: ```json [...] ```
+    let jsonStr = null;
+    const codeBlockMatch = text.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
+    if (codeBlockMatch) jsonStr = codeBlockMatch[1];
+    // 2. Direct array: [...]
+    if (!jsonStr) { const m = text.match(/\[[\s\S]*\]/); if (m) jsonStr = m[0]; }
+    // 3. Object with suggestions key: {"suggestions": [...]}
+    if (!jsonStr) {
+      const objMatch = text.match(/\{[\s\S]*"suggestions"\s*:\s*(\[[\s\S]*?\])[\s\S]*\}/);
+      if (objMatch) jsonStr = objMatch[1];
+    }
+
+    if (!jsonStr) {
+      console.error("[AI Excel] No JSON found in response. First 500 chars:", text.substring(0, 500));
       return null;
     }
 
-    const suggestions = JSON.parse(jsonMatch[0]);
+    let suggestions;
+    try {
+      suggestions = JSON.parse(jsonStr);
+    } catch (parseErr) {
+      console.error("[AI Excel] JSON parse error:", parseErr.message, "JSON start:", jsonStr.substring(0, 200));
+      return null;
+    }
+
+    if (!Array.isArray(suggestions)) {
+      console.error("[AI Excel] Parsed result is not array:", typeof suggestions);
+      return null;
+    }
 
     // Validate — শুধু known field keys রাখো
     const validated = suggestions.filter(s => {
