@@ -1438,93 +1438,53 @@ router.post("/ai-analyze", upload.single("file"), asyncHandler(async (req, res) 
 
 // ================================================================
 // POST /api/excel/ai-insert-placeholders
-// Approved suggestions → Excel-এ {{placeholder}} insert → save template
+// Approved suggestions → Excel-এ {{placeholder}} insert → download
+// DB-তে save না — সরাসরি .xlsx ডাউনলোড
 // ================================================================
 router.post("/ai-insert-placeholders", upload.single("file"), asyncHandler(async (req, res) => {
-  const { agency_id } = req.user;
-  const { template_id, suggestions, school_name } = req.body;
+  const { suggestions, school_name } = req.body;
   const parsedSuggestions = typeof suggestions === "string" ? JSON.parse(suggestions) : suggestions;
 
   if (!parsedSuggestions || !parsedSuggestions.length) {
     return res.status(400).json({ error: "No suggestions provided" });
   }
 
-  // Template buffer load
-  let templateBuffer = null;
-  let tmpl = null;
-
-  if (template_id) {
-    const { data } = await supabase.from("excel_templates").select("*").eq("id", template_id).eq("agency_id", agency_id).single();
-    if (!data) return res.status(404).json({ error: "Template not found" });
-    tmpl = data;
-    templateBuffer = getTemplateBuffer(data.file_url || data.file_path);
-  } else if (req.file) {
-    templateBuffer = fs.readFileSync(req.file.path);
-  }
-
-  if (!templateBuffer) return res.status(400).json({ error: "Template file not found" });
+  // File upload থেকে buffer
+  if (!req.file) return res.status(400).json({ error: "Excel file required" });
+  const templateBuffer = fs.readFileSync(req.file.path);
 
   // Workbook load
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(templateBuffer);
 
-  // Stage 4: Insert {{placeholders}} into approved cells
-  const inserted = [];
+  // Insert {{placeholders}} into approved cells
+  let insertedCount = 0;
   parsedSuggestions.forEach(s => {
     if (!s.cellRef || !s.field) return;
-    const sheetName = s.sheet;
-    const sheet = sheetName ? workbook.getWorksheet(sheetName) : workbook.worksheets[0];
+    const sheet = s.sheet ? workbook.getWorksheet(s.sheet) : workbook.worksheets[0];
     if (!sheet) return;
-
     try {
       const cell = sheet.getCell(s.cellRef);
-      // Style preserve
       const oldStyle = cell.style ? JSON.parse(JSON.stringify(cell.style)) : {};
-      // Placeholder build
-      const placeholder = s.modifier ? `{{${s.field}${s.modifier}}}` : `{{${s.field}}}`;
-      cell.value = placeholder;
+      cell.value = s.modifier ? `{{${s.field}${s.modifier}}}` : `{{${s.field}}}`;
       cell.style = oldStyle;
-      inserted.push({ cellRef: s.cellRef, sheet: sheetName || sheet.name, field: s.field, modifier: s.modifier || "", placeholder });
+      insertedCount++;
     } catch (err) {
       console.error(`[AI Insert] Cell ${s.cellRef} error:`, err.message);
     }
   });
 
-  // Save modified file
+  // Excel buffer → download response
   const buffer = await workbook.xlsx.writeBuffer();
-  const fileName = `ai_${Date.now()}_${sanitize(school_name || "template")}.xlsx`;
-  const filePath = path.join(__dirname, "../../uploads/excel-templates", fileName);
+  const fileName = `${sanitize(school_name || "template")}_with_placeholders.xlsx`;
 
-  // uploads/excel-templates dir ensure
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(filePath, Buffer.from(buffer));
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+  res.send(Buffer.from(buffer));
 
-  // DB record — create or update
-  const mappings = inserted.map(s => ({
-    cell: s.cellRef, sheet: s.sheet, label: s.label || "", field: s.field, modifier: s.modifier || "", placeholder: s.placeholder,
-  }));
-
-  if (tmpl) {
-    // Update existing template
-    await supabase.from("excel_templates").update({
-      mappings, total_fields: inserted.length, mapped_fields: inserted.length,
-      file_url: filePath, file_path: filePath, file_name: fileName,
-      ai_analysis: parsedSuggestions,
-    }).eq("id", template_id);
-    return res.json({ ...tmpl, mappings, total_fields: inserted.length, mapped_fields: inserted.length, file_name: fileName });
-  } else {
-    // New template
-    const { data: newTmpl, error } = await supabase.from("excel_templates").insert({
-      agency_id, school_name: school_name || "AI Template",
-      file_name: fileName, file_url: filePath, file_path: filePath,
-      mappings, total_fields: inserted.length, mapped_fields: inserted.length,
-      ai_analysis: parsedSuggestions,
-    }).select().single();
-
-    if (error) return res.status(500).json({ error: error.message });
-    return res.json(newTmpl);
-  }
+  // Cleanup uploaded temp file
+  try { fs.unlinkSync(req.file.path); } catch {}
+  console.log(`[AI Insert] ${insertedCount} placeholders inserted, downloading ${fileName}`);
 }));
 
 module.exports = router;
