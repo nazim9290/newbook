@@ -423,13 +423,39 @@ async function fillSingleStudentFromBuffer(templateBuffer, mappings, student, sy
         const text = getCellText(cell);
         if (text && text.includes("{{")) {
           // সব {{key}} replace করো — sub-field support (:year, :month, :day, :first, :last)
+          let hasMissing = false;
           const replaced = text.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
             const k = key.trim();
             const mapping = mappings.find(m => m.key === k || m.placeholder === match);
             const fieldKey = mapping?.field || k;
-            return resolveFieldValue(flat, fieldKey);
+            let val = resolveFieldValue(flat, fieldKey);
+
+            // Encrypted hash detect — decrypt fail হলে empty করো
+            if (looksEncrypted(val)) {
+              try {
+                const { decrypt } = require("../lib/crypto");
+                const decVal = decrypt(val);
+                val = (decVal && !looksEncrypted(decVal)) ? decVal : "";
+              } catch { val = ""; }
+            }
+
+            // Value না থাকলে placeholder নাম রাখো (পরে লাল করব)
+            if (!val && val !== "0") {
+              hasMissing = true;
+              return `[${k}]`; // e.g. [father_name_en]
+            }
+            return val;
           });
           cell.value = replaced;
+
+          // Missing value থাকলে font color RED করো
+          if (hasMissing) {
+            const oldStyle = cell.style ? JSON.parse(JSON.stringify(cell.style)) : {};
+            cell.style = {
+              ...oldStyle,
+              font: { ...(oldStyle.font || {}), color: { argb: "FFFF0000" } }, // Red color
+            };
+          }
         }
       });
     });
@@ -444,6 +470,22 @@ function flattenStudent(student) {
   const { decryptSensitiveFields } = require("../lib/crypto");
   const decrypted = decryptSensitiveFields(student);
   const flat = { ...decrypted };
+
+  // ── Field alias mapping — DB column name → Excel placeholder key ──
+  // DB-তে father_name/father_en/mother_name/mother_en আছে, Excel-এ father_name_en/mother_name_en ব্যবহার হয়
+  flat.father_name_en = flat.father_name_en || flat.father_en || flat.father_name || "";
+  flat.mother_name_en = flat.mother_name_en || flat.mother_en || flat.mother_name || "";
+  flat.father_name = flat.father_name || flat.father_name_en || "";
+  flat.mother_name = flat.mother_name || flat.mother_name_en || "";
+  flat.passport_number = flat.passport_number || flat.passport || "";
+  flat.permanent_address = flat.permanent_address || flat.present_address || "";
+  flat.current_address = flat.current_address || flat.present_address || flat.permanent_address || "";
+  flat.birth_place = flat.birth_place || "";
+  flat.occupation = flat.occupation || "";
+  flat.marital_status = flat.marital_status || "";
+  flat.nationality = flat.nationality || "Bangladeshi";
+  flat.blood_group = flat.blood_group || "";
+  flat.name_katakana = flat.name_katakana || "";
 
   // Education: SSC, HSC, Honours
   const edu = student.student_education || student.education || [];
@@ -552,6 +594,12 @@ function buildSystemContext(agency, batch, branch, school) {
  *   name_en:first → "Mohammad", name_en:last → "Rahim"
  *   "Mohammad Rahim" → first="Mohammad", last="Rahim"
  */
+// Hash/encrypted value detect — "iv:authTag:ciphertext" format (hex:hex:hex)
+function looksEncrypted(val) {
+  if (!val || typeof val !== "string") return false;
+  return /^[a-f0-9]{24}:[a-f0-9]{32}:[a-f0-9]+$/i.test(val);
+}
+
 function resolveFieldValue(flat, fieldKey) {
   if (!fieldKey) return "";
 
