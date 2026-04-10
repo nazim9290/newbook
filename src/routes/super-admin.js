@@ -83,7 +83,7 @@ router.get("/agencies/:id", asyncHandler(async (req, res) => {
 // POST /agencies — নতুন agency তৈরি + admin user
 // ═══════════════════════════════════════════════════
 router.post("/agencies", asyncHandler(async (req, res) => {
-  const { name, name_bn, subdomain, phone, email, address, plan, admin_name, admin_email, admin_password, dedicated } = req.body;
+  const { name, name_bn, subdomain, phone, email, address, plan, admin_name, admin_email, admin_password, dedicated, prefix: customPrefix } = req.body;
 
   // Required fields validation
   if (!name || !subdomain || !admin_email || !admin_password) {
@@ -104,8 +104,8 @@ router.post("/agencies", asyncHandler(async (req, res) => {
   const trialEndsAt = new Date();
   trialEndsAt.setDate(trialEndsAt.getDate() + trialDays);
 
-  // ── Agency prefix auto-generate — নামের আদ্যক্ষর থেকে ──
-  const basePrefix = generatePrefix(name);
+  // ── Agency prefix — custom থাকলে সেটা, না থাকলে auto-generate ──
+  const basePrefix = customPrefix?.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5) || generatePrefix(name);
   const prefix = await ensureUniquePrefix(basePrefix);
 
   // Agency তৈরি (prefix সহ)
