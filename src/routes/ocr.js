@@ -715,36 +715,87 @@ router.post("/scan", upload.single("file"), async (req, res) => {
       });
     }
 
-    const imageBuffer = fs.readFileSync(filePath);
+    // ── PDF → Image conversion — PDF হলে pdftoppm দিয়ে প্রথম পেজ image-এ convert ──
+    const isPdf = req.file.mimetype === "application/pdf" || req.file.originalname.toLowerCase().endsWith(".pdf");
+    let ocrFilePath = filePath;
+
+    if (isPdf) {
+      const { execSync } = require("child_process");
+      const pdfImageBase = filePath.replace(/\.pdf$/i, "_page");
+      try {
+        // PDF → JPEG (প্রথম 3 পেজ, 300 DPI — OCR-এর জন্য ভালো quality)
+        execSync(`pdftoppm -jpeg -r 300 -l 3 "${filePath}" "${pdfImageBase}"`, { timeout: 30000 });
+        // pdftoppm output: _page-1.jpg, _page-2.jpg, etc.
+        const pages = fs.readdirSync(path.dirname(pdfImageBase))
+          .filter(f => f.startsWith(path.basename(pdfImageBase)) && f.endsWith(".jpg"))
+          .sort()
+          .map(f => path.join(path.dirname(pdfImageBase), f));
+        if (pages.length > 0) {
+          ocrFilePath = pages[0]; // প্রথম পেজ — পরে সব পেজ merge করা যাবে
+          console.log(`[OCR] PDF converted: ${pages.length} pages, using first page for OCR`);
+        } else {
+          console.error("[OCR] PDF conversion produced no images");
+        }
+      } catch (pdfErr) {
+        console.error("[OCR] PDF to image conversion failed:", pdfErr.message);
+      }
+    }
+
+    const imageBuffer = fs.readFileSync(ocrFilePath);
     const base64Image = imageBuffer.toString("base64");
 
     const base64SizeMB = (base64Image.length * 3 / 4) / (1024 * 1024);
-    console.log(`[OCR] File: ${req.file.originalname}, Size: ${base64SizeMB.toFixed(2)}MB, Credits: ${credits}`);
+    console.log(`[OCR] File: ${req.file.originalname}, isPdf: ${isPdf}, Size: ${base64SizeMB.toFixed(2)}MB, Credits: ${credits}`);
     if (base64SizeMB > 8) return res.status(400).json({ error: "Image too large — max 8MB" });
 
-    // ── Step 1: Google Vision OCR — raw text extract (ফ্রি 1000/মাস) ──
+    // ── Step 1: Google Vision OCR — raw text extract ──
+    // PDF multi-page: সব পেজ OCR করে merge
     const visionApiKey = process.env.GOOGLE_VISION_API_KEY;
     let fullText = "";
 
     if (visionApiKey) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
-      try {
-        const response = await fetch(
-          `https://vision.googleapis.com/v1/images:annotate?key=${visionApiKey}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ requests: [{ image: { content: base64Image }, features: [{ type: "DOCUMENT_TEXT_DETECTION" }] }] }),
-            signal: controller.signal,
-          }
-        );
-        clearTimeout(timeout);
-        const data = await response.json();
-        fullText = data.responses?.[0]?.fullTextAnnotation?.text || "";
-      } catch (fetchErr) {
-        clearTimeout(timeout);
-        console.error("[OCR] Vision API error:", fetchErr.message);
+      // PDF হলে সব converted page OCR করো
+      const pagesToOcr = isPdf ? (() => {
+        const pdfImageBase = filePath.replace(/\.pdf$/i, "_page");
+        return fs.readdirSync(path.dirname(pdfImageBase))
+          .filter(f => f.startsWith(path.basename(pdfImageBase)) && f.endsWith(".jpg"))
+          .sort()
+          .map(f => path.join(path.dirname(pdfImageBase), f));
+      })() : [ocrFilePath];
+
+      for (const pageFile of pagesToOcr) {
+        const pageBuffer = fs.readFileSync(pageFile);
+        const pageBase64 = pageBuffer.toString("base64");
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000);
+        try {
+          const response = await fetch(
+            `https://vision.googleapis.com/v1/images:annotate?key=${visionApiKey}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ requests: [{ image: { content: pageBase64 }, features: [{ type: "DOCUMENT_TEXT_DETECTION" }] }] }),
+              signal: controller.signal,
+            }
+          );
+          clearTimeout(timeout);
+          const data = await response.json();
+          const pageText = data.responses?.[0]?.fullTextAnnotation?.text || "";
+          if (pageText) fullText += (fullText ? "\n\n--- PAGE BREAK ---\n\n" : "") + pageText;
+        } catch (fetchErr) {
+          clearTimeout(timeout);
+          console.error("[OCR] Vision API error on page:", fetchErr.message);
+        }
+      }
+
+      // Cleanup temp PDF images
+      if (isPdf) {
+        const pdfImageBase = filePath.replace(/\.pdf$/i, "_page");
+        try {
+          fs.readdirSync(path.dirname(pdfImageBase))
+            .filter(f => f.startsWith(path.basename(pdfImageBase)) && f.endsWith(".jpg"))
+            .forEach(f => fs.unlinkSync(path.join(path.dirname(pdfImageBase), f)));
+        } catch {}
       }
     }
 
