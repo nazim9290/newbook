@@ -453,9 +453,11 @@ async function fillSingleStudentFromBuffer(templateBuffer, mappings, student, sy
   // Flatten student data + system context merge
   const flat = { ...flattenStudent(student), ...sysContext };
 
-  // Debug — কোন keys আছে log করো (প্রথমবার generate করলে দেখা যাবে)
+  // Debug — কোন keys আছে log করো
   const availableKeys = Object.keys(flat).filter(k => flat[k]);
-  console.log(`[Excel Generate] Student: ${student.name_en || student.id}, available keys: ${availableKeys.length}, sample:`, availableKeys.slice(0, 20).join(", "));
+  console.log(`[Excel Generate] Student: ${student.name_en || student.id}, available keys: ${availableKeys.length}, sample:`, availableKeys.slice(0, 30).join(", "));
+  // Debug — critical fields check
+  console.log(`[Excel Debug] birth_place="${flat.birth_place}", spouse_name="${flat.spouse_name}", occupation="${flat.occupation}", edu_elementary_school="${flat.edu_elementary_school}", sponsor_name="${flat.sponsor_name}"`);
 
   // সব sheet-এর সব cell scan করো — {{...}} থাকলে replace করো
   // includeEmpty: true — merged cell-এর master cell empty হলেও scan করবে
