@@ -226,6 +226,36 @@ router.patch("/:id", asyncHandler(async (req, res) => {
   res.json(data);
 }));
 
+// DELETE /api/batches/:id — ব্যাচ ডিলিট
+// related data (batch_students, class_tests, class_test_scores) আগে মুছবে
+router.delete("/:id", asyncHandler(async (req, res) => {
+  const id = req.params.id;
+  const agencyId = req.user.agency_id;
+
+  // ব্যাচ আছে কিনা চেক
+  const { data: batch } = await supabase.from("batches").select("id, name").eq("id", id).eq("agency_id", agencyId).single();
+  if (!batch) return res.status(404).json({ error: "ব্যাচ পাওয়া যায়নি" });
+
+  // Related data cleanup
+  try { await supabase.from("class_test_scores").delete().eq("batch_id", id); } catch {}
+  try { await supabase.from("class_tests").delete().eq("batch_id", id); } catch {}
+  try { await supabase.from("batch_students").delete().eq("batch_id", id); } catch {}
+  try { await supabase.from("attendance").delete().eq("batch_id", id); } catch {}
+
+  // Students-এর batch reference clear
+  await supabase.from("students").update({ batch: null, batch_id: null }).eq("batch_id", id).eq("agency_id", agencyId);
+
+  // ব্যাচ delete
+  const { error } = await supabase.from("batches").delete().eq("id", id).eq("agency_id", agencyId);
+  if (error) return res.status(500).json({ error: "ডিলিট ব্যর্থ: " + error.message });
+
+  cache.invalidate(agencyId);
+  logActivity({ agencyId, userId: req.user.id, action: "delete", module: "batches",
+    recordId: id, description: `ব্যাচ ডিলিট: ${batch.name}`, ip: req.ip }).catch(() => {});
+
+  res.json({ success: true });
+}));
+
 // POST /api/batches/:id/enroll — enroll student
 // batch_students junction table + student.batch ফিল্ড sync
 router.post("/:id/enroll", asyncHandler(async (req, res) => {
