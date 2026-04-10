@@ -312,7 +312,11 @@ router.post("/generate-single", asyncHandler(async (req, res) => {
     const schoolId = student.school_id || tmpl.school_id;
     const [agencyRes, batchRes, branchRes, schoolRes] = await Promise.all([
       supabase.from("agencies").select("*").eq("id", req.user.agency_id).single(),
-      student.batch_id ? supabase.from("batches").select("*").eq("id", student.batch_id).single() : { data: null },
+      student.batch_id
+        ? supabase.from("batches").select("*").eq("id", student.batch_id).single()
+        : student.batch
+          ? supabase.from("batches").select("*").eq("agency_id", req.user.agency_id).ilike("name", `%${student.batch}%`).limit(1).single()
+          : { data: null },
       student.branch ? supabase.from("branches").select("*").eq("agency_id", req.user.agency_id).eq("name", student.branch).single() : { data: null },
       schoolId ? supabase.from("schools").select("*").eq("id", schoolId).single() : { data: null },
     ]);
