@@ -599,16 +599,32 @@ function flattenStudent(student) {
   const sp = decryptSensitiveFields(spRaw);
   flat.sponsor_name = sp.name || ""; flat.sponsor_name_en = sp.name_en || sp.name || "";
   flat.sponsor_relationship = sp.relationship || ""; flat.sponsor_phone = sp.phone || "";
-  flat.sponsor_address = sp.address || ""; flat.sponsor_company = sp.company_name || "";
-  flat.sponsor_income_y1 = sp.annual_income_y1 || ""; flat.sponsor_income_y2 = sp.annual_income_y2 || ""; flat.sponsor_income_y3 = sp.annual_income_y3 || "";
-  flat.sponsor_tax_y1 = sp.tax_y1 || ""; flat.sponsor_tax_y2 = sp.tax_y2 || ""; flat.sponsor_tax_y3 = sp.tax_y3 || "";
-
-  // Sponsor extended
+  flat.sponsor_address = sp.permanent_address || sp.present_address || sp.address || "";
+  flat.sponsor_present_address = sp.present_address || sp.address || "";
+  flat.sponsor_permanent_address = sp.permanent_address || sp.address || "";
+  flat.sponsor_company = sp.company_name || "";
+  flat.sponsor_company_name = sp.company_name || "";
+  flat.sponsor_company_phone = sp.company_phone || "";
+  flat.sponsor_company_address = sp.company_address || "";
+  flat.sponsor_trade_license = sp.trade_license || sp.trade_license_no || "";
+  flat.sponsor_work_address = sp.work_address || "";
+  // Sponsor parents
+  flat.sponsor_father_name = sp.father_name || "";
+  flat.sponsor_mother_name = sp.mother_name || "";
+  // Tax/Income
   flat.sponsor_dob = sp.dob || "";
   flat.sponsor_nid = sp.nid || "";
   flat.sponsor_tin = sp.tin || "";
-  flat.sponsor_company_phone = sp.company_phone || "";
-  flat.sponsor_company_address = sp.company_address || "";
+  flat.sponsor_income_year_1 = sp.income_year_1 || "";
+  flat.sponsor_income_year_2 = sp.income_year_2 || "";
+  flat.sponsor_income_year_3 = sp.income_year_3 || "";
+  flat.sponsor_income_source_1 = sp.income_source_1 || "";
+  flat.sponsor_income_source_2 = sp.income_source_2 || "";
+  flat.sponsor_income_source_3 = sp.income_source_3 || "";
+  flat.sponsor_income_y1 = sp.annual_income_y1 || ""; flat.sponsor_income_y2 = sp.annual_income_y2 || ""; flat.sponsor_income_y3 = sp.annual_income_y3 || "";
+  flat.sponsor_income = sp.annual_income_y1 || "";
+  flat.sponsor_tax_y1 = sp.tax_y1 || ""; flat.sponsor_tax_y2 = sp.tax_y2 || ""; flat.sponsor_tax_y3 = sp.tax_y3 || "";
+  flat.sponsor_statement = sp.statement || "";
 
   // Family
   const fam = student.student_family || [];
