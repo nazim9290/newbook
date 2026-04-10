@@ -588,11 +588,13 @@ function flattenStudent(student) {
     flat[`${p}_address`] = e.address || "";
     flat[`${p}_entrance`] = e.entrance_year || "";
     flat[`${p}_entrance_month`] = e.entrance_month || "";
-    flat[`${p}_graduation`] = e.passing_year || e.graduation_year || "";
+    // graduation/passing year — DB-তে "year" column-এ "2015-12" format থাকে
+    flat[`${p}_graduation`] = e.passing_year || e.graduation_year || e.year || "";
     flat[`${p}_graduation_month`] = e.graduation_month || e.passing_month || "";
     // 在学年数 (years of study) — entrance から graduation まで
-    if (e.entrance_year && (e.passing_year || e.graduation_year)) {
-      flat[`${p}_years`] = String(parseInt(e.passing_year || e.graduation_year) - parseInt(e.entrance_year));
+    const gradYear = e.passing_year || e.graduation_year || e.year || "";
+    if (e.entrance_year && gradYear) {
+      flat[`${p}_years`] = String(parseInt(gradYear) - parseInt(e.entrance_year));
     } else {
       flat[`${p}_years`] = "";
     }
@@ -658,6 +660,33 @@ function flattenStudent(student) {
     const age = Math.floor((Date.now() - new Date(flat.dob)) / (365.25 * 24 * 60 * 60 * 1000));
     flat.age = String(age);
   }
+
+  // ── JP Study History — agency+batch fallback (docgen.js-এর মতো) ──
+  const jpStudyAll = student.jp_study || [];
+  const jpStudy = jpStudyAll[0] || {};
+  flat.jp_study_institution = jpStudy.institution || flat.sys_agency_name || "";
+  flat.jp_study_address = jpStudy.address || flat.sys_agency_address || "";
+  flat.jp_study_from = jpStudy.period_from || flat.sys_batch_start || "";
+  flat.jp_study_to = jpStudy.period_to || flat.sys_batch_end || "";
+  flat.jp_study_hours = jpStudy.total_hours || flat.sys_batch_hours || "";
+
+  // ── Work Experience — 職歴 ──
+  const workAll = student.work_experience || [];
+  workAll.forEach((w, i) => {
+    const idx = i + 1;
+    flat[`work${idx}_company`] = w.company_name || "";
+    flat[`work${idx}_address`] = w.address || "";
+    flat[`work${idx}_position`] = w.position || "";
+    flat[`work${idx}_start`] = w.start_date || "";
+    flat[`work${idx}_end`] = w.end_date || "";
+  });
+  // Shorthand — first entry
+  const work = workAll[0] || {};
+  flat.work_company = work.company_name || "";
+  flat.work_address = work.address || "";
+  flat.work_position = work.position || "";
+  flat.work_start = work.start_date || "";
+  flat.work_end = work.end_date || "";
 
   return flat;
 }
@@ -773,6 +802,9 @@ const KEY_ALIASES = {
   // Study
   reason_for_study: "reason_for_study", purpose_of_study: "reason_for_study",
   study_plan: "reason_for_study", future_plan: "future_plan",
+  // Work experience aliases
+  work_company_name: "work_company", company_name: "work_company",
+  work_start_date: "work_start", work_end_date: "work_end",
   // System
   agency_name: "sys_agency_name", agency_address: "sys_agency_address",
   school_name: "sys_school_name", school_name_jp: "sys_school_name_jp",
