@@ -44,6 +44,17 @@ router.post("/", asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("submissions").insert(record).select("*, students(name_en), schools(name_en)").single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
+  // ── Student-এর school_id আপডেট — submission-এ যে school, সেটা student-এ assign ──
+  if (record.student_id && record.school_id) {
+    try {
+      const schoolUpdate = { school_id: record.school_id };
+      // School নাম text field-এও রাখো (students list-এ sort/filter এর জন্য)
+      const { data: sch } = await supabase.from("schools").select("name_en").eq("id", record.school_id).single();
+      if (sch) schoolUpdate.school = sch.name_en;
+      await supabase.from("students").update(schoolUpdate).eq("id", record.student_id).eq("agency_id", req.user.agency_id);
+    } catch (e) { console.error("[Submission→Student school sync]", e.message); }
+  }
+
   // Cache invalidate — নতুন submission তৈরি হলে cache মুছে দাও
   cache.invalidate(req.user.agency_id);
 
