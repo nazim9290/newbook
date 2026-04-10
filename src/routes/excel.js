@@ -543,11 +543,9 @@ function flattenStudent(student) {
   flat.study_subject = flat.study_subject || student.study_subject || "";
 
   // Additional personal fields
-  console.log(`[FLATTEN DEBUG] PRE: flat.birth_place="${flat.birth_place}", student.birth_place="${student.birth_place}", decrypted keys:`, Object.keys(flat).filter(k => k.includes("birth") || k.includes("occup") || k.includes("spouse")).join(","));
   flat.birth_place = flat.birth_place || student.birth_place || "";
   flat.occupation = flat.occupation || student.occupation || "";
   flat.spouse_name = flat.spouse_name || student.spouse_name || "";
-  console.log(`[FLATTEN DEBUG] POST: flat.birth_place="${flat.birth_place}", flat.occupation="${flat.occupation}", flat.spouse_name="${flat.spouse_name}"`);
   flat.emergency_contact = flat.emergency_contact || student.emergency_contact || "";
   flat.emergency_phone = flat.emergency_phone || student.emergency_phone || "";
 
@@ -1152,79 +1150,7 @@ function generateCSV(res, tmpl, students) {
 }
 
 // Flatten student + related data into a key-value map
-function flattenStudent(s) {
-  const flat = {};
-  const fields = [
-    "id", "name_en", "name_bn", "name_katakana", "phone", "whatsapp", "email",
-    "dob", "gender", "marital_status", "nationality", "blood_group",
-    "nid", "passport_number", "passport_issue", "passport_expiry",
-    "permanent_address", "current_address",
-    "father_name", "father_name_en", "mother_name", "mother_name_en",
-    "country", "intake", "visa_type", "source", "student_type", "status", "branch",
-  ];
-  for (const f of fields) flat[f] = s[f] || "";
-
-  // Age
-  if (s.dob) {
-    const birth = new Date(s.dob);
-    flat.age = String(new Date().getFullYear() - birth.getFullYear());
-  }
-
-  // Education
-  if (Array.isArray(s.student_education)) {
-    for (const edu of s.student_education) {
-      const key = (edu.level || "").toLowerCase().replace(/[^a-z]/g, "");
-      const match = ["ssc", "hsc", "honours", "masters", "diploma"].find((l) => key.includes(l)) || key.substring(0, 6);
-      flat[`edu_${match}_school`] = edu.school_name || "";
-      flat[`edu_${match}_year`] = edu.year || "";
-      flat[`edu_${match}_board`] = edu.board || "";
-      flat[`edu_${match}_gpa`] = edu.gpa || "";
-      flat[`edu_${match}_subject`] = edu.subject_group || "";
-    }
-  }
-
-  // JP exams
-  if (Array.isArray(s.student_jp_exams) && s.student_jp_exams.length > 0) {
-    const latest = [...s.student_jp_exams].sort((a, b) => (b.exam_date || "").localeCompare(a.exam_date || ""))[0];
-    flat.jp_exam_type = latest.exam_type || "";
-    flat.jp_level = latest.level || "";
-    flat.jp_score = String(latest.score || "");
-    flat.jp_result = latest.result || "";
-    flat.jp_exam_date = latest.exam_date || "";
-  }
-
-  // Family
-  if (Array.isArray(s.student_family)) {
-    for (const f of s.student_family) {
-      const rel = (f.relation || "").toLowerCase();
-      flat[`${rel}_name`] = f.name || "";
-      flat[`${rel}_name_en`] = f.name_en || "";
-      flat[`${rel}_dob`] = f.dob || "";
-      flat[`${rel}_occupation`] = f.occupation || "";
-      flat[`${rel}_workplace`] = f.workplace || "";
-      flat[`${rel}_phone`] = f.phone || "";
-    }
-  }
-
-  // Sponsor
-  if (Array.isArray(s.sponsors) && s.sponsors.length > 0) {
-    const sp = s.sponsors[0];
-    flat.sponsor_name = sp.name || "";
-    flat.sponsor_name_en = sp.name_en || "";
-    flat.sponsor_relationship = sp.relationship || "";
-    flat.sponsor_phone = sp.phone || "";
-    flat.sponsor_address = sp.address || "";
-    flat.sponsor_company = sp.company_name || "";
-    flat.sponsor_income_y1 = String(sp.annual_income_y1 || "");
-    flat.sponsor_income_y2 = String(sp.annual_income_y2 || "");
-    flat.sponsor_income_y3 = String(sp.annual_income_y3 || "");
-    flat.sponsor_tax_y1 = String(sp.tax_y1 || "");
-    flat.sponsor_tax_y2 = String(sp.tax_y2 || "");
-    flat.sponsor_tax_y3 = String(sp.tax_y3 || "");
-  }
-
-  return flat;
-}
+// দ্বিতীয় flattenStudent সরানো হয়েছে — line 519-এর বিস্তারিত version ব্যবহার হবে
 
 // System fields for frontend
 const SYSTEM_FIELDS = [
