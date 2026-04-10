@@ -34,6 +34,17 @@ module.exports = function authMiddleware(req, res, next) {
 
   try {
     req.user = jwt.verify(token, process.env.JWT_SECRET);
+
+    // ── Super Admin agency switch — X-Switch-Agency header থেকে agency_id override ──
+    // শুধু super_admin role হলেই কাজ করবে
+    if (req.user.role === "super_admin") {
+      const switchAgencyId = req.headers["x-switch-agency"];
+      if (switchAgencyId) {
+        req.user._original_agency_id = req.user.agency_id;
+        req.user.agency_id = switchAgencyId;
+      }
+    }
+
     next();
   } catch {
     return res.status(401).json({ error: "Token অবৈধ বা মেয়াদ শেষ" });
