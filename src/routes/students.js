@@ -529,26 +529,49 @@ router.get("/import/template", checkPermission("students", "read"), asyncHandler
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Students");
 
-  // Column config — text format columns চিহ্নিত
+  // ── সব student ফিল্ড — ইউজার bulk import করতে পারবে ──
   const cols = [
-    { header: "Name *", key: "name", width: 25 },
-    { header: "Name (বাংলা)", key: "name_bn", width: 25 },
+    // ── Personal Info ──
+    { header: "Full Name (English) *", key: "name_en", width: 28 },
+    { header: "Name (カタカナ)", key: "name_katakana", width: 20 },
     { header: "Phone *", key: "phone", width: 18 },
-    { header: "Email", key: "email", width: 22 },
-    { header: "Date of Birth", key: "dob", width: 15 },
-    { header: "Gender", key: "gender", width: 10 },
-    { header: "Passport No", key: "passport", width: 15 },
-    { header: "NID", key: "nid", width: 20 },
-    { header: "Father Name", key: "father", width: 20 },
-    { header: "Mother Name", key: "mother", width: 20 },
-    { header: "Address", key: "address", width: 30 },
-    { header: "Country", key: "country", width: 12 },
-    { header: "Branch", key: "branch", width: 12 },
-    { header: "Source", key: "source", width: 12 },
-    { header: "Blood Group", key: "blood", width: 10 },
     { header: "WhatsApp", key: "whatsapp", width: 18 },
-    { header: "Nationality", key: "nationality", width: 12 },
+    { header: "Email", key: "email", width: 24 },
+    { header: "Date of Birth", key: "dob", width: 14 },
+    { header: "Gender", key: "gender", width: 10 },
+    { header: "Marital Status", key: "marital_status", width: 12 },
+    { header: "Nationality", key: "nationality", width: 14 },
+    { header: "Blood Group", key: "blood_group", width: 10 },
+    { header: "Place of Birth", key: "birth_place", width: 18 },
+    { header: "Occupation", key: "occupation", width: 15 },
+    // ── Passport & NID ──
+    { header: "NID", key: "nid", width: 20 },
+    { header: "Passport No", key: "passport_number", width: 15 },
+    { header: "Passport Issue Date", key: "passport_issue", width: 14 },
+    { header: "Passport Expiry Date", key: "passport_expiry", width: 14 },
+    // ── Address ──
+    { header: "Permanent Address", key: "permanent_address", width: 35 },
+    { header: "Current Address", key: "current_address", width: 35 },
+    // ── Family ──
+    { header: "Father Name", key: "father_name", width: 22 },
+    { header: "Mother Name", key: "mother_name", width: 22 },
+    { header: "Spouse Name", key: "spouse_name", width: 20 },
+    { header: "Emergency Contact", key: "emergency_contact", width: 20 },
+    { header: "Emergency Phone", key: "emergency_phone", width: 18 },
+    // ── Destination & Status ──
+    { header: "Country", key: "country", width: 12 },
+    { header: "School", key: "school", width: 25 },
+    { header: "Batch", key: "batch", width: 15 },
+    { header: "Intake", key: "intake", width: 15 },
     { header: "Visa Type", key: "visa_type", width: 18 },
+    { header: "Student Type", key: "student_type", width: 12 },
+    { header: "Branch", key: "branch", width: 12 },
+    { header: "Source", key: "source", width: 14 },
+    { header: "Counselor", key: "counselor", width: 15 },
+    // ── Study Plan ──
+    { header: "Reason for Study", key: "reason_for_study", width: 30 },
+    { header: "Future Plan", key: "future_plan", width: 25 },
+    { header: "Study Subject", key: "study_subject", width: 20 },
   ];
   ws.columns = cols;
 
@@ -558,49 +581,47 @@ router.get("/import/template", checkPermission("students", "read"), asyncHandler
   headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF06B6D4" } };
   headerRow.alignment = { horizontal: "center" };
 
-  // Required columns (* চিহ্নিত) red background
+  // Required columns (* চিহ্নিত) red background — Name (1) ও Phone (3)
   [1, 3].forEach(col => {
     const cell = headerRow.getCell(col);
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF43F5E" } };
   });
 
-  // Row 2 = নির্দেশনা (হালকা হলুদ)
+  // ── Row 2 = নির্দেশনা সারি — প্রতিটি ফিল্ডের জন্য hint ──
   const guideRow = ws.addRow([
-    "বাধ্যতামূলক — English-এ পুরো নাম",
-    "ঐচ্ছিক — বাংলায় নাম",
-    "বাধ্যতামূলক — 01XXXXXXXXX",
-    "ঐচ্ছিক",
-    "YYYY-MM-DD format",
-    "Male / Female / Other",
-    "পাসপোর্ট নম্বর",
-    "জাতীয় পরিচয়পত্র নম্বর",
-    "পিতার নাম",
-    "মাতার নাম",
-    "স্থায়ী ঠিকানা",
-    "Japan / Germany / Korea",
-    "Main / Chattogram / Sylhet",
-    "Facebook / Walk-in / Agent / Referral",
-    "A+ / B+ / O+ / AB+ ইত্যাদি",
-    "আলাদা হলে WhatsApp নম্বর",
-    "Bangladeshi",
-    "Language Student / SSW / TITP",
+    "Required — Full name in English CAPS", "カタカナ name", "Required — 01XXXXXXXXX",
+    "If different from phone", "Optional", "YYYY-MM-DD", "Male / Female / Other",
+    "Single / Married / Divorced", "Bangladeshi", "A+ / B+ / O+ / AB+ etc.",
+    "Place of birth", "Student / Business etc.",
+    "17-digit NID number", "Passport number", "YYYY-MM-DD", "YYYY-MM-DD",
+    "Village, Upazila, District", "Current address if different",
+    "Father full name", "Mother full name", "Spouse name", "Emergency person name", "Emergency phone",
+    "Japan / Germany / Korea", "School name", "e.g. April 2026", "e.g. April 2026",
+    "Language Student / SSW / TITP", "Own / Partner", "Main / Chattogram / Sylhet",
+    "Facebook / Walk-in / Agent / Referral", "Counselor name",
+    "Reason for studying abroad", "Future career plan", "Subject of study",
   ]);
   guideRow.font = { italic: true, size: 9, color: { argb: "FF666666" } };
   guideRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFDE7" } };
 
-  // Row 3 = Sample data
+  // ── Row 3 = Sample data ──
   ws.addRow([
-    "Mohammad Rahim", "মোহাম্মদ রহিম", "01811111111", "rahim@gmail.com",
-    "1998-03-12", "Male", "BK1234567", "1998123456789",
-    "Abdul Karim", "Fatema Begum", "Comilla, Bangladesh",
-    "Japan", "Main", "Facebook", "B+", "01811111111", "Bangladeshi", "Language Student",
+    "MOHAMMAD RAHIM", "モハマド ラヒム", "01811111111",
+    "01811111111", "rahim@gmail.com", "1998-03-12", "Male",
+    "Single", "Bangladeshi", "B+", "Comilla", "Student",
+    "1998123456789", "BK1234567", "2020-01-15", "2030-01-14",
+    "Comilla, Bangladesh", "", "Abdul Karim", "Fatema Begum",
+    "", "", "",
+    "Japan", "Kobe Japanese Language School", "April 2026", "April 2026",
+    "Language Student", "Own", "Main", "Facebook", "Mina",
+    "To learn Japanese and work in Japan", "IT engineer in Japan", "Computer Science",
   ]);
 
-  // Phone, NID, WhatsApp columns → Text format (leading zero রক্ষা)
-  const textCols = [3, 8, 16]; // Phone, NID, WhatsApp
-  for (let r = 1; r <= 100; r++) {
+  // ── Phone, NID, WhatsApp, Emergency Phone → Text format (leading zero রক্ষা) ──
+  const textCols = [3, 4, 13, 23]; // phone, whatsapp, nid, emergency_phone
+  for (let r = 1; r <= 200; r++) {
     textCols.forEach(c => {
-      ws.getCell(r, c).numFmt = "@"; // @ = Text format
+      ws.getCell(r, c).numFmt = "@";
     });
   }
 
@@ -714,22 +735,50 @@ router.post("/import/parse", checkPermission("students", "write"), importUpload.
 
     // Auto-suggest mappings
     const suggestions = {};
+    // ── Auto-mapping — Excel header text → system field ──
     const autoMap = {
+      // Personal
       "name": "name_en", "নাম": "name_en", "full name": "name_en", "student name": "name_en",
+      "katakana": "name_katakana", "カタカナ": "name_katakana",
       "phone": "phone", "ফোন": "phone", "mobile": "phone", "contact": "phone",
+      "whatsapp": "whatsapp",
       "email": "email", "ইমেইল": "email",
       "dob": "dob", "date of birth": "dob", "জন্ম তারিখ": "dob", "birth date": "dob",
       "gender": "gender", "লিঙ্গ": "gender", "sex": "gender",
-      "passport": "passport_number", "পাসপোর্ট": "passport_number",
+      "marital": "marital_status", "বৈবাহিক": "marital_status",
+      "nationality": "nationality", "জাতীয়তা": "nationality",
+      "blood": "blood_group", "রক্ত": "blood_group",
+      "birth place": "birth_place", "place of birth": "birth_place", "জন্মস্থান": "birth_place",
+      "occupation": "occupation", "পেশা": "occupation",
+      // Passport & NID
       "nid": "nid", "national id": "nid",
+      "passport": "passport_number", "পাসপোর্ট": "passport_number",
+      "passport issue": "passport_issue",
+      "passport expiry": "passport_expiry",
+      // Address
+      "permanent address": "permanent_address", "address": "permanent_address", "ঠিকানা": "permanent_address",
+      "current address": "current_address",
+      // Family
       "father": "father_name", "পিতা": "father_name", "father name": "father_name",
       "mother": "mother_name", "মাতা": "mother_name", "mother name": "mother_name",
-      "address": "permanent_address", "ঠিকানা": "permanent_address",
+      "spouse": "spouse_name", "স্বামী": "spouse_name", "স্ত্রী": "spouse_name",
+      "emergency contact": "emergency_contact",
+      "emergency phone": "emergency_phone",
+      // Destination
       "country": "country", "দেশ": "country",
       "school": "school", "স্কুল": "school",
       "batch": "batch", "ব্যাচ": "batch",
-      "status": "status", "source": "source",
+      "intake": "intake",
+      "visa type": "visa_type", "visa": "visa_type",
+      "student type": "student_type", "type": "student_type",
       "branch": "branch", "ব্রাঞ্চ": "branch",
+      "source": "source",
+      "counselor": "counselor", "কাউন্সেলর": "counselor",
+      // Study Plan
+      "reason": "reason_for_study",
+      "future plan": "future_plan",
+      "study subject": "study_subject", "subject": "study_subject",
+      "status": "status",
     };
     headers.forEach(h => {
       const lower = h.name.toLowerCase();
