@@ -102,6 +102,37 @@ router.post("/permissions", auth, asyncHandler(async (req, res) => {
   res.json({ success: true, message: "পারমিশন সংরক্ষণ হয়েছে" });
 }));
 
+// ── GET /api/users/me/preferences — নিজের preferences (কলাম কনফিগ ইত্যাদি) ──
+router.get("/me/preferences", auth, asyncHandler(async (req, res) => {
+  const { data, error } = await supabase.from("users")
+    .select("preferences")
+    .eq("id", req.user.id)
+    .single();
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি" }); }
+  res.json(data?.preferences || {});
+}));
+
+// ── PATCH /api/users/me/preferences — preferences আপডেট (merge) ──
+router.patch("/me/preferences", auth, asyncHandler(async (req, res) => {
+  const updates = req.body;
+  if (!updates || typeof updates !== "object") return res.status(400).json({ error: "preferences অবজেক্ট দিন" });
+
+  // বর্তমান preferences নিয়ে merge করো — partial update
+  const { data: current } = await supabase.from("users")
+    .select("preferences")
+    .eq("id", req.user.id)
+    .single();
+  const merged = { ...(current?.preferences || {}), ...updates };
+
+  const { data, error } = await supabase.from("users")
+    .update({ preferences: JSON.stringify(merged) })
+    .eq("id", req.user.id)
+    .select("preferences")
+    .single();
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি" }); }
+  res.json(data?.preferences || merged);
+}));
+
 // ── DELETE /api/users/:id — ইউজার মুছে ফেলো ──
 router.delete("/:id", auth, asyncHandler(async (req, res) => {
   // নিজেকে delete করতে পারবে না
