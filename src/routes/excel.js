@@ -521,6 +521,13 @@ function flattenStudent(student) {
   const decrypted = decryptSensitiveFields(student);
   const flat = { ...decrypted };
 
+  // ── Date fields normalize — pg driver Date object কে "YYYY-MM-DD" string-এ convert ──
+  for (const key of Object.keys(flat)) {
+    if (flat[key] instanceof Date) {
+      flat[key] = flat[key].toISOString().slice(0, 10);
+    }
+  }
+
   // ── Field alias mapping — DB column name → Excel placeholder key ──
   // DB-তে father_name/father_en/mother_name/mother_en আছে, Excel-এ father_name_en/mother_name_en ব্যবহার হয়
   flat.father_name_en = flat.father_name_en || flat.father_en || flat.father_name || "";
@@ -797,6 +804,9 @@ function resolveFieldValue(flat, fieldKey) {
     }
     if (!rawValue) return "";
 
+    // Date object → ISO string convert
+    if (rawValue instanceof Date) rawValue = rawValue.toISOString().slice(0, 10);
+
     // Date modifiers
     if (["year", "month", "day"].includes(modifier)) {
       // Date format: "1998-03-12" বা "03/12/1998" বা "1998/03/12"
@@ -829,6 +839,8 @@ function resolveFieldValue(flat, fieldKey) {
   }
 
   // No modifier → direct value, with alias + case-insensitive fallback
+  // Date object হলে ISO string-এ convert
+  if (flat[fieldKey] instanceof Date) return flat[fieldKey].toISOString().slice(0, 10);
   if (flat[fieldKey] !== undefined && flat[fieldKey] !== "") return flat[fieldKey];
 
   // Alias lookup
