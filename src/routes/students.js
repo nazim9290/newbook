@@ -522,6 +522,20 @@ router.post("/:id/jp-study", checkPermission("students", "write"), asyncHandler(
   res.status(201).json(data);
 }));
 
+// PATCH /api/students/:id/jp-study/:jsId — জাপানি ভাষা শিক্ষা ইতিহাস আপডেট
+router.patch("/:id/jp-study/:jsId", checkPermission("students", "write"), asyncHandler(async (req, res) => {
+  const { institution, address, period_from, period_to, total_hours } = req.body;
+  const update = { updated_at: new Date().toISOString() };
+  if (institution !== undefined) update.institution = institution;
+  if (address !== undefined) update.address = address;
+  if (period_from !== undefined) update.period_from = period_from;
+  if (period_to !== undefined) update.period_to = period_to;
+  if (total_hours !== undefined) update.total_hours = total_hours;
+  const { data, error } = await supabase.from("student_jp_study").update(update).eq("id", req.params.jsId).eq("student_id", req.params.id).select().single();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+}));
+
 // DELETE /api/students/:id/jp-study/:jsId — জাপানি ভাষা শিক্ষা ইতিহাস মুছুন
 router.delete("/:id/jp-study/:jsId", checkPermission("students", "write"), asyncHandler(async (req, res) => {
   await supabase.from("student_jp_study").delete().eq("id", req.params.jsId);
