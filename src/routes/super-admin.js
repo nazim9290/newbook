@@ -124,12 +124,19 @@ router.post("/agencies", asyncHandler(async (req, res) => {
   if (agencyErr) return res.status(500).json({ error: "Agency তৈরি ব্যর্থ" });
 
   // এই agency-র জন্য admin user তৈরি
-  const password_hash = await bcrypt.hash(admin_password, 12);
-  const { data: adminUser, error: userErr } = await supabase.from("users")
-    .insert({ agency_id: agency.id, name: admin_name || "Admin", email: admin_email, password_hash, role: "owner", branch: "Main" })
-    .select().single();
-
-  if (userErr) return res.status(500).json({ error: "Admin user তৈরি ব্যর্থ: " + userErr.message });
+  // ⚠️ Super Admin-এর email হলে duplicate owner তৈরি করো না — switch দিয়ে access পাবে
+  const isSuperAdminEmail = admin_email.toLowerCase() === req.user.email?.toLowerCase();
+  let adminUser = null;
+  if (isSuperAdminEmail) {
+    console.log(`[Agency Create] Skipping owner user — ${admin_email} is super_admin, will use switch`);
+  } else {
+    const password_hash = await bcrypt.hash(admin_password, 12);
+    const { data, error: userErr } = await supabase.from("users")
+      .insert({ agency_id: agency.id, name: admin_name || "Admin", email: admin_email, password_hash, role: "owner", branch: "Main" })
+      .select().single();
+    if (userErr) return res.status(500).json({ error: "Admin user তৈরি ব্যর্থ: " + userErr.message });
+    adminUser = data;
+  }
 
   // Default portal form config copy করো (demo agency থেকে)
   const { data: defaultConfigs } = await supabase.from("portal_form_config")
