@@ -222,13 +222,15 @@ router.post("/generate", asyncHandler(async (req, res) => {
       const { data: sts } = await supabase.from("students").select("*").in("id", student_ids).eq("agency_id", req.user.agency_id);
       if (!sts) return res.status(500).json({ error: "সার্ভার ত্রুটি" });
       students = await Promise.all(sts.map(async (st) => {
-        const [eduRes, jpRes, famRes, spRes] = await Promise.all([
+        const [eduRes, jpRes, famRes, spRes, workRes, jpStudyRes] = await Promise.all([
           supabase.from("student_education").select("*").eq("student_id", st.id),
           supabase.from("student_jp_exams").select("*").eq("student_id", st.id),
           supabase.from("student_family").select("*").eq("student_id", st.id),
           supabase.from("sponsors").select("*").eq("student_id", st.id),
+          supabase.from("student_work_experience").select("*").eq("student_id", st.id),
+          supabase.from("student_jp_study").select("*").eq("student_id", st.id),
         ]);
-        return { ...st, student_education: eduRes.data || [], student_jp_exams: jpRes.data || [], student_family: famRes.data || [], sponsors: spRes.data || [] };
+        return { ...st, student_education: eduRes.data || [], student_jp_exams: jpRes.data || [], student_family: famRes.data || [], sponsors: spRes.data || [], work_experience: workRes.data || [], jp_study: jpStudyRes.data || [] };
       }));
     }
 
@@ -293,13 +295,15 @@ router.post("/generate-single", asyncHandler(async (req, res) => {
       console.log("[Excel Generate] JOIN failed, using separate queries:", joinErr.message);
       const { data: st } = await supabase.from("students").select("*").eq("id", student_id).eq("agency_id", req.user.agency_id).single();
       if (!st) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
-      const [eduRes, jpRes, famRes, spRes] = await Promise.all([
+      const [eduRes, jpRes, famRes, spRes, workRes, jpStudyRes] = await Promise.all([
         supabase.from("student_education").select("*").eq("student_id", student_id),
         supabase.from("student_jp_exams").select("*").eq("student_id", student_id),
         supabase.from("student_family").select("*").eq("student_id", student_id),
         supabase.from("sponsors").select("*").eq("student_id", student_id),
+        supabase.from("student_work_experience").select("*").eq("student_id", student_id),
+        supabase.from("student_jp_study").select("*").eq("student_id", student_id),
       ]);
-      student = { ...st, student_education: eduRes.data || [], student_jp_exams: jpRes.data || [], student_family: famRes.data || [], sponsors: spRes.data || [] };
+      student = { ...st, student_education: eduRes.data || [], student_jp_exams: jpRes.data || [], student_family: famRes.data || [], sponsors: spRes.data || [], work_experience: workRes.data || [], jp_study: jpStudyRes.data || [] };
     }
     if (!student) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
 
