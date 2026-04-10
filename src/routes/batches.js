@@ -214,8 +214,9 @@ router.patch("/:id", asyncHandler(async (req, res) => {
     }
   }
 
+  console.log("[Batch PATCH] Updates payload:", JSON.stringify(updates));
   const { data, error } = await supabase.from("batches").update(updates).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
-  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+  if (error) { console.error("[DB] update batches:", error.message, "| Payload:", JSON.stringify(updates)); return res.status(400).json({ error: error.message }); }
 
   // Auto-calculate — ক্লাসের দিন/ঘণ্টা থেকে total_classes, total_hours, weekly_hours হিসাব
   // ছুটির দিনগুলো বাদ দিয়ে হিসাব (holidays table থেকে)
