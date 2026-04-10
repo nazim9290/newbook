@@ -17,7 +17,8 @@ router.get("/", checkPermission("students", "read"), asyncHandler(async (req, re
   const { search, status, country, batch, school, branch } = req.query;
   const { applyCursor, buildResponse } = require("../lib/cursorPagination");
 
-  let query = supabase.from("students").select("*", { count: "exact" }).eq("agency_id", req.user.agency_id);
+  // schools ও batches JOIN — school_id/batch_id থেকে নাম আনো
+  let query = supabase.from("students").select("*, schools:school_id(name_en), batches:batch_id(name)", { count: "exact" }).eq("agency_id", req.user.agency_id);
 
   // Branch-based access — counselor/staff শুধু নিজের branch-এর student দেখবে
   const { getBranchFilter } = require("../lib/branchFilter");
