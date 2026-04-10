@@ -721,16 +721,28 @@ router.post("/import/parse", checkPermission("students", "write"), importUpload.
       headers.push({ col: colNumber, name: val.trim() });
     });
 
-    // Data rows (max 5 for preview)
+    // ── Data rows — empty row skip করো, max 5 preview ──
     const preview = [];
-    for (let r = 2; r <= Math.min(sheet.rowCount, 6); r++) {
+    let dataRowCount = 0;
+    for (let r = 2; r <= sheet.rowCount; r++) {
       const row = sheet.getRow(r);
-      const obj = {};
+      // row-তে কোনো data আছে কিনা চেক করো
+      let hasData = false;
       headers.forEach(h => {
         const cell = row.getCell(h.col);
-        obj[h.name] = cell.text || (cell.value != null ? String(cell.value) : "");
+        const val = cell.text || (cell.value != null ? String(cell.value).trim() : "");
+        if (val) hasData = true;
       });
-      preview.push(obj);
+      if (!hasData) continue;
+      dataRowCount++;
+      if (preview.length < 5) {
+        const obj = {};
+        headers.forEach(h => {
+          const cell = row.getCell(h.col);
+          obj[h.name] = cell.text || (cell.value != null ? String(cell.value) : "");
+        });
+        preview.push(obj);
+      }
     }
 
     // Auto-suggest mappings
@@ -793,7 +805,7 @@ router.post("/import/parse", checkPermission("students", "write"), importUpload.
 
     res.json({
       headers: headers.map(h => h.name),
-      totalRows: sheet.rowCount - 1,
+      totalRows: dataRowCount,
       preview,
       suggestions,
     });
