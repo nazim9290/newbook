@@ -287,11 +287,14 @@ router.post("/:id/enroll", asyncHandler(async (req, res) => {
 
   // ── student.batch ও batch_id sync — ব্যাচ নাম ও ID student record-এ সেট ──
   try {
-    await supabase.from("students")
+    const { data: syncResult, error: syncErr } = await supabase.from("students")
       .update({ batch: batch.name, batch_id: batch.id })
       .eq("id", student_id)
-      .eq("agency_id", req.user.agency_id);
-  } catch (e) { console.error("[Batch Sync]", e.message); }
+      .eq("agency_id", req.user.agency_id)
+      .select("id, batch, batch_id");
+    if (syncErr) console.error("[Batch Sync Error]", syncErr.message);
+    else console.log("[Batch Sync OK]", student_id, "→", batch.name, batch.id, "result:", syncResult?.length || 0, "rows");
+  } catch (e) { console.error("[Batch Sync Exception]", e.message); }
 
   // Cache invalidate — enrollment হলে cache মুছে দাও
   cache.invalidate(req.user.agency_id);
