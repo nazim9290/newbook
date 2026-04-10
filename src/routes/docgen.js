@@ -546,26 +546,47 @@ function flattenForDoc(student, context = {}) {
   const sp = decryptSensitiveFields(spRaw);
   flat.sponsor_name = sp.name || ""; flat.sponsor_name_en = sp.name_en || sp.name || "";
   flat.sponsor_phone = sp.phone || "";
-  flat.sponsor_address = sp.address || ""; flat.sponsor_relationship = sp.relationship || "";
-  // Extended sponsor fields — 経費支弁書 (Financial Sponsorship Document)
-  flat.sponsor_statement = sp.statement || "";
-  flat.sponsor_payment_to_student = sp.payment_to_student ? "✓" : "";
-  flat.sponsor_payment_to_school = sp.payment_to_school ? "✓" : "";
-  flat.sponsor_sign_date = sp.sign_date || "";
-  flat.sponsor_tin = sp.tin || "";
-  flat.sponsor_income = sp.annual_income_y1 || "";
-  flat.sponsor_company = sp.company_name || "";
+  flat.sponsor_address = sp.address || sp.permanent_address || "";
+  flat.sponsor_relationship = sp.relationship || "";
+  flat.sponsor_dob = sp.dob || "";
   flat.sponsor_nid = sp.nid || "";
-  flat.tuition_jpy = sp.tuition_jpy || student.tuition_jpy || "";
-  flat.monthly_living = sp.living_jpy_monthly || student.monthly_living || "";
-  flat.exchange_rate = sp.exchange_rate || "";
-  // Sponsor yearly income/tax — ৩ বছরের তথ্য
+  // ── Sponsor addresses ──
+  flat.sponsor_present_address = sp.present_address || sp.address || "";
+  flat.sponsor_permanent_address = sp.permanent_address || sp.address || "";
+  // ── Sponsor parents ──
+  flat.sponsor_father_name = sp.father_name || "";
+  flat.sponsor_mother_name = sp.mother_name || "";
+  // ── Business ──
+  flat.sponsor_company = sp.company_name || "";
+  flat.sponsor_company_name = sp.company_name || "";
+  flat.sponsor_company_phone = sp.company_phone || "";
+  flat.sponsor_company_address = sp.company_address || "";
+  flat.sponsor_trade_license = sp.trade_license || sp.trade_license_no || "";
+  flat.sponsor_work_address = sp.work_address || "";
+  // ── Tax/Income — Assessment Year + Source + Amount ──
+  flat.sponsor_tin = sp.tin || "";
+  flat.sponsor_income_year_1 = sp.income_year_1 || "";
+  flat.sponsor_income_year_2 = sp.income_year_2 || "";
+  flat.sponsor_income_year_3 = sp.income_year_3 || "";
+  flat.sponsor_income_source_1 = sp.income_source_1 || "Business Income";
+  flat.sponsor_income_source_2 = sp.income_source_2 || "Business Income";
+  flat.sponsor_income_source_3 = sp.income_source_3 || "Business Income";
   flat.sponsor_income_y1 = sp.annual_income_y1 || "";
   flat.sponsor_income_y2 = sp.annual_income_y2 || "";
   flat.sponsor_income_y3 = sp.annual_income_y3 || "";
+  flat.sponsor_income = sp.annual_income_y1 || "";
   flat.sponsor_tax_y1 = sp.tax_paid_y1 || sp.tax_y1 || "";
   flat.sponsor_tax_y2 = sp.tax_paid_y2 || sp.tax_y2 || "";
   flat.sponsor_tax_y3 = sp.tax_paid_y3 || sp.tax_y3 || "";
+  // ── Statement ──
+  flat.sponsor_statement = sp.statement || "";
+  flat.sponsor_sign_date = sp.sign_date || "";
+  flat.sponsor_payment_to_student = sp.payment_to_student ? "✓" : "";
+  flat.sponsor_payment_to_school = sp.payment_to_school ? "✓" : "";
+  // ── Japan finance ──
+  flat.tuition_jpy = sp.tuition_jpy || student.tuition_jpy || "";
+  flat.monthly_living = sp.living_jpy_monthly || student.monthly_living || "";
+  flat.exchange_rate = sp.exchange_rate || "";
 
   // ═══════════════════════════════════════════════════
   // New Student fields — 入学願書 (Application for Admission)

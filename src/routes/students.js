@@ -214,16 +214,16 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
       const sp = body.sponsor;
       // sponsors table-এর valid columns — বাকি সব ignore
       const SPONSOR_COLS = [
-        "name", "name_en", "relationship", "phone", "address", "nid",
-        "company_name", "company_address", "company_phone", "trade_license", "tin",
+        "name", "name_en", "relationship", "phone", "address", "nid", "dob",
+        "father_name", "mother_name", "present_address", "permanent_address",
+        "company_name", "company_address", "company_phone", "trade_license", "trade_license_no", "work_address", "tin",
+        "income_year_1", "income_year_2", "income_year_3",
+        "income_source_1", "income_source_2", "income_source_3",
         "annual_income_y1", "annual_income_y2", "annual_income_y3",
         "tax_y1", "tax_y2", "tax_y3",
+        "statement", "payment_to_student", "payment_to_school", "sign_date",
         "tuition_jpy", "living_jpy_monthly", "payment_method", "exchange_rate",
         "fund_formation", "notes",
-        // 経費支弁書 fields
-        "statement", "payment_to_student", "payment_to_school", "sign_date",
-        // Resume fields — 入学願書 support
-        "dob",
       ];
       const sponsorRecord = { student_id: req.params.id };
       for (const col of SPONSOR_COLS) {
