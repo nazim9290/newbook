@@ -753,6 +753,11 @@ const KEY_ALIASES = {
   edu_technical_name: "edu_technical_school", edu_technical_add: "edu_technical_address",
   edu_university_name: "edu_university_school", edu_university_add: "edu_university_address",
   edu_juniorcollege_name: "edu_juniorCollege_school", edu_juniorcollege_add: "edu_juniorCollege_address",
+  // Education — honours aliases
+  edu_honours_add: "edu_honours_address",
+  // Passport date aliases — template-এ "Passport Issue", "Passport Expiry" ব্যবহার হতে পারে
+  "passport issue": "passport_issue", "passport_issue_date": "passport_issue",
+  "passport expiry": "passport_expiry", "passport_expiry_date": "passport_expiry",
   // Sponsor
   sponsor: "sponsor_name_en",
   // JP
@@ -767,6 +772,17 @@ const KEY_ALIASES = {
 
 function resolveFieldValue(flat, fieldKey) {
   if (!fieldKey) return "";
+
+  // ── Normalize — double colon ও duplicate modifier fix ──
+  // "dob::day:day:day" → "dob:day", "dob:month:month:month" → "dob:month"
+  fieldKey = fieldKey.replace(/:+/g, ":").replace(/:$/, "");
+  if (fieldKey.includes(":")) {
+    const parts = fieldKey.split(":");
+    // unique modifier — শেষ valid modifier নাও
+    const base = parts[0];
+    const mod = parts.find((p, i) => i > 0 && p) || "";
+    fieldKey = mod ? `${base}:${mod}` : base;
+  }
 
   // Sub-field check: "dob:year", "name_en:first", etc.
   if (fieldKey.includes(":")) {
