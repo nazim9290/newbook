@@ -281,7 +281,7 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
     }
   }
 
-  // ── Batch sync — batch_id পরিবর্তন হলে batch_students junction table আপডেট ──
+  // ── Batch sync — batch_id পরিবর্তন হলে batch_students + JP Study auto-link ──
   if (body.batch_id && data.batch_id) {
     try {
       // পুরনো enrollment থাকলে মুছে নতুনটা যোগ
@@ -289,10 +289,49 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
       await supabase.from("batch_students").insert({
         batch_id: data.batch_id, student_id: req.params.id, agency_id: req.user.agency_id,
       });
-      // batch name sync — batch_id থেকে name আনো
-      if (!body.batch) {
-        const { data: batchInfo } = await supabase.from("batches").select("name").eq("id", data.batch_id).single();
-        if (batchInfo) await supabase.from("students").update({ batch: batchInfo.name }).eq("id", req.params.id);
+
+      // batch info আনো — name, start_date, end_date, total_hours
+      const { data: batchInfo } = await supabase.from("batches")
+        .select("name, start_date, end_date, total_hours")
+        .eq("id", data.batch_id).single();
+
+      if (batchInfo) {
+        // batch name sync
+        if (!body.batch) {
+          await supabase.from("students").update({ batch: batchInfo.name }).eq("id", req.params.id);
+        }
+
+        // ── JP Study History auto-create — ব্যাচ assign হলে শিক্ষা ইতিহাস তৈরি ──
+        // Agency নাম = institution, Batch start/end = period, Batch hours = total_hours
+        const { data: agency } = await supabase.from("agencies")
+          .select("name, address").eq("id", req.user.agency_id).single();
+
+        // আগে এই batch-এর জন্য JP Study entry আছে কিনা চেক করো (duplicate এড়ানো)
+        const { data: existing } = await supabase.from("student_jp_study")
+          .select("id")
+          .eq("student_id", req.params.id)
+          .eq("agency_id", req.user.agency_id)
+          .ilike("institution", `%${agency?.name || ""}%`)
+          .limit(1);
+
+        if (!existing || existing.length === 0) {
+          await supabase.from("student_jp_study").insert({
+            student_id: req.params.id,
+            agency_id: req.user.agency_id,
+            institution: agency?.name || "Language Institute",
+            address: agency?.address || "",
+            period_from: batchInfo.start_date || "",
+            period_to: batchInfo.end_date || "",
+            total_hours: batchInfo.total_hours ? String(batchInfo.total_hours) : "",
+          });
+        } else {
+          // existing entry আপডেট করো — নতুন batch-এর তারিখ/ঘন্টা দিয়ে
+          await supabase.from("student_jp_study").update({
+            period_from: batchInfo.start_date || "",
+            period_to: batchInfo.end_date || "",
+            total_hours: batchInfo.total_hours ? String(batchInfo.total_hours) : "",
+          }).eq("id", existing[0].id);
+        }
       }
     } catch (e) { console.error("[Batch Sync]", e.message); }
   }
