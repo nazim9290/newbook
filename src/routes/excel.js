@@ -543,8 +543,11 @@ function flattenStudent(student) {
   flat.study_subject = flat.study_subject || student.study_subject || "";
 
   // Additional personal fields
+  console.log(`[FLATTEN DEBUG] PRE: flat.birth_place="${flat.birth_place}", student.birth_place="${student.birth_place}", decrypted keys:`, Object.keys(flat).filter(k => k.includes("birth") || k.includes("occup") || k.includes("spouse")).join(","));
   flat.birth_place = flat.birth_place || student.birth_place || "";
   flat.occupation = flat.occupation || student.occupation || "";
+  flat.spouse_name = flat.spouse_name || student.spouse_name || "";
+  console.log(`[FLATTEN DEBUG] POST: flat.birth_place="${flat.birth_place}", flat.occupation="${flat.occupation}", flat.spouse_name="${flat.spouse_name}"`);
   flat.emergency_contact = flat.emergency_contact || student.emergency_contact || "";
   flat.emergency_phone = flat.emergency_phone || student.emergency_phone || "";
 
