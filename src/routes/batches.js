@@ -201,8 +201,18 @@ router.patch("/:id", asyncHandler(async (req, res) => {
     }
   }
 
-  // প্রতিটি save-এ updated_at নতুন করে সেট — পরবর্তী conflict check-এর জন্য
-  const updates = { ...req.body, updated_at: new Date().toISOString() };
+  // প্রতিটি save-এ updated_at নতুন করে সেট — শুধু allowed fields
+  const allowed = ["name", "country", "language", "level", "start_date", "end_date", "capacity", "schedule", "teacher", "branch", "status", "class_days", "class_hours_per_day", "class_time", "settings"];
+  const updates = { updated_at: new Date().toISOString() };
+  for (const key of allowed) {
+    if (req.body[key] !== undefined) {
+      if (key === "capacity") updates[key] = parseInt(req.body[key]) || 20;
+      else if (key === "class_hours_per_day") updates[key] = parseFloat(req.body[key]) || 2;
+      else if (key === "class_days") updates[key] = Array.isArray(req.body[key]) ? req.body[key] : JSON.parse(req.body[key] || "[]");
+      else if (key === "start_date" || key === "end_date") updates[key] = (req.body[key] || "").slice(0, 10) || null;
+      else updates[key] = req.body[key];
+    }
+  }
 
   const { data, error } = await supabase.from("batches").update(updates).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
