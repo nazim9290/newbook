@@ -274,7 +274,12 @@ class QueryBuilder {
     for (var r = 0; r < rows.length; r++) {
       var row = rows[r];
       var cols = Object.keys(row).filter(function(k) { return row[k] !== undefined; });
-      var vals = cols.map(function(c) { return row[c] !== undefined ? row[c] : null; });
+      // JSONB columns-এ array/object → JSON.stringify
+      var vals = cols.map(function(c) {
+        var v = row[c] !== undefined ? row[c] : null;
+        if (v !== null && typeof v === "object" && !(v instanceof Date)) return JSON.stringify(v);
+        return v;
+      });
       var ph = cols.map(function(_, i) { return "$" + (i + 1); }).join(", ");
       var sql = 'INSERT INTO "' + this._table + '" (' + cols.join(", ") + ") VALUES (" + ph + ") RETURNING *";
       var result = await timedQuery(sql, vals);
@@ -296,7 +301,12 @@ class QueryBuilder {
 
     var cols = Object.keys(clean);
     var setClauses = cols.map(function(c, i) { return c + " = $" + (i + 1); }).join(", ");
-    var vals = cols.map(function(c) { return clean[c]; });
+    // JSONB columns-এ array/object values JSON.stringify করতে হয় (pg driver raw array ভুল করে)
+    var vals = cols.map(function(c) {
+      var v = clean[c];
+      if (v !== null && typeof v === "object" && !(v instanceof Date)) return JSON.stringify(v);
+      return v;
+    });
 
     var nextIdx = cols.length + 1;
     var w = this._buildWhere(nextIdx);
