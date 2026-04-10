@@ -187,9 +187,10 @@ router.delete("/agencies/:id", asyncHandler(async (req, res) => {
     "attendance", "student_jp_exams", "student_education", "student_family",
     "sponsors", "student_fees", "student_payments", "documents",
     "batch_students", "class_tests", "class_test_scores",
-    "school_submissions", "excel_templates",
-    "portal_form_config", "ocr_usage",
-    "visitors", "students", "batches", "agents", "partners",
+    "school_submissions", "excel_templates", "doc_types",
+    "portal_form_config", "ocr_usage", "partner_students",
+    "visitors", "students", "schools", "batches", "agents", "partners",
+    "inventory_items", "hr_employees", "hr_salary",
     "branches", "users",
   ];
 
