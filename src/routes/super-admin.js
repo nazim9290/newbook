@@ -172,15 +172,43 @@ router.patch("/agencies/:id", asyncHandler(async (req, res) => {
 }));
 
 // ═══════════════════════════════════════════════════
-// DELETE /agencies/:id — agency মুছে ফেলা (সাবধান!)
+// DELETE /agencies/:id — agency ও সব related data মুছে ফেলা (সাবধান!)
 // ═══════════════════════════════════════════════════
 router.delete("/agencies/:id", asyncHandler(async (req, res) => {
+  const id = req.params.id;
   // Demo agency মুছা যাবে না
-  if (req.params.id === "a0000000-0000-0000-0000-000000000001") {
+  if (id === "a0000000-0000-0000-0000-000000000001") {
     return res.status(400).json({ error: "Demo agency মুছা যাবে না" });
   }
-  const { error } = await supabase.from("agencies").delete().eq("id", req.params.id);
-  if (error) return res.status(500).json({ error: "মুছতে ব্যর্থ" });
+
+  // ── Related tables আগে delete (FK constraint avoid) ──
+  const tables = [
+    "activity_log", "communications", "calendar_events", "tasks",
+    "attendance", "student_jp_exams", "student_education", "student_family",
+    "sponsors", "student_fees", "student_payments", "documents",
+    "batch_students", "class_tests", "class_test_scores",
+    "school_submissions", "excel_templates",
+    "portal_form_config", "ocr_usage",
+    "visitors", "students", "batches", "agents", "partners",
+    "branches", "users",
+  ];
+
+  for (const table of tables) {
+    try {
+      await supabase.from(table).delete().eq("agency_id", id);
+    } catch (err) {
+      // কিছু table-এ agency_id column না থাকতে পারে — skip
+      console.log(`[Agency Delete] ${table}: ${err.message || "skipped"}`);
+    }
+  }
+
+  // Agency নিজে delete
+  const { error } = await supabase.from("agencies").delete().eq("id", id);
+  if (error) {
+    console.error("[Agency Delete] Final:", error.message);
+    return res.status(500).json({ error: "মুছতে ব্যর্থ: " + error.message });
+  }
+  console.log(`[Agency Delete] Agency ${id} and all related data deleted`);
   res.json({ success: true });
 }));
 
