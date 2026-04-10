@@ -494,7 +494,8 @@ async function fillSingleStudentFromBuffer(templateBuffer, mappings, student, sy
               hasMissing = true;
               return `[${k}]`; // e.g. [father_name_en]
             }
-            return val;
+            // Date object হলে string-এ convert
+            return val instanceof Date ? val.toISOString().slice(0, 10) : String(val);
           });
           cell.value = replaced;
 
@@ -1113,18 +1114,20 @@ async function fillSingleStudent(templateUrl, mappings, student) {
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
-// Fill mapped data into a sheet — handles merged cells
+// Fill mapped data into a sheet — handles merged cells + modifier support
 function fillSheetData(sheet, mappings, student) {
   const flat = flattenStudent(student);
   for (const m of mappings) {
     if (!m.field || !m.cell) continue;
-    const value = flat[m.field] || "";
+    // resolveFieldValue ব্যবহার — :year, :month, :day, alias সব support করে
+    const value = resolveFieldValue(flat, m.field);
     if (!value) continue;
     try {
       const cell = sheet.getCell(m.cell);
       // Preserve style, font, border — only change value
       const oldStyle = cell.style ? JSON.parse(JSON.stringify(cell.style)) : {};
-      cell.value = value;
+      // সবসময় string হিসেবে set করো — Date object এড়ানো
+      cell.value = String(value);
       cell.style = oldStyle;
     } catch { /* invalid cell ref or merged cell issue, skip */ }
   }
