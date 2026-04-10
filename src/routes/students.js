@@ -17,8 +17,7 @@ router.get("/", checkPermission("students", "read"), asyncHandler(async (req, re
   const { search, status, country, batch, school, branch } = req.query;
   const { applyCursor, buildResponse } = require("../lib/cursorPagination");
 
-  // schools ও batches JOIN — school_id/batch_id থেকে নাম আনো
-  let query = supabase.from("students").select("*, schools:school_id(name_en), batches:batch_id(name)", { count: "exact" }).eq("agency_id", req.user.agency_id);
+  let query = supabase.from("students").select("*", { count: "exact" }).eq("agency_id", req.user.agency_id);
 
   // Branch-based access — counselor/staff শুধু নিজের branch-এর student দেখবে
   const { getBranchFilter } = require("../lib/branchFilter");
@@ -40,11 +39,25 @@ router.get("/", checkPermission("students", "read"), asyncHandler(async (req, re
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
+  // ── school_id / batch_id থেকে নাম resolve — একবার bulk lookup ──
+  const schoolIds = [...new Set((data || []).map(s => s.school_id).filter(Boolean))];
+  const batchIds = [...new Set((data || []).map(s => s.batch_id).filter(Boolean))];
+  const schoolMap = {};
+  const batchMap = {};
+  if (schoolIds.length > 0) {
+    const { data: schools } = await supabase.from("schools").select("id, name_en").in("id", schoolIds);
+    (schools || []).forEach(sc => { schoolMap[sc.id] = sc.name_en; });
+  }
+  if (batchIds.length > 0) {
+    const { data: batches } = await supabase.from("batches").select("id, name").in("id", batchIds);
+    (batches || []).forEach(b => { batchMap[b.id] = b.name; });
+  }
+
   // DB fields → frontend field mapping
   const mapped = (data || []).map(s => ({
     ...s,
-    batch: s.batches?.name || s.batch || "",
-    school: s.schools?.name_en || s.school || "",
+    batch: batchMap[s.batch_id] || s.batch || "",
+    school: schoolMap[s.school_id] || s.school || "",
     passport: s.passport_number || "",
     father: s.father_name || "",
     mother: s.mother_name || "",
