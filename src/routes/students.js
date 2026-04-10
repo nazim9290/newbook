@@ -118,8 +118,9 @@ const STUDENT_COLUMNS = [
   "counselor", "branch", "gdrive_folder_url", "photo_url", "internal_notes",
   // Resume fields — Excel入学願書 support
   "birth_place", "occupation", "reason_for_study", "future_plan", "study_subject",
-  // Passport page fields — emergency contact, spouse
+  // Passport page fields — emergency contact, spouse, parents DOB/occupation
   "spouse_name", "emergency_contact", "emergency_phone",
+  "father_dob", "father_occupation", "mother_dob", "mother_occupation",
 ];
 
 router.post("/", checkPermission("students", "write"), asyncHandler(async (req, res) => {

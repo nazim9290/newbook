@@ -645,9 +645,12 @@ function flattenStudent(student) {
   const fam = student.student_family || [];
   const father = fam.find(f => f.relation === "father") || {};
   const mother = fam.find(f => f.relation === "mother") || {};
-  flat.father_dob = father.dob || ""; flat.father_occupation = father.occupation || "";
+  // Father/Mother — student_family table fallback → students table direct fields
+  flat.father_dob = father.dob || flat.father_dob || student.father_dob || "";
+  flat.father_occupation = father.occupation || flat.father_occupation || student.father_occupation || "";
   flat.father_phone = father.phone || flat.father_phone || "";
-  flat.mother_dob = mother.dob || ""; flat.mother_occupation = mother.occupation || "";
+  flat.mother_dob = mother.dob || flat.mother_dob || student.mother_dob || "";
+  flat.mother_occupation = mother.occupation || flat.mother_occupation || student.mother_occupation || "";
   flat.mother_phone = mother.phone || flat.mother_phone || "";
 
   // Family detailed (family1, family2, family3)
