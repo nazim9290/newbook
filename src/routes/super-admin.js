@@ -80,6 +80,29 @@ router.get("/agencies/:id", asyncHandler(async (req, res) => {
 }));
 
 // ═══════════════════════════════════════════════════
+// PATCH /agencies/:id/reset-password — agency owner password reset
+// ═══════════════════════════════════════════════════
+router.patch("/agencies/:id/reset-password", asyncHandler(async (req, res) => {
+  const { password } = req.body;
+  if (!password || password.length < 8) return res.status(400).json({ error: "Password minimum 8 characters" });
+
+  const bcrypt = require("bcryptjs");
+  const hash = await bcrypt.hash(password, 12);
+
+  // Agency-র owner user খুঁজে password update করো
+  const { data, error } = await supabase.from("users")
+    .update({ password_hash: hash, updated_at: new Date().toISOString() })
+    .eq("agency_id", req.params.id)
+    .eq("role", "owner")
+    .select("id, name, email");
+
+  if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি" }); }
+  if (!data || data.length === 0) return res.status(404).json({ error: "Owner user পাওয়া যায়নি" });
+
+  res.json({ success: true, message: `Password reset: ${data[0].email}` });
+}));
+
+// ═══════════════════════════════════════════════════
 // POST /agencies — নতুন agency তৈরি + admin user
 // ═══════════════════════════════════════════════════
 router.post("/agencies", asyncHandler(async (req, res) => {
