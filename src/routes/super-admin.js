@@ -131,11 +131,11 @@ router.post("/agencies", asyncHandler(async (req, res) => {
   const basePrefix = customPrefix?.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5) || generatePrefix(name);
   const prefix = await ensureUniquePrefix(basePrefix);
 
-  // Agency তৈরি (prefix সহ)
+  // Agency তৈরি (prefix সহ) — email না থাকলে admin_email ব্যবহার করো
   const settings = { dedicated: !!dedicated };
   const { data: agency, error: agencyErr } = await supabase.from("agencies")
     .insert({
-      name, name_bn, subdomain, phone, email, address, prefix,
+      name, name_bn, subdomain, phone, email: email || admin_email, address, prefix,
       id_counters: { student: 0, visitor: 0, payment: 0, invoice: 0, submission: 0 },
       plan: dedicated ? "dedicated" : "standard",
       settings, status: "active",
