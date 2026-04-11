@@ -505,6 +505,11 @@ router.delete("/templates/:id", asyncHandler(async (req, res) => {
 function flattenForDoc(student, context = {}) {
   const flat = { ...student };
 
+  // ── Date object → "YYYY-MM-DD" string normalize (pg driver Date object return করে) ──
+  for (const key of Object.keys(flat)) {
+    if (flat[key] instanceof Date) flat[key] = flat[key].toISOString().slice(0, 10);
+  }
+
   // ═══════════════════════════════════════════════════
   // Education — SSC, HSC, Honours/Bachelor
   // ═══════════════════════════════════════════════════
@@ -680,12 +685,15 @@ function flattenForDoc(student, context = {}) {
   flat.jp_study_from = jpStudy.period_from || ctxBatch.start_date || "";
   flat.jp_study_to = jpStudy.period_to || ctxBatch.end_date || "";
   flat.jp_study_hours = jpStudy.total_hours || ctxBatch.total_hours || "";
+  // Date object → string normalize
+  if (flat.jp_study_from instanceof Date) flat.jp_study_from = flat.jp_study_from.toISOString().slice(0, 10);
+  if (flat.jp_study_to instanceof Date) flat.jp_study_to = flat.jp_study_to.toISOString().slice(0, 10);
   // JP Study sub-parts — "2023-03-02" → year=2023, month=3, day=2
-  if (flat.jp_study_from && flat.jp_study_from.includes("-")) {
+  if (flat.jp_study_from && String(flat.jp_study_from).includes("-")) {
     const [fy, fm, fd] = flat.jp_study_from.split("-");
     flat.jp_study_from_year = fy || ""; flat.jp_study_from_month = String(parseInt(fm || "0")) || ""; flat.jp_study_from_day = String(parseInt(fd || "0")) || "";
   }
-  if (flat.jp_study_to && flat.jp_study_to.includes("-")) {
+  if (flat.jp_study_to && String(flat.jp_study_to).includes("-")) {
     const [ty, tm, td] = flat.jp_study_to.split("-");
     flat.jp_study_to_year = ty || ""; flat.jp_study_to_month = String(parseInt(tm || "0")) || ""; flat.jp_study_to_day = String(parseInt(td || "0")) || "";
   }
