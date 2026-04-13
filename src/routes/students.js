@@ -56,9 +56,11 @@ router.get("/", checkPermission("students", "read"), asyncHandler(async (req, re
   // DB fields → frontend field mapping + Date object normalize
   const mapped = (data || []).map(s => {
     // Date object → "YYYY-MM-DD" string (pg driver date columns কে Date object return করে)
+    // updated_at / created_at — full ISO timestamp রাখো (optimistic lock-এ দরকার)
+    const KEEP_FULL_TIMESTAMP = new Set(["updated_at", "created_at"]);
     const r = { ...s };
     for (const k of Object.keys(r)) {
-      if (r[k] instanceof Date) r[k] = r[k].toISOString().slice(0, 10);
+      if (r[k] instanceof Date) r[k] = KEEP_FULL_TIMESTAMP.has(k) ? r[k].toISOString() : r[k].toISOString().slice(0, 10);
     }
     r.batch = batchMap[s.batch_id] || s.batch || "";
     r.school = schoolMap[s.school_id] || s.school || "";
@@ -97,9 +99,9 @@ router.get("/:id", checkPermission("students", "read"), asyncHandler(async (req,
   ]);
 
   const decrypted = decryptSensitiveFields(student);
-  // Date object → string normalize
+  // Date object → string normalize (updated_at/created_at full timestamp রাখো)
   for (const k of Object.keys(decrypted)) {
-    if (decrypted[k] instanceof Date) decrypted[k] = decrypted[k].toISOString().slice(0, 10);
+    if (decrypted[k] instanceof Date) decrypted[k] = (k === "updated_at" || k === "created_at") ? decrypted[k].toISOString() : decrypted[k].toISOString().slice(0, 10);
   }
   decrypted.student_education = eduRes.data || [];
   decrypted.student_jp_exams = examRes.data || [];
