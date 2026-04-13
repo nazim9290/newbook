@@ -277,7 +277,8 @@ router.get("/:id/interview-mapping", checkPermission("schools", "read"), asyncHa
 function studentToFlat(s, i, agencyName, staffName) {
   const dob = s.dob ? new Date(s.dob) : null;
   const age = dob ? Math.floor((Date.now() - dob) / 31557600000) : "";
-  const dobStr = s.dob || "";
+  // জাপানি format: YYYY/MM/DD
+  const dobStr = dob ? `${dob.getFullYear()}/${String(dob.getMonth() + 1).padStart(2, "0")}/${String(dob.getDate()).padStart(2, "0")}` : "";
   const dobAge = dobStr + (age ? ` (${age})` : "");
   // Family name / Given name split
   const parts = (s.name_en || "").trim().split(/\s+/);
