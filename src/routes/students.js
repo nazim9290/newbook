@@ -75,6 +75,20 @@ router.get("/", checkPermission("students", "read"), asyncHandler(async (req, re
   res.json(response);
 }));
 
+// GET /api/students/match-data — Smart Matching-এর জন্য সব student-এর education + JP exam data
+// ⚠️ /:id-এর আগে থাকতে হবে — না হলে "match-data" কে id হিসেবে ধরবে
+router.get("/match-data", checkPermission("students", "read"), asyncHandler(async (req, res) => {
+  const agencyId = req.user.agency_id;
+  const [eduRes, jpRes] = await Promise.all([
+    supabase.from("student_education").select("student_id, level, gpa").eq("agency_id", agencyId),
+    supabase.from("student_jp_exams").select("student_id, jp_level, jp_score, exam_type").eq("agency_id", agencyId),
+  ]);
+  res.json({
+    education: eduRes.data || [],
+    jp_exams: jpRes.data || [],
+  });
+}));
+
 // GET /api/students/:id — single student with related data
 router.get("/:id", checkPermission("students", "read"), asyncHandler(async (req, res) => {
   // Main student record
@@ -1211,22 +1225,4 @@ HUMANIZE — CRITICAL:
 }));
 
 // ================================================================
-// GET /api/students/match-data — Smart Matching-এর জন্য সব student-এর education + JP exam data
-// একবারে bulk fetch — N+1 query এড়ানো
-// ================================================================
-router.get("/match-data", checkPermission("students", "read"), asyncHandler(async (req, res) => {
-  const agencyId = req.user.agency_id;
-
-  // education ও jp_exams — agency-র সব student-এর জন্য
-  const [eduRes, jpRes] = await Promise.all([
-    supabase.from("student_education").select("student_id, level, gpa").eq("agency_id", agencyId),
-    supabase.from("student_jp_exams").select("student_id, jp_level, jp_score, exam_type").eq("agency_id", agencyId),
-  ]);
-
-  res.json({
-    education: eduRes.data || [],
-    jp_exams: jpRes.data || [],
-  });
-}));
-
 module.exports = router;
