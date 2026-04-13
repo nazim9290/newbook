@@ -182,12 +182,18 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
   const { updated_at: clientUpdatedAt } = body;
   if (clientUpdatedAt) {
     const { data: current } = await supabase.from("students").select("updated_at").eq("id", req.params.id).single();
-    if (current && current.updated_at && new Date(current.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
-      return res.status(409).json({
-        error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — পেজ রিফ্রেশ করুন",
-        code: "CONFLICT",
-        server_updated_at: current.updated_at,
-      });
+    if (current && current.updated_at) {
+      const serverMs = new Date(current.updated_at).getTime();
+      const clientMs = new Date(clientUpdatedAt).getTime();
+      console.log("[Optimistic Lock]", req.params.id, { client: clientUpdatedAt, server: current.updated_at, clientMs, serverMs, diff: Math.abs(serverMs - clientMs) });
+      if (serverMs !== clientMs) {
+        return res.status(409).json({
+          error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — পেজ রিফ্রেশ করুন",
+          code: "CONFLICT",
+          server_updated_at: current.updated_at,
+          client_updated_at: clientUpdatedAt,
+        });
+      }
     }
   }
 
