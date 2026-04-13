@@ -53,16 +53,21 @@ router.get("/", checkPermission("students", "read"), asyncHandler(async (req, re
     (batches || []).forEach(b => { batchMap[b.id] = b.name; });
   }
 
-  // DB fields → frontend field mapping
-  const mapped = (data || []).map(s => ({
-    ...s,
-    batch: batchMap[s.batch_id] || s.batch || "",
-    school: schoolMap[s.school_id] || s.school || "",
-    passport: s.passport_number || "",
-    father: s.father_name || "",
-    mother: s.mother_name || "",
-    created: s.created_at ? (s.created_at instanceof Date ? s.created_at.toISOString().slice(0, 10) : String(s.created_at).slice(0, 10)) : "",
-  }));
+  // DB fields → frontend field mapping + Date object normalize
+  const mapped = (data || []).map(s => {
+    // Date object → "YYYY-MM-DD" string (pg driver date columns কে Date object return করে)
+    const r = { ...s };
+    for (const k of Object.keys(r)) {
+      if (r[k] instanceof Date) r[k] = r[k].toISOString().slice(0, 10);
+    }
+    r.batch = batchMap[s.batch_id] || s.batch || "";
+    r.school = schoolMap[s.school_id] || s.school || "";
+    r.passport = s.passport_number || "";
+    r.father = s.father_name || "";
+    r.mother = s.mother_name || "";
+    r.created = r.created_at?.slice?.(0, 10) || "";
+    return r;
+  });
 
   const response = buildResponse(decryptMany(mapped), req.query, { sortCol: "created_at", total: count });
   res.json(response);
@@ -92,6 +97,10 @@ router.get("/:id", checkPermission("students", "read"), asyncHandler(async (req,
   ]);
 
   const decrypted = decryptSensitiveFields(student);
+  // Date object → string normalize
+  for (const k of Object.keys(decrypted)) {
+    if (decrypted[k] instanceof Date) decrypted[k] = decrypted[k].toISOString().slice(0, 10);
+  }
   decrypted.student_education = eduRes.data || [];
   decrypted.student_jp_exams = examRes.data || [];
   decrypted.student_family = famRes.data || [];
