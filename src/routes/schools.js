@@ -319,8 +319,9 @@ router.post("/:id/interview-list", checkPermission("schools", "write"), asyncHan
   }
 
   // Students fetch
-  const { data: studentsRaw } = await supabase.from("students").select("*")
+  const { data: studentsRaw, error: studErr } = await supabase.from("students").select("*")
     .in("id", student_ids).eq("agency_id", req.user.agency_id);
+  console.log("[Interview] Requested:", student_ids.length, "IDs:", student_ids, "| Fetched:", (studentsRaw || []).length, studErr ? `Error: ${studErr.message}` : "");
   const students = (studentsRaw || []).sort((a, b) => student_ids.indexOf(a.id) - student_ids.indexOf(b.id));
 
   // School fetch
