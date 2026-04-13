@@ -880,11 +880,10 @@ router.post("/import/mapped", checkPermission("students", "write"), importUpload
         }
       });
 
-      if (hasData && student.name_en) {
-        // Valid columns only + auto-generate ID
-        const year = new Date().getFullYear();
-        const seq = String(r - 1).padStart(3, "0");
-        const clean = { agency_id: agencyId, id: student.id || `S-${year}-IMP${seq}` };
+      // ── Guide/hint row skip — "YYYY-MM-DD", "বাধ্যতামূলক", placeholder text ──
+      if (hasData && student.name_en && !/YYYY|বাধ্যতামূলক|Required|placeholder|CAPS|01XXXXXXXXX/i.test(student.name_en)) {
+        // Valid columns only + auto-generate unique ID (timestamp-based)
+        const clean = { agency_id: agencyId, id: student.id || await generateId(agencyId, "student") };
         for (const col of STUDENT_COLUMNS) {
           if (col === "id") continue; // already set
           if (student[col] !== undefined && student[col] !== "") clean[col] = student[col];
