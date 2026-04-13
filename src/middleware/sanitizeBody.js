@@ -55,6 +55,8 @@ const JSONB_FIELDS = new Set([
   "old_value", "new_value",
   // generic
   "feedback",
+  // schools — intake-wise requirements
+  "intake_requirements",
 ]);
 
 // ── text[] (PostgreSQL array) columns — JS array → PostgreSQL array literal ──

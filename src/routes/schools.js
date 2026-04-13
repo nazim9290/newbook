@@ -23,6 +23,8 @@ const SCHOOL_COLS = [
   ...NUMERIC_COLS,
   "min_jp_level", "interview_type", "has_dormitory", "immigration_bureau",
   "deadline_april", "deadline_october", "status", "notes",
+  // Smart Matching — intake-wise requirements + region
+  "intake_requirements", "region",
 ];
 
 // GET /api/schools — search, filter, cursor-based pagination

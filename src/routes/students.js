@@ -130,6 +130,8 @@ const STUDENT_COLUMNS = [
   // Passport page fields — emergency contact, spouse, parents DOB/occupation
   "spouse_name", "emergency_contact", "emergency_phone",
   "father_dob", "father_occupation", "mother_dob", "mother_occupation",
+  // Smart Matching — পছন্দের অঞ্চল (optional)
+  "preferred_region",
 ];
 
 router.post("/", checkPermission("students", "write"), asyncHandler(async (req, res) => {
