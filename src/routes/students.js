@@ -759,6 +759,11 @@ router.post("/import/parse", checkPermission("students", "write"), importUpload.
         if (val) hasData = true;
       });
       if (!hasData) continue;
+      // Guide/sample row skip — hint text বা sample name detect
+      const rowVals = [];
+      headers.forEach(h => { const c = row.getCell(h.col); rowVals.push(c.text || (c.value != null ? String(c.value) : "")); });
+      const rowText = rowVals.join(" ");
+      if (/YYYY|বাধ্যতামূলক|Required|placeholder|CAPS|01XXXXXXXXX|Mohammad Rahim|মোহাম্মদ রহিম|FULL NAME IN/i.test(rowText)) continue;
       dataRowCount++;
       if (preview.length < 5) {
         const obj = {};
@@ -863,6 +868,8 @@ router.post("/import/mapped", checkPermission("students", "write"), importUpload
     });
 
     // Build student records from all data rows
+    // ── Row 2 = Guide/hint row, Row 3 = Sample data — skip detect ──
+    // Template-এর guide row (italic, hint text) ও sample row ("Mohammad Rahim") skip
     const records = [];
     for (let r = 2; r <= sheet.rowCount; r++) {
       const row = sheet.getRow(r);
@@ -880,8 +887,12 @@ router.post("/import/mapped", checkPermission("students", "write"), importUpload
         }
       });
 
-      // ── Guide/hint row skip — "YYYY-MM-DD", "বাধ্যতামূলক", placeholder text ──
-      if (hasData && student.name_en && !/YYYY|বাধ্যতামূলক|Required|placeholder|CAPS|01XXXXXXXXX/i.test(student.name_en)) {
+      // ── Guide/hint/sample row skip ──
+      // Guide: "YYYY-MM-DD", "বাধ্যতামূলক", "Required"
+      // Sample: "Mohammad Rahim", "01811111111", template sample data
+      const allVals = Object.values(student).join(" ");
+      const isGuideOrSample = /YYYY|বাধ্যতামূলক|Required|placeholder|CAPS|01XXXXXXXXX|Mohammad Rahim|মোহাম্মদ রহিম|FULL NAME IN/i.test(allVals);
+      if (hasData && student.name_en && !isGuideOrSample) {
         // Valid columns only + auto-generate unique ID (timestamp-based)
         const clean = { agency_id: agencyId, id: student.id || await generateId(agencyId, "student") };
         for (const col of STUDENT_COLUMNS) {
