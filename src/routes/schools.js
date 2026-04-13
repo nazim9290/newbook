@@ -555,17 +555,38 @@ router.post("/:id/interview-list", checkPermission("schools", "write"), asyncHan
   ws.addRow([`行名(Agent Name): ${agency_name || "AgencyBook"}`]);
   ws.addRow([]);
 
-  // Column headers — default or user-selected
-  const DEFAULT_HEADERS = [
-    { key: "no", label: "No." }, { key: "family_name", label: "Family Name" },
-    { key: "given_name", label: "Given Name" }, { key: "gender", label: "Gender" },
-    { key: "dob_age", label: "Date of Birth(Age)" }, { key: "education", label: "Education" },
-    { key: "gpa", label: "GPA" }, { key: "jp_level", label: "JP Level/Score" },
-    { key: "sponsor", label: "Sponsor (Income)" },
+  // Column headers — সব possible columns (Japanese + English)
+  const ALL_HEADERS = [
+    { key: "no", label: "No." },
+    { key: "family_name", label: "氏 Sir Name\n(Family Name)" },
+    { key: "given_name", label: "名 Given Name\n(First Name)" },
+    { key: "full_name", label: "氏名\nFull Name" },
+    { key: "gender", label: "性別\nGender\n(M/F)" },
+    { key: "dob_age", label: "生年月日 (年齢)\nDate of Birth(Age)" },
+    { key: "nationality", label: "国籍\nNationality" },
+    { key: "education", label: "最終学歴\nEducation" },
+    { key: "gpa", label: "GPA" },
+    { key: "jp_level", label: "日本語能力\nJP Level/Score" },
+    { key: "jp_study_hours", label: "日本語学習時間\nJP Study Hours" },
+    { key: "occupation", label: "職業\nOccupation" },
+    { key: "past_visa", label: "過去のビザ\nPast Visa" },
+    { key: "sponsor", label: "経費支弁者\nSponsor (Income)" },
+    { key: "sponsor_relation", label: "経費支弁者関係\nSponsor Relation" },
+    { key: "passport_no", label: "パスポート番号\nPassport No" },
+    { key: "phone", label: "電話番号\nPhone" },
+    { key: "email", label: "メール\nEmail" },
+    { key: "address", label: "住所\nAddress" },
+    { key: "intended_semester", label: "入学希望期\nIntake" },
+    { key: "coe_applied", label: "COE Applied" },
+    { key: "textbook_lesson", label: "教科書\nTextbook Lesson" },
+    { key: "goal", label: "卒業後の目標\nGoal" },
   ];
+  const headerMap = Object.fromEntries(ALL_HEADERS.map(h => [h.key, h]));
+  // User-selected columns → order preserve, অথবা default 9টা
+  const DEFAULT_KEYS = ["no", "family_name", "given_name", "gender", "dob_age", "education", "gpa", "jp_level", "sponsor"];
   const activeCols = columns && columns.length > 0
-    ? DEFAULT_HEADERS.filter(h => columns.includes(h.key))
-    : DEFAULT_HEADERS;
+    ? columns.map(k => headerMap[k]).filter(Boolean)
+    : DEFAULT_KEYS.map(k => headerMap[k]);
 
   const headerRow = ws.addRow(activeCols.map(h => h.label));
   headerRow.font = { bold: true };
