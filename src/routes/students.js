@@ -763,7 +763,7 @@ router.post("/import/parse", checkPermission("students", "write"), importUpload.
       const rowVals = [];
       headers.forEach(h => { const c = row.getCell(h.col); rowVals.push(c.text || (c.value != null ? String(c.value) : "")); });
       const rowText = rowVals.join(" ");
-      if (/YYYY|বাধ্যতামূলক|Required|placeholder|CAPS|01XXXXXXXXX|Mohammad Rahim|মোহাম্মদ রহিম|FULL NAME IN/i.test(rowText)) continue;
+      if (/YYYY-MM-DD|বাধ্যতামূলক|Required —|placeholder|FULL NAME IN CAPS|01XXXXXXXXX format/i.test(rowText)) continue;
       dataRowCount++;
       if (preview.length < 5) {
         const obj = {};
@@ -887,12 +887,10 @@ router.post("/import/mapped", checkPermission("students", "write"), importUpload
         }
       });
 
-      // ── Guide/hint/sample row skip ──
-      // Guide: "YYYY-MM-DD", "বাধ্যতামূলক", "Required"
-      // Sample: "Mohammad Rahim", "01811111111", template sample data
+      // ── Guide/hint row skip — শুধু template hint text detect ──
       const allVals = Object.values(student).join(" ");
-      const isGuideOrSample = /YYYY|বাধ্যতামূলক|Required|placeholder|CAPS|01XXXXXXXXX|Mohammad Rahim|মোহাম্মদ রহিম|FULL NAME IN/i.test(allVals);
-      if (hasData && student.name_en && !isGuideOrSample) {
+      const isGuideRow = /YYYY-MM-DD|বাধ্যতামূলক|Required —|placeholder|FULL NAME IN CAPS|01XXXXXXXXX format/i.test(allVals);
+      if (hasData && student.name_en && !isGuideRow) {
         // Valid columns only + auto-generate unique ID (timestamp-based)
         const clean = { agency_id: agencyId, id: student.id || await generateId(agencyId, "student") };
         for (const col of STUDENT_COLUMNS) {
