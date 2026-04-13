@@ -318,11 +318,46 @@ router.post("/:id/interview-list", checkPermission("schools", "write"), asyncHan
     return res.status(400).json({ error: "student_ids দিন" });
   }
 
-  // Students fetch
+  // Students fetch — related data সহ (education, jp_exams, sponsors)
   const { data: studentsRaw, error: studErr } = await supabase.from("students").select("*")
     .in("id", student_ids).eq("agency_id", req.user.agency_id);
-  console.log("[Interview] Requested:", student_ids.length, "IDs:", student_ids, "| Fetched:", (studentsRaw || []).length, studErr ? `Error: ${studErr.message}` : "");
-  const students = (studentsRaw || []).sort((a, b) => student_ids.indexOf(a.id) - student_ids.indexOf(b.id));
+  console.log("[Interview] Requested:", student_ids.length, "| Fetched:", (studentsRaw || []).length, studErr ? `Error: ${studErr.message}` : "");
+
+  // Related data bulk fetch — education, jp_exams, sponsors
+  const sIds = (studentsRaw || []).map(s => s.id);
+  const [eduRes, jpRes, spRes] = await Promise.all([
+    supabase.from("student_education").select("student_id, level, gpa, school_name, passing_year").in("student_id", sIds),
+    supabase.from("student_jp_exams").select("student_id, level, score, exam_type").in("student_id", sIds),
+    supabase.from("sponsors").select("student_id, name, name_en, relationship, phone, annual_income_y1, company_name").in("student_id", sIds),
+  ]);
+  // student_id → related data map
+  const eduMap = {}, jpMap = {}, spMap = {};
+  (eduRes.data || []).forEach(e => { if (!eduMap[e.student_id]) eduMap[e.student_id] = []; eduMap[e.student_id].push(e); });
+  (jpRes.data || []).forEach(j => { if (!jpMap[j.student_id]) jpMap[j.student_id] = []; jpMap[j.student_id].push(j); });
+  (spRes.data || []).forEach(s => { spMap[s.student_id] = s; });
+
+  // Students-এ related data merge
+  const students = (studentsRaw || []).map(s => {
+    const edu = eduMap[s.id] || [];
+    const jp = jpMap[s.id] || [];
+    const sp = spMap[s.id] || {};
+    // সবচেয়ে ভালো education level ও GPA
+    let bestEdu = "", bestGpa = "";
+    edu.forEach(e => { if (e.level) { bestEdu = e.level; if (e.gpa) bestGpa = e.gpa; } });
+    // সবচেয়ে ভালো JP level
+    const JP_RANK = { N5: 1, N4: 2, N3: 3, N2: 4, N1: 5 };
+    let bestJp = "", bestJpScore = "";
+    jp.forEach(j => { if ((JP_RANK[j.level] || 0) > (JP_RANK[bestJp] || 0)) { bestJp = j.level; bestJpScore = j.score || ""; } });
+    return {
+      ...s,
+      last_education: bestEdu, gpa: bestGpa,
+      jp_level: bestJp, jp_score: bestJpScore, jp_exam_type: jp[0]?.exam_type || "",
+      jp_study_hours: s.jp_study_hours || "",
+      sponsor_name: sp.name || sp.name_en || "", sponsor_relation: sp.relationship || "",
+      sponsor_income: sp.annual_income_y1 ? `৳${Number(sp.annual_income_y1).toLocaleString("en-IN")}` : "",
+      sponsor_phone: sp.phone || "", sponsor_company: sp.company_name || "",
+    };
+  }).sort((a, b) => student_ids.indexOf(a.id) - student_ids.indexOf(b.id));
 
   // School fetch
   const { data: school } = await supabase.from("schools").select("*").eq("id", req.params.id).single();
