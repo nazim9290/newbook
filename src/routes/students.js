@@ -903,13 +903,19 @@ router.post("/import/mapped", checkPermission("students", "write"), importUpload
 
     if (error) {
       // Bulk fail → one by one
+      console.log("[Import] Bulk insert failed, trying one by one:", error.message);
       for (let i = 0; i < records.length; i++) {
         const { error: sErr } = await supabase.from("students").insert(records[i]);
-        if (sErr) { results.failed++; results.errors.push({ row: i + 2, name: records[i].name_en || `Row ${i + 2}`, error: "ডাটা সংরক্ষণ ব্যর্থ" }); }
-        else { results.success++; }
+        if (sErr) {
+          console.log(`[Import] Row ${i+2} failed:`, sErr.message);
+          results.failed++;
+          results.errors.push({ row: i + 2, name: records[i].name_en || `Row ${i + 2}`, error: sErr.message || "ডাটা সংরক্ষণ ব্যর্থ" });
+        } else {
+          results.success++;
+        }
       }
     } else {
-      results.success = data.length;
+      results.success = Array.isArray(data) ? data.length : records.length;
     }
 
     // Cleanup
