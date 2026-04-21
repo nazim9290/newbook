@@ -53,6 +53,7 @@ const SENSITIVE_FIELDS = [
   // Address
   "present_address",
   "permanent_address",
+  "current_address",
   "address",
   // Financial
   "bank_account",
