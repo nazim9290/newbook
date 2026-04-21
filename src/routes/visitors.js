@@ -238,17 +238,30 @@ router.post("/:id/convert", checkPermission("visitors", "write"), asyncHandler(a
   if (sErr) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
 
   // ── Education transfer — visitor education array → student_education table-এ ──
+  // ⚠️ Level-ভিত্তিক mapping:
+  //   SSC/HSC (school): board field = Board, school_name = School name (if any)
+  //   Honours/Masters/PhD (university): visitor-এ board field-এ University name থাকে
+  //     → school_name = University name, board = "" (duplicate এড়াতে)
   try {
     const eduArr = typeof visitor.education === "string" ? JSON.parse(visitor.education) : visitor.education;
     if (Array.isArray(eduArr) && eduArr.length > 0) {
+      const UNI_LEVELS = ["Honours/Degree", "Masters/B.Sc", "PhD"];
       const eduRows = eduArr
-        .filter(e => e.level || e.institution || e.year)
-        .map(e => ({
-          student_id: studentId, agency_id: agencyId,
-          level: e.level || "", school_name: e.institution || e.board || "",
-          year: e.year || null, board: e.board || "", gpa: e.gpa || "",
-          group_name: e.subject || e.group || "",
-        }));
+        .filter(e => e.level || e.institution || e.year || e.board || e.gpa || e.subject)
+        .map(e => {
+          const isUni = UNI_LEVELS.includes(e.level);
+          return {
+            student_id: studentId, agency_id: agencyId,
+            level: e.level || "",
+            // University level: board field আসলে University name → school_name-এ যাবে, board খালি
+            // School level: institution আলাদা না থাকলে খালি
+            school_name: isUni ? (e.institution || e.board || "") : (e.institution || ""),
+            year: e.year || null,
+            board: isUni ? "" : (e.board || ""),
+            gpa: e.gpa || "",
+            group_name: e.subject || e.group || "",
+          };
+        });
       if (eduRows.length > 0) {
         await supabase.from("student_education").insert(eduRows);
       }
