@@ -169,14 +169,24 @@ router.post("/create-from-default", asyncHandler(async (req, res) => {
   }
 
   // Auto-map — placeholder name থেকে intelligent field match
+  // ⚠ শুধু valid SYSTEM_FIELDS keys (frontend FieldMapper.jsx দেখুন) ব্যবহার করো।
+  // Doc-specific field (Register No, BR Number ইত্যাদি) leave empty — user manually map করবে।
   const AUTO_MAP = {
-    "Register No": "register_no", "Date of Registration": "reg_date:jp",
-    "Date of Issue": "issue_date:jp", "Birth Registration No": "birth_reg_no",
-    "Name": "name_en", "Sex": "sex:jp", "Date of Birth": "dob:jp",
-    "Place of Birth": "birth_place", "Father's Name": "father_name",
-    "Father's Nationality": "father_nationality:jp", "Mother's Name": "mother_name",
-    "Mother's Nationality": "mother_nationality:jp", "Permanent Address": "permanent_address",
-    "BR Number": "birth_reg_no", "In Word": "dob_in_word",
+    // Student profile fields — system-এ আছে
+    "Name": "name_en",
+    "Full Name": "name_en",
+    "Sex": "gender:jp", "Gender": "gender:jp",
+    "Date of Birth": "dob:jp", "DOB": "dob:jp", "Birth Date": "dob:jp",
+    "Place of Birth": "birth_place", "Birth Place": "birth_place",
+    "Father's Name": "father_name_en", "Father Name": "father_name_en",
+    "Mother's Name": "mother_name_en", "Mother Name": "mother_name_en",
+    "Permanent Address": "permanent_address",
+    "Present Address": "current_address", "Current Address": "current_address",
+    "Phone": "phone", "Phone No": "phone",
+    "Nationality": "nationality",
+    "Passport No": "passport_number", "Passport Number": "passport_number",
+    "NID": "nid", "NID No": "nid",
+    "Occupation": "occupation",
   };
   placeholders = placeholders.map(p => {
     if (!p.field && AUTO_MAP[p.key]) return { ...p, field: AUTO_MAP[p.key] };
