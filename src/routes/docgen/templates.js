@@ -95,6 +95,7 @@ router.post("/upload", upload.single("file"), asyncHandler(async (req, res) => {
     }
 
     // Save to DB — column names match actual table schema
+    // default_template_id = null → custom uploaded (user নিজে আপলোড করেছে)
     const { data: tmpl, error: dbErr } = await supabase
       .from("doc_templates")
       .insert({
@@ -106,6 +107,7 @@ router.post("/upload", upload.single("file"), asyncHandler(async (req, res) => {
         file_path: permanentPath,
         field_mappings: JSON.stringify(placeholders),
         placeholders: JSON.stringify(placeholders),
+        default_template_id: null,
       })
       .select()
       .single();
@@ -181,7 +183,7 @@ router.post("/create-from-default", asyncHandler(async (req, res) => {
     return p;
   });
 
-  // Save as agency template
+  // Save as agency template — default_template_id set (ডিফল্ট থেকে তৈরি মার্কার)
   const { data: newTmpl, error } = await supabase.from("doc_templates").insert({
     agency_id: req.user.agency_id,
     name: template_name,
@@ -192,6 +194,7 @@ router.post("/create-from-default", asyncHandler(async (req, res) => {
     file_path: destPath,
     field_mappings: JSON.stringify(placeholders),
     placeholders: JSON.stringify(placeholders),
+    default_template_id: default_template_id,
   }).select().single();
 
   if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি" }); }
