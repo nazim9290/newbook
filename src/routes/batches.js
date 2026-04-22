@@ -8,6 +8,24 @@ const cache = require("../lib/cache");
 const router = express.Router();
 router.use(auth);
 
+// ── class_tests-এ scores attach করা (PostgREST !fk syntax custom wrapper-এ নেই) ──
+// এক বা একাধিক test row নিয়ে class_test_scores query করে merge করে
+async function attachScores(tests) {
+  const arr = Array.isArray(tests) ? tests : tests ? [tests] : [];
+  if (arr.length === 0) return tests;
+  const testIds = arr.map(t => t.id).filter(Boolean);
+  if (testIds.length === 0) return tests;
+  const { data: scores } = await supabase.from("class_test_scores")
+    .select("test_id, student_id, score").in("test_id", testIds);
+  const byTest = {};
+  (scores || []).forEach(s => {
+    if (!byTest[s.test_id]) byTest[s.test_id] = [];
+    byTest[s.test_id].push({ student_id: s.student_id, score: s.score });
+  });
+  const merged = arr.map(t => ({ ...t, class_test_scores: byTest[t.id] || [] }));
+  return Array.isArray(tests) ? merged : merged[0];
+}
+
 // ═══════════════════════════════════════════════════════
 // Auto-calculate study hours — ক্লাসের দিন ও সময় থেকে ঘণ্টা হিসাব
 // start_date, end_date, class_days, class_hours_per_day থেকে
@@ -132,11 +150,12 @@ router.get("/:id", asyncHandler(async (req, res) => {
     .eq("agency_id", req.user.agency_id);
 
   // Class tests — scores সহ load (agency_id filter — cross-agency data leak prevention)
-  const { data: tests } = await supabase.from("class_tests")
-    .select("*, class_test_scores!test_id(student_id, score)")
+  const { data: testsRaw } = await supabase.from("class_tests")
+    .select("*")
     .eq("batch_id", req.params.id)
     .eq("agency_id", req.user.agency_id)
     .order("date", { ascending: false });
+  const tests = await attachScores(testsRaw || []);
 
   res.json({ ...batch, enrollments: enrollments || [], tests: tests || [] });
 }));
@@ -340,9 +359,9 @@ router.post("/:id/tests", asyncHandler(async (req, res) => {
 
   // scores সহ return
   const { data: full } = await supabase.from("class_tests")
-    .select("*, class_test_scores!test_id(student_id, score)")
-    .eq("id", data.id).single();
-  res.status(201).json(full || data);
+    .select("*").eq("id", data.id).single();
+  const withScores = full ? await attachScores(full) : null;
+  res.status(201).json(withScores || data);
 }));
 
 // PUT /api/batches/:id/tests/:testId — ক্লাস টেস্ট আপডেট
@@ -384,18 +403,19 @@ router.put("/:id/tests/:testId", asyncHandler(async (req, res) => {
 
   // Full data return
   const { data: full } = await supabase.from("class_tests")
-    .select("*, class_test_scores!test_id(student_id, score)")
-    .eq("id", req.params.testId).single();
-  res.json(full);
+    .select("*").eq("id", req.params.testId).single();
+  const withScores = full ? await attachScores(full) : null;
+  res.json(withScores);
 }));
 
 // GET /api/batches/:id/tests — ক্লাস টেস্ট তালিকা (scores সহ)
 router.get("/:id/tests", asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("class_tests")
-    .select("*, class_test_scores!test_id(student_id, score)")
+    .select("*")
     .eq("batch_id", req.params.id).order("date", { ascending: false });
   if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
-  res.json(data || []);
+  const tests = await attachScores(data || []);
+  res.json(tests || []);
 }));
 
 module.exports = router;

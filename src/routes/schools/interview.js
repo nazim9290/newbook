@@ -37,7 +37,7 @@ router.post("/:id/interview-list", checkPermission("schools", "write"), asyncHan
   // Related data bulk fetch — education, jp_exams, sponsors
   const sIds = (studentsRaw || []).map(s => s.id);
   const [eduRes, jpRes, spRes] = await Promise.all([
-    supabase.from("student_education").select("student_id, level, gpa, school_name, passing_year").in("student_id", sIds),
+    supabase.from("student_education").select("student_id, level, gpa, school_name, year").in("student_id", sIds),
     supabase.from("student_jp_exams").select("student_id, level, score, exam_type").in("student_id", sIds),
     supabase.from("sponsors").select("student_id, name, name_en, relationship, phone, annual_income_y1, company_name").in("student_id", sIds),
   ]);
