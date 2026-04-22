@@ -148,8 +148,20 @@ router.get("/cross-validate/:studentId", checkPermission("documents", "read"), a
   const { decryptSensitiveFields } = require("../lib/crypto");
   const dec = decryptSensitiveFields(student);
 
-  // DOB format — ISO → YYYY-MM-DD
-  const formatDate = (d) => { if (!d) return ""; const s = String(d); return s.length > 10 ? s.slice(0, 10) : s; };
+  // DOB format — Date object / ISO string → "YYYY-MM-DD"
+  // pg driver DATE column-কে Date object return করে, তাই instanceof check জরুরি
+  const formatDate = (d) => {
+    if (!d) return "";
+    if (d instanceof Date) return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+    const s = String(d);
+    // ISO pattern থাকলে সেটা তুলে নাও
+    const iso = s.match(/\d{4}-\d{2}-\d{2}/);
+    if (iso) return iso[0];
+    // Last resort — Date parse করে দেখো
+    const parsed = new Date(d);
+    if (isNaN(parsed.getTime()) || parsed.getFullYear() < 1900) return "";
+    return parsed.toISOString().slice(0, 10);
+  };
 
   // Student Profile → field map (decrypt ও normalize করে)
   const profileData = {
