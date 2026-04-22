@@ -265,23 +265,31 @@ class QueryBuilder {
     return { data: data, error: null, count: count };
   }
 
+  // ── Helper: value কে JSONB হলে stringify করে, placeholder-এ ::jsonb cast যোগ করে ──
+  // pg driver prepared statement-এ text → jsonb implicit cast allow করে না, তাই explicit cast দরকার
+  _buildParam(v, idx) {
+    var isJson = v !== null && typeof v === "object" && !(v instanceof Date);
+    return { val: isJson ? JSON.stringify(v) : v, ph: "$" + idx + (isJson ? "::jsonb" : "") };
+  }
+
   // ── INSERT ──
   async _execInsert() {
     var rows = this._insertData;
     if (!rows || rows.length === 0) return { data: null, error: { message: "No data" } };
 
+    var self = this;
     var results = [];
     for (var r = 0; r < rows.length; r++) {
       var row = rows[r];
       var cols = Object.keys(row).filter(function(k) { return row[k] !== undefined; });
-      // JSONB columns-এ array/object → JSON.stringify
-      var vals = cols.map(function(c) {
-        var v = row[c] !== undefined ? row[c] : null;
-        if (v !== null && typeof v === "object" && !(v instanceof Date)) return JSON.stringify(v);
-        return v;
+      var vals = [];
+      var phList = [];
+      cols.forEach(function(c, i) {
+        var p = self._buildParam(row[c] !== undefined ? row[c] : null, i + 1);
+        vals.push(p.val);
+        phList.push(p.ph);
       });
-      var ph = cols.map(function(_, i) { return "$" + (i + 1); }).join(", ");
-      var sql = 'INSERT INTO "' + this._table + '" (' + cols.join(", ") + ") VALUES (" + ph + ") RETURNING *";
+      var sql = 'INSERT INTO "' + this._table + '" (' + cols.join(", ") + ") VALUES (" + phList.join(", ") + ") RETURNING *";
       var result = await timedQuery(sql, vals);
       results.push(result.rows[0]);
     }
@@ -299,14 +307,16 @@ class QueryBuilder {
     for (var k in data) { if (data[k] !== undefined) clean[k] = data[k]; }
     if (!clean.updated_at) clean.updated_at = new Date().toISOString();
 
+    var self = this;
     var cols = Object.keys(clean);
-    var setClauses = cols.map(function(c, i) { return c + " = $" + (i + 1); }).join(", ");
-    // JSONB columns-এ array/object values JSON.stringify করতে হয় (pg driver raw array ভুল করে)
-    var vals = cols.map(function(c) {
-      var v = clean[c];
-      if (v !== null && typeof v === "object" && !(v instanceof Date)) return JSON.stringify(v);
-      return v;
+    var setParts = [];
+    var vals = [];
+    cols.forEach(function(c, i) {
+      var p = self._buildParam(clean[c], i + 1);
+      vals.push(p.val);
+      setParts.push(c + " = " + p.ph);
     });
+    var setClauses = setParts.join(", ");
 
     var nextIdx = cols.length + 1;
     var w = this._buildWhere(nextIdx);
@@ -332,17 +342,23 @@ class QueryBuilder {
     var rows = this._insertData;
     if (!rows || rows.length === 0) return { data: null, error: { message: "No data" } };
 
+    var self = this;
     var conflictCols = this._upsertConflict;
     var results = [];
 
     for (var r = 0; r < rows.length; r++) {
       var row = rows[r];
       var cols = Object.keys(row).filter(function(k) { return row[k] !== undefined; });
-      var vals = cols.map(function(c) { return row[c] !== undefined ? row[c] : null; });
-      var ph = cols.map(function(_, i) { return "$" + (i + 1); }).join(", ");
+      var vals = [];
+      var phList = [];
+      cols.forEach(function(c, i) {
+        var p = self._buildParam(row[c] !== undefined ? row[c] : null, i + 1);
+        vals.push(p.val);
+        phList.push(p.ph);
+      });
       var updateCols = cols.filter(function(c) { return !conflictCols.split(",").map(function(s) { return s.trim(); }).includes(c); });
       var updateSet = updateCols.map(function(c) { return c + " = EXCLUDED." + c; }).join(", ");
-      var sql = 'INSERT INTO "' + this._table + '" (' + cols.join(", ") + ") VALUES (" + ph + ")" +
+      var sql = 'INSERT INTO "' + this._table + '" (' + cols.join(", ") + ") VALUES (" + phList.join(", ") + ")" +
         (updateSet ? " ON CONFLICT (" + conflictCols + ") DO UPDATE SET " + updateSet : " ON CONFLICT (" + conflictCols + ") DO NOTHING") +
         " RETURNING *";
       var result = await timedQuery(sql, vals);

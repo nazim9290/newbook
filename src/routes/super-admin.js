@@ -205,15 +205,18 @@ router.delete("/agencies/:id", asyncHandler(async (req, res) => {
   }
 
   // ── Related tables আগে delete (FK constraint avoid) ──
+  // Actual table names (renamed): student_fees→fee_items, student_payments→payments,
+  // school_submissions→submissions, partners→partner_agencies, inventory_items→inventory,
+  // hr_employees→employees, hr_salary→salary_history
   const tables = [
     "activity_log", "communications", "calendar_events", "tasks",
     "attendance", "student_jp_exams", "student_education", "student_family",
-    "sponsors", "student_fees", "student_payments", "documents",
+    "sponsors", "fee_items", "payments", "documents",
     "batch_students", "class_tests", "class_test_scores",
-    "school_submissions", "excel_templates", "doc_types",
+    "submissions", "excel_templates", "doc_types",
     "portal_form_config", "ocr_usage", "partner_students",
-    "visitors", "students", "schools", "batches", "agents", "partners",
-    "inventory_items", "hr_employees", "hr_salary",
+    "visitors", "students", "schools", "batches", "agents", "partner_agencies",
+    "inventory", "employees", "salary_history",
     "branches", "users",
   ];
 

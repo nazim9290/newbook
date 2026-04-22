@@ -267,7 +267,13 @@ router.delete("/:id", asyncHandler(async (req, res) => {
   if (!batch) return res.status(404).json({ error: "ব্যাচ পাওয়া যায়নি" });
 
   // Related data cleanup
-  try { await supabase.from("class_test_scores").delete().eq("batch_id", id); } catch {}
+  // class_test_scores টেবিলে batch_id column নেই — test_id → class_tests.batch_id দিয়ে লিঙ্ক
+  // তাই আগে এই ব্যাচের test_ids নিয়ে তারপর scores মুছতে হবে
+  try {
+    const { data: testRows } = await supabase.from("class_tests").select("id").eq("batch_id", id);
+    const testIds = (testRows || []).map(t => t.id);
+    if (testIds.length > 0) await supabase.from("class_test_scores").delete().in("test_id", testIds);
+  } catch {}
   try { await supabase.from("class_tests").delete().eq("batch_id", id); } catch {}
   try { await supabase.from("batch_students").delete().eq("batch_id", id); } catch {}
   try { await supabase.from("attendance").delete().eq("batch_id", id); } catch {}

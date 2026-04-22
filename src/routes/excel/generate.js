@@ -47,17 +47,9 @@ router.post("/generate", asyncHandler(async (req, res) => {
     if (!tmpl.mappings || !tmpl.mappings.length) return res.status(400).json({ error: "কোনো mapping নেই" });
 
     // Get students — try JOIN, fallback to separate queries
+    // Custom pg wrapper PostgREST !fk hint syntax support করে না — সরাসরি separate queries
     let students = [];
-    try {
-      const { data, error: sErr } = await supabase
-        .from("students")
-        .select("*, student_education(*), student_jp_exams(*), student_family(*), sponsors!sponsors_student_id_fkey(*)")
-        .in("id", student_ids)
-        .eq("agency_id", req.user.agency_id);
-      if (sErr) throw sErr;
-      students = data || [];
-    } catch (joinErr) {
-      console.log("[Excel Generate Bulk] JOIN failed, using separate queries:", joinErr.message);
+    {
       const { data: sts } = await supabase.from("students").select("*").in("id", student_ids).eq("agency_id", req.user.agency_id);
       if (!sts) return res.status(500).json({ error: "সার্ভার ত্রুটি" });
       students = await Promise.all(sts.map(async (st) => {
@@ -118,33 +110,18 @@ router.post("/generate-single", asyncHandler(async (req, res) => {
     const { data: tmpl } = await supabase.from("excel_templates").select("*").eq("id", template_id).single();
     if (!tmpl) return res.status(404).json({ error: "Template পাওয়া যায়নি" });
 
-    // Student + related data load — try JOIN, fallback to separate queries
-    let student = null;
-    try {
-      const { data, error } = await supabase
-        .from("students")
-        .select("*, student_education(*), student_jp_exams(*), student_family(*), sponsors!sponsors_student_id_fkey(*)")
-        .eq("id", student_id)
-        .eq("agency_id", req.user.agency_id)
-        .single();
-      if (error) throw error;
-      student = data;
-    } catch (joinErr) {
-      // JOIN fail — separate queries
-      console.log("[Excel Generate] JOIN failed, using separate queries:", joinErr.message);
-      const { data: st } = await supabase.from("students").select("*").eq("id", student_id).eq("agency_id", req.user.agency_id).single();
-      if (!st) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
-      const [eduRes, jpRes, famRes, spRes, workRes, jpStudyRes] = await Promise.all([
-        supabase.from("student_education").select("*").eq("student_id", student_id),
-        supabase.from("student_jp_exams").select("*").eq("student_id", student_id),
-        supabase.from("student_family").select("*").eq("student_id", student_id),
-        supabase.from("sponsors").select("*").eq("student_id", student_id),
-        supabase.from("student_work_experience").select("*").eq("student_id", student_id),
-        supabase.from("student_jp_study").select("*").eq("student_id", student_id),
-      ]);
-      student = { ...st, student_education: eduRes.data || [], student_jp_exams: jpRes.data || [], student_family: famRes.data || [], sponsors: spRes.data || [], work_experience: workRes.data || [], jp_study: jpStudyRes.data || [] };
-    }
-    if (!student) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
+    // Student + related data load — custom pg wrapper !fk hint সাপোর্ট করে না, তাই separate queries
+    const { data: st } = await supabase.from("students").select("*").eq("id", student_id).eq("agency_id", req.user.agency_id).single();
+    if (!st) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
+    const [eduRes, jpRes, famRes, spRes, workRes, jpStudyRes] = await Promise.all([
+      supabase.from("student_education").select("*").eq("student_id", student_id),
+      supabase.from("student_jp_exams").select("*").eq("student_id", student_id),
+      supabase.from("student_family").select("*").eq("student_id", student_id),
+      supabase.from("sponsors").select("*").eq("student_id", student_id),
+      supabase.from("student_work_experience").select("*").eq("student_id", student_id),
+      supabase.from("student_jp_study").select("*").eq("student_id", student_id),
+    ]);
+    const student = { ...st, student_education: eduRes.data || [], student_jp_exams: jpRes.data || [], student_family: famRes.data || [], sponsors: spRes.data || [], work_experience: workRes.data || [], jp_study: jpStudyRes.data || [] };
 
     // ── সিস্টেম ভ্যারিয়েবল: এজেন্সি, ব্যাচ, ব্রাঞ্চ, স্কুল fetch ──
     // School: student-এর school_id → fallback template-এর school_id
