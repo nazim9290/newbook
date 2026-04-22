@@ -46,6 +46,22 @@ pool.on("error", (err) => {
   console.error("[DB] Pool error:", err.message);
 });
 
+// ── JSONB Columns Registry ──
+// যেসব column-এ array/object value JSONB হিসেবে store হয় (PG TEXT[]/UUID[] নয়)।
+// প্রায়শই JSONB column object store করে, কিন্তু কিছু array-শেপ data-ও JSONB-এ থাকে (যেমন class_days)।
+// Primitive array column (TEXT[], UUID[]) এই map-এ রাখা হবে না — pg driver নিজেই সামলাবে।
+const JSONB_COLUMNS = {
+  batches: ["class_days", "settings"],
+  agencies: ["settings", "permissions_config"],
+  users: ["permissions"],
+  students: ["resume_data"],
+  doc_types: ["fields"],
+  doc_templates: ["field_mappings", "placeholders"],
+  default_templates: ["template_data"],
+  excel_templates: ["mappings"],
+  class_tests: ["absent_students"],
+};
+
 // ── Foreign Key Map — join করতে কোন table-এর কোন FK ব্যবহার হবে ──
 const FK_MAP = {
   students: "student_id",
@@ -265,11 +281,30 @@ class QueryBuilder {
     return { data: data, error: null, count: count };
   }
 
-  // ── Helper: value কে JSONB হলে stringify করে, placeholder-এ ::jsonb cast যোগ করে ──
-  // pg driver prepared statement-এ text → jsonb implicit cast allow করে না, তাই explicit cast দরকার
-  _buildParam(v, idx) {
-    var isJson = v !== null && typeof v === "object" && !(v instanceof Date);
-    return { val: isJson ? JSON.stringify(v) : v, ph: "$" + idx + (isJson ? "::jsonb" : "") };
+  // ── Helper: value cast হিসেবে JSONB/array পার্থক্য করা ──
+  // pg driver prepared statement-এ text → jsonb implicit cast allow করে না।
+  // TEXT[] / UUID[] native PG array — pg driver নিজে serialize করে।
+  // তাই: object / nested array → JSONB (::jsonb cast), primitive array → PG array (raw pass)।
+  // column নাম পাস করা হলে JSONB_COLUMNS registry থেকে সঠিক treatment।
+  _buildParam(v, idx, column) {
+    if (v === null || v === undefined || v instanceof Date) return { val: v, ph: "$" + idx };
+    if (typeof v !== "object") return { val: v, ph: "$" + idx };
+
+    var table = this._table;
+    var isJsonbCol = JSONB_COLUMNS[table] && JSONB_COLUMNS[table].indexOf(column) !== -1;
+    var isArray = Array.isArray(v);
+
+    // Registry explicit — JSONB column
+    if (isJsonbCol) return { val: JSON.stringify(v), ph: "$" + idx + "::jsonb" };
+
+    // Primitive array — pg driver natively serializes as TEXT[] / UUID[] etc.
+    if (isArray) {
+      var allPrimitive = v.every(function(x) { return x === null || ["string", "number", "boolean"].indexOf(typeof x) !== -1; });
+      if (allPrimitive) return { val: v, ph: "$" + idx };
+    }
+
+    // Fallback — plain object / nested array → JSONB
+    return { val: JSON.stringify(v), ph: "$" + idx + "::jsonb" };
   }
 
   // ── INSERT ──
@@ -285,7 +320,7 @@ class QueryBuilder {
       var vals = [];
       var phList = [];
       cols.forEach(function(c, i) {
-        var p = self._buildParam(row[c] !== undefined ? row[c] : null, i + 1);
+        var p = self._buildParam(row[c] !== undefined ? row[c] : null, i + 1, c);
         vals.push(p.val);
         phList.push(p.ph);
       });
@@ -312,7 +347,7 @@ class QueryBuilder {
     var setParts = [];
     var vals = [];
     cols.forEach(function(c, i) {
-      var p = self._buildParam(clean[c], i + 1);
+      var p = self._buildParam(clean[c], i + 1, c);
       vals.push(p.val);
       setParts.push(c + " = " + p.ph);
     });
@@ -352,7 +387,7 @@ class QueryBuilder {
       var vals = [];
       var phList = [];
       cols.forEach(function(c, i) {
-        var p = self._buildParam(row[c] !== undefined ? row[c] : null, i + 1);
+        var p = self._buildParam(row[c] !== undefined ? row[c] : null, i + 1, c);
         vals.push(p.val);
         phList.push(p.ph);
       });
