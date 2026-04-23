@@ -33,6 +33,42 @@ router.get("/", asyncHandler(async (req, res) => {
   res.json(parsed);
 }));
 
+// ── "Active" status — একই student অন্য school-এ এই status-এ থাকলে নতুন submission block ──
+// এগুলো মানে student ঐ school-এ locked — rejected/cancelled/withdrawn/interview হলে free
+const ACTIVE_STATUSES = ["submitted", "issues_found", "minor_issues", "accepted", "forwarded_immigration", "coe_received"];
+
+// ── GET /api/submissions/conflicts?student_ids=id1,id2&exclude_school_id=X ──
+// Returns: { [student_id]: [{ school_id, school_name, status, submission_date }] }
+// interview list prep-এর সময় warning দেখাতে ব্যবহৃত
+router.get("/conflicts", asyncHandler(async (req, res) => {
+  const { student_ids, exclude_school_id } = req.query;
+  if (!student_ids) return res.status(400).json({ error: "student_ids দিন" });
+  const ids = String(student_ids).split(",").map(s => s.trim()).filter(Boolean);
+  if (ids.length === 0) return res.json({});
+
+  let q = supabase.from("submissions")
+    .select("student_id, school_id, status, submission_date, schools(name_en, name_jp)")
+    .eq("agency_id", req.user.agency_id)
+    .in("student_id", ids)
+    .in("status", ACTIVE_STATUSES);
+  if (exclude_school_id) q = q.neq("school_id", exclude_school_id);
+
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি" });
+
+  const conflicts = {};
+  (data || []).forEach(row => {
+    if (!conflicts[row.student_id]) conflicts[row.student_id] = [];
+    conflicts[row.student_id].push({
+      school_id: row.school_id,
+      school_name: row.schools?.name_en || row.schools?.name_jp || "Unknown",
+      status: row.status,
+      submission_date: row.submission_date,
+    });
+  });
+  res.json(conflicts);
+}));
+
 // POST /api/submissions — নতুন submission
 router.post("/", asyncHandler(async (req, res) => {
   const record = {
@@ -41,6 +77,26 @@ router.post("/", asyncHandler(async (req, res) => {
     submission_date: req.body.submission_date || new Date().toISOString().slice(0, 10),
     status: req.body.status || "submitted",
   };
+
+  // ── Hard block — same student অন্য school-এ active submission থাকলে file submit নিষিদ্ধ ──
+  // (interview status হলে allow; রিজেক্ট/withdraw হলে allow)
+  if (record.student_id && record.school_id && ACTIVE_STATUSES.includes(record.status)) {
+    const { data: conflicts } = await supabase.from("submissions")
+      .select("id, school_id, status, schools(name_en)")
+      .eq("agency_id", req.user.agency_id)
+      .eq("student_id", record.student_id)
+      .in("status", ACTIVE_STATUSES)
+      .neq("school_id", record.school_id);
+    if (conflicts && conflicts.length > 0) {
+      const conflictList = conflicts.map(c => `${c.schools?.name_en || "?"} (${c.status})`).join(", ");
+      return res.status(409).json({
+        error: `এই student ইতিমধ্যে অন্য school-এ active submission আছে: ${conflictList} — আগের submission cancel/reject করে তারপর নতুন করুন`,
+        code: "STUDENT_ALREADY_SUBMITTED",
+        conflicts,
+      });
+    }
+  }
+
   const { data, error } = await supabase.from("submissions").insert(record).select("*, students(name_en), schools(name_en)").single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
 
@@ -69,6 +125,29 @@ router.patch("/:id", asyncHandler(async (req, res) => {
     const { data: current } = await supabase.from("submissions").select("updated_at").eq("id", req.params.id).single();
     if (current && current.updated_at && new Date(current.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
       return res.status(409).json({ error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — রিফ্রেশ করুন", code: "CONFLICT" });
+    }
+  }
+
+  // ── Hard block — status inactive → active transition হলে অন্য school-এ conflict check ──
+  if (req.body.status && ACTIVE_STATUSES.includes(req.body.status)) {
+    const { data: currentSub } = await supabase.from("submissions").select("student_id, school_id, status")
+      .eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
+    if (currentSub && !ACTIVE_STATUSES.includes(currentSub.status)) {
+      // reactive transition — check conflict
+      const { data: conflicts } = await supabase.from("submissions")
+        .select("id, school_id, status, schools(name_en)")
+        .eq("agency_id", req.user.agency_id)
+        .eq("student_id", currentSub.student_id)
+        .in("status", ACTIVE_STATUSES)
+        .neq("id", req.params.id);
+      if (conflicts && conflicts.length > 0) {
+        const list = conflicts.map(c => `${c.schools?.name_en || "?"} (${c.status})`).join(", ");
+        return res.status(409).json({
+          error: `এই student-এর অন্য school-এ active submission আছে: ${list}`,
+          code: "STUDENT_ALREADY_SUBMITTED",
+          conflicts,
+        });
+      }
     }
   }
 
