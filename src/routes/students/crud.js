@@ -24,7 +24,7 @@ router.use(auth);
 
 // GET /api/students — list with search + filters (cursor-based pagination)
 router.get("/", checkPermission("students", "read"), asyncHandler(async (req, res) => {
-  const { search, status, country, batch, school, branch } = req.query;
+  const { search, status, country, batch, school, branch, intake } = req.query;
   const { applyCursor, buildResponse } = require("../../lib/cursorPagination");
 
   let query = supabase.from("students").select("*", { count: "exact" }).eq("agency_id", req.user.agency_id);
@@ -42,6 +42,7 @@ router.get("/", checkPermission("students", "read"), asyncHandler(async (req, re
   if (batch && batch !== "All") query = query.eq("batch", batch);
   if (school && school !== "All") query = query.eq("school", school);
   if (branch && branch !== "All") query = query.eq("branch", branch);
+  if (intake && intake !== "All") query = query.eq("intake", intake);
 
   // Cursor-based pagination — cursor=timestamp অথবা page=N (backward compatible)
   query = applyCursor(query, req.query, { sortCol: "created_at", ascending: false });

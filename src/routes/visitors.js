@@ -13,7 +13,7 @@ router.use(auth);
 
 // GET /api/visitors — search, filter, cursor-based pagination
 router.get("/", checkPermission("visitors", "read"), asyncHandler(async (req, res) => {
-  const { search, status, status_in, exclude_status, branch } = req.query;
+  const { search, status, status_in, exclude_status, branch, interested_intake } = req.query;
   const { applyCursor, buildResponse } = require("../lib/cursorPagination");
 
   let query = supabase.from("visitors").select("*", { count: "exact" }).eq("agency_id", req.user.agency_id);
@@ -37,6 +37,7 @@ router.get("/", checkPermission("visitors", "read"), asyncHandler(async (req, re
     excluded.forEach(s => { query = query.neq("status", s); });
   }
   if (branch && branch !== "All") query = query.eq("branch", branch);
+  if (interested_intake && interested_intake !== "All") query = query.eq("interested_intake", interested_intake);
 
   // Cursor-based pagination
   query = applyCursor(query, req.query, { sortCol: "created_at", ascending: false });
