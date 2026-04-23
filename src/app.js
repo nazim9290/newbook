@@ -230,6 +230,7 @@ app.use("/api/docgen", heavyLimiter, require("./routes/docgen"));             //
 app.use("/api/docdata", require("./routes/docdata"));           // Document Types ও Student Document Data
 app.use("/api/users", require("./routes/users"));               // ইউজার ও Branch ম্যানেজমেন্ট
 app.use("/api/branches", require("./routes/branches"));         // শাখা CRUD (ঠিকানা, ফোন, ম্যানেজার)
+app.use("/api/sessions", require("./routes/sessions"));         // Session/Intake master (April 2027, etc.)
 app.use("/api/activity-log", require("./routes/activity-log")); // কার্যকলাপ লগ
 app.use("/api/student-portal", require("./routes/student-portal")); // স্টুডেন্ট পোর্টাল (self-service)
 app.use("/api/reports", require("./routes/reports"));               // রিপোর্ট ও Analytics
