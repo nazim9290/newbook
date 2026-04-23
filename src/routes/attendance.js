@@ -8,6 +8,68 @@ const cache = require("../lib/cache");
 const router = express.Router();
 router.use(auth);
 
+// ── GET /api/attendance/report?from=YYYY-MM-DD&to=YYYY-MM-DD&batch_id=xxx&intake=xxx ──
+// Returns: { students, dates, attendance: { student_id: { date: status } }, summary }
+// Used by: AttendancePage Report tab — matrix view + export
+router.get("/report", asyncHandler(async (req, res) => {
+  const { from, to, batch_id, intake, student_id } = req.query;
+  if (!from || !to) return res.status(400).json({ error: "from ও to date দিন" });
+
+  const agencyId = req.user.agency_id;
+  const branchFilter = getBranchFilter(req.user);
+
+  // ── Students filter — batch / intake / branch / specific student ──
+  let studentsQ = supabase.from("students")
+    .select("id, name_en, batch, batch_id, intake, status, branch")
+    .eq("agency_id", agencyId);
+  if (branchFilter) studentsQ = studentsQ.eq("branch", branchFilter);
+  if (batch_id && batch_id !== "All") studentsQ = studentsQ.eq("batch_id", batch_id);
+  if (intake && intake !== "All") studentsQ = studentsQ.eq("intake", intake);
+  if (student_id && student_id !== "All") studentsQ = studentsQ.eq("id", student_id);
+  const { data: students } = await studentsQ;
+  if (!students || students.length === 0) return res.json({ students: [], dates: [], attendance: {}, summary: {} });
+
+  // ── Attendance records — date range + these students ──
+  const studentIds = students.map(s => s.id);
+  const { data: records } = await supabase.from("attendance")
+    .select("student_id, date, status")
+    .eq("agency_id", agencyId)
+    .gte("date", from).lte("date", to)
+    .in("student_id", studentIds);
+
+  // ── Build matrix ──
+  const attendance = {};
+  students.forEach(s => { attendance[s.id] = {}; });
+  const datesSet = new Set();
+  (records || []).forEach(r => {
+    const d = String(r.date).slice(0, 10);
+    datesSet.add(d);
+    if (!attendance[r.student_id]) attendance[r.student_id] = {};
+    attendance[r.student_id][d] = r.status;
+  });
+  const dates = Array.from(datesSet).sort();
+
+  // ── Per-student summary — present/absent/late counts + percentage ──
+  const summary = {};
+  students.forEach(s => {
+    const att = attendance[s.id] || {};
+    let present = 0, absent = 0, late = 0, total = 0;
+    Object.values(att).forEach(status => {
+      total++;
+      const norm = (status || "").toLowerCase();
+      if (norm === "p" || norm === "present") present++;
+      else if (norm === "l" || norm === "late") late++;
+      else absent++;
+    });
+    summary[s.id] = {
+      present, absent, late, total,
+      pct: total > 0 ? Math.round(((present + late) / total) * 100) : 0,
+    };
+  });
+
+  res.json({ students, dates, attendance, summary });
+}));
+
 // GET /api/attendance?date=2026-03-24&batch=xyz
 // agency_id ফিল্টার — শুধু নিজের agency-র attendance দেখাবে
 router.get("/", asyncHandler(async (req, res) => {
