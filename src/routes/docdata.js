@@ -77,6 +77,46 @@ router.delete("/types/:id", asyncHandler(async (req, res) => {
 
 // ════════════════ DOCUMENT DATA (Student-wise) ════════════════
 
+// ── GET /api/docdata/checklist-summary — সব student × সব doc-type completion summary ──
+// Returns: { students: [...], docTypes: [...], summary: { [student_id]: { [doc_type_id]: { filled, total, pct } } } }
+// Used by: Documents Checklist matrix view (print-friendly)
+router.get("/checklist-summary", asyncHandler(async (req, res) => {
+  const agencyId = req.user.agency_id;
+  const branchFilter = getBranchFilter(req.user);
+
+  // Students — branch filtered
+  let studentsQ = supabase.from("students").select("id, name_en, batch, status, branch").eq("agency_id", agencyId);
+  if (branchFilter) studentsQ = studentsQ.eq("branch", branchFilter);
+  const { data: students } = await studentsQ;
+
+  // Active doc types
+  const { data: docTypes } = await supabase.from("doc_types")
+    .select("id, name, name_bn, category, fields").eq("agency_id", agencyId).eq("is_active", true).order("category");
+
+  // All document_data for agency (একবারে fetch — client-side aggregate কম cost)
+  const { data: allData } = await supabase.from("document_data")
+    .select("student_id, doc_type_id, field_data").eq("agency_id", agencyId);
+
+  // Summary build — student_id → doc_type_id → { filled, total, pct }
+  const summary = {};
+  (students || []).forEach(s => { summary[s.id] = {}; });
+  (allData || []).forEach(row => {
+    const dt = (docTypes || []).find(d => d.id === row.doc_type_id);
+    if (!dt || !summary[row.student_id]) return;
+    const fields = dt.fields || [];
+    const fieldData = row.field_data || {};
+    const filled = fields.filter(f => {
+      const v = fieldData[f.key];
+      return v !== undefined && v !== null && String(v).trim() !== "";
+    }).length;
+    summary[row.student_id][row.doc_type_id] = {
+      filled, total: fields.length, pct: fields.length > 0 ? Math.round((filled / fields.length) * 100) : 0,
+    };
+  });
+
+  res.json({ students: students || [], docTypes: docTypes || [], summary });
+}));
+
 // GET /api/docdata/student/:studentId — একটি student-এর সব document data
 router.get("/student/:studentId", asyncHandler(async (req, res) => {
   // Branch filter — staff শুধু নিজ branch-এর student-এর data দেখবে
