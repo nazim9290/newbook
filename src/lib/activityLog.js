@@ -6,7 +6,7 @@
  * (error হলে silently ignore করে — main operation block করে না)
  */
 
-const supabase = require("./supabase");
+const supabase = require("./db");
 
 /**
  * Activity log এ entry রাখো

@@ -11,7 +11,7 @@
 const ExcelJS = require("exceljs");
 const path = require("path");
 const fs = require("fs");
-const supabase = require("../supabase");
+const supabase = require("../db");
 const { decrypt } = require("../crypto");
 const { getCellText, encName, looksEncrypted } = require("./cellUtils");
 const { flattenStudent, resolveFieldValue } = require("./studentData");

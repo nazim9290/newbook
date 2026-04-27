@@ -5,7 +5,7 @@
  * ocr_usage + ocr_credit_log table-এ log হয়
  */
 
-const supabase = require("../supabase");
+const supabase = require("../db");
 
 const CREDITS_PER_SCAN = 5;
 
