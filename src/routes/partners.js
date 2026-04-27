@@ -9,7 +9,7 @@ const express = require("express");
 const router = express.Router();
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
-const supabase = require("../lib/supabase");
+const supabase = require("../lib/db");
 const { logActivity } = require("../lib/activityLog");
 
 // ── GET /api/partners — সব partner এজেন্সি + student count + revenue ──

@@ -11,13 +11,79 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
-const supabase = require("../../lib/supabase");
+const supabase = require("../../lib/db");
 const auth = require("../../middleware/auth");
 const asyncHandler = require("../../lib/asyncHandler");
 const { upload } = require("./_shared");
+const { decryptSensitiveFields } = require("../../lib/crypto");
+const { flattenForDoc } = require("../../lib/docgen/studentFlatten");
 
 const router = express.Router();
 router.use(auth);
+
+// ================================================================
+// GET /api/docgen/preview-data?student_id=X
+// Returns flat student object — same shape as generate.js feeds to
+// .docx replacement, so frontend can show live preview values inside
+// the Field Mapper UI.
+// ================================================================
+router.get("/preview-data", asyncHandler(async (req, res) => {
+  try {
+    const { student_id } = req.query;
+    if (!student_id) return res.status(400).json({ error: "student_id দিন" });
+
+    // 1. Tenant-scoped student fetch
+    const { data: student } = await supabase
+      .from("students")
+      .select("*")
+      .eq("id", student_id)
+      .eq("agency_id", req.user.agency_id)
+      .single();
+    if (!student) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
+
+    // 2. Same parallel fetch pattern as generate.js — student relations + system context
+    const [eduRes, examRes, famRes, sponsorRes, workRes, jpStudyRes, agencyRes, schoolRes, batchRes, branchRes] = await Promise.all([
+      supabase.from("student_education").select("*").eq("student_id", student_id),
+      supabase.from("student_jp_exams").select("*").eq("student_id", student_id),
+      supabase.from("student_family").select("*").eq("student_id", student_id),
+      supabase.from("sponsors").select("*").eq("student_id", student_id),
+      supabase.from("student_work_experience").select("*").eq("student_id", student_id),
+      supabase.from("student_jp_study").select("*").eq("student_id", student_id),
+      supabase.from("agencies").select("*").eq("id", req.user.agency_id).single(),
+      student.school_id
+        ? supabase.from("schools").select("*").eq("id", student.school_id).single()
+        : student.school
+          ? supabase.from("schools").select("*").eq("agency_id", req.user.agency_id).eq("name_en", student.school).limit(1)
+          : { data: null },
+      student.batch_id ? supabase.from("batches").select("*").eq("id", student.batch_id).single() : { data: null },
+      student.branch ? supabase.from("branches").select("*").eq("agency_id", req.user.agency_id).eq("name", student.branch).single() : { data: null },
+    ]);
+
+    student.student_education = eduRes.data || [];
+    student.student_jp_exams = examRes.data || [];
+    student.student_family = famRes.data || [];
+    student.sponsors = sponsorRes.data || [];
+    student.work_experience = workRes.data || [];
+    student.jp_study = jpStudyRes.data || [];
+
+    const agency = agencyRes.data || {};
+    const school = Array.isArray(schoolRes.data) ? schoolRes.data[0] || {} : schoolRes.data || {};
+    const batch = batchRes.data || {};
+    const branch = branchRes.data || {};
+
+    // 3. Decrypt PII
+    const decrypted = decryptSensitiveFields(student);
+
+    // 4. Flatten — DON'T duplicate logic, reuse shared helper
+    const flat = flattenForDoc(decrypted, { agency, school, batch, branch });
+
+    // 5. Return flat object
+    res.json({ data: flat });
+  } catch (err) {
+    console.error("[DocGen preview-data]", err.message);
+    res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  }
+}));
 
 // ================================================================
 // GET /api/docgen/templates — সব document template

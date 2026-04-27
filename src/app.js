@@ -159,7 +159,7 @@ const path = require("path");
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 // ── Health Check — সার্ভার ও ডাটাবেস চালু আছে কিনা check করতে ──
-const { pool } = require("./lib/supabase");
+const { pool } = require("./lib/db");
 app.get("/api/health", async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT 1");
@@ -177,7 +177,7 @@ app.get("/api/health", async (req, res) => {
 
 // ── Agency self-service — নিজের agency info get/update (owner/admin) ──
 const agencyAuth = require("./middleware/auth");
-const agencySupa = require("./lib/supabase");
+const agencySupa = require("./lib/db");
 const agencyAsync = require("./lib/asyncHandler");
 app.get("/api/agency/me", agencyAuth, agencyAsync(async (req, res) => {
   const { data, error } = await agencySupa.from("agencies").select("*").eq("id", req.user.agency_id).single();
@@ -259,5 +259,5 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, async () => {
   console.log(`AgencyBook API running on http://localhost:${PORT}`);
   // HQ branch cache load — branch-based access control
-  try { const { loadHqBranches } = require("./lib/branchFilter"); const supabase = require("./lib/supabase"); await loadHqBranches(supabase); } catch (e) { console.error("[HQ Cache]", e.message); }
+  try { const { loadHqBranches } = require("./lib/branchFilter"); const supabase = require("./lib/db"); await loadHqBranches(supabase); } catch (e) { console.error("[HQ Cache]", e.message); }
 });

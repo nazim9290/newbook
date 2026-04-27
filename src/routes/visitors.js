@@ -1,5 +1,5 @@
 const express = require("express");
-const supabase = require("../lib/supabase");
+const supabase = require("../lib/db");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { encryptSensitiveFields, decryptMany } = require("../lib/crypto");
