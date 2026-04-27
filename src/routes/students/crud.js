@@ -248,7 +248,8 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
             sponsorRecord[col] = typeof sp[col] === "string" ? sp[col] : JSON.stringify(sp[col] || []);
           } else if (["payment_to_student", "payment_to_school"].includes(col)) {
             sponsorRecord[col] = !!sp[col];
-          } else if (col === "sign_date") {
+          } else if (["dob", "sign_date"].includes(col)) {
+            // Date columns — PostgreSQL "" reject করে, তাই empty/null/undefined → null
             sponsorRecord[col] = sp[col] || null;
           } else {
             sponsorRecord[col] = sp[col];
@@ -257,12 +258,20 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
       }
       sponsorRecord.updated_at = new Date().toISOString();
 
+      // Tenant isolation — agency_id column-ও set করা ভাল practice
+      sponsorRecord.agency_id = req.user.agency_id;
+
       // Upsert — student_id UNIQUE constraint দিয়ে conflict resolve
       const encSponsor = encryptSensitiveFields(sponsorRecord);
-      await supabase.from("sponsors").upsert(encSponsor, { onConflict: "student_id" });
+      const { error: spError } = await supabase.from("sponsors").upsert(encSponsor, { onConflict: "student_id" });
+      if (spError) {
+        // ── Sponsor save fail করলে আর silent থাকা যাবে না — response-এ flag করো ──
+        console.error("[Sponsor Upsert]", spError.message);
+        if (data) data._sponsor_save_error = spError.message || "Sponsor save failed";
+      }
     } catch (spErr) {
       console.error("[Sponsor Upsert]", spErr.message);
-      // Sponsor save fail হলেও student update সফল — পরে retry করা যাবে
+      if (data) data._sponsor_save_error = spErr.message || "Sponsor save failed";
     }
   }
 
