@@ -9,7 +9,7 @@ const express = require("express");
 const router = express.Router();
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
-const supabase = require("../lib/supabase");
+const supabase = require("../lib/db");
 const cache = require("../lib/cache");
 
 // ── GET /api/dashboard/stats — সব dashboard stats একসাথে ──

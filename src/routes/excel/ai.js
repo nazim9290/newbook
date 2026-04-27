@@ -8,7 +8,7 @@
 const express = require("express");
 const ExcelJS = require("exceljs");
 const fs = require("fs");
-const supabase = require("../../lib/supabase");
+const supabase = require("../../lib/db");
 const auth = require("../../middleware/auth");
 const asyncHandler = require("../../lib/asyncHandler");
 const { upload } = require("./_shared");

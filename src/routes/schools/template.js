@@ -10,7 +10,7 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
-const supabase = require("../../lib/supabase");
+const supabase = require("../../lib/db");
 const auth = require("../../middleware/auth");
 const asyncHandler = require("../../lib/asyncHandler");
 const { checkPermission } = require("../../middleware/checkPermission");
