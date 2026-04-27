@@ -288,4 +288,43 @@ function flattenForDoc(student, context = {}) {
   return flat;
 }
 
-module.exports = { flattenForDoc };
+/**
+ * docTypeSlug — Doc Type name → URL/key safe slug
+ * "TIN Certificate" → "doc_tin_certificate"
+ * Frontend ও backend দুই জায়গায় এই helper-এর exact same logic দরকার।
+ */
+function docTypeSlug(name) {
+  return "doc_" + String(name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+/**
+ * mergeDocData — document_data rows-এর field_data কে namespaced key-তে flat-এ merge করে
+ *
+ * @param {Object} flat — flattenForDoc()-এর output
+ * @param {Array}  docDataRows — [{ field_data, doc_type:{name} OR doc_types:{name} }]
+ *
+ * Namespace example:  TIN Certificate-এর field "father_name" → flat["doc_tin_certificate.father_name"]
+ * Doc-type field-এ student-profile field-এর সাথে collision (যেমন "name_en") থাকলেও
+ * student-profile data সরে না — দুই key পাশাপাশি থাকে।
+ */
+function mergeDocData(flat, docDataRows = []) {
+  if (!Array.isArray(docDataRows)) return flat;
+  for (const row of docDataRows) {
+    const dt = row.doc_type || row.doc_types || {};
+    const docName = (Array.isArray(dt) ? dt[0]?.name : dt?.name) || row.doc_type_name || "";
+    if (!docName) continue;
+    const slug = docTypeSlug(docName);
+    const fields = row.field_data || row.fields || {};
+    if (!fields || typeof fields !== "object") continue;
+    for (const [k, v] of Object.entries(fields)) {
+      if (k == null || k === "") continue;
+      flat[`${slug}.${k}`] = v;
+    }
+  }
+  return flat;
+}
+
+module.exports = { flattenForDoc, docTypeSlug, mergeDocData };

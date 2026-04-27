@@ -16,7 +16,7 @@ const auth = require("../../middleware/auth");
 const asyncHandler = require("../../lib/asyncHandler");
 const { upload } = require("./_shared");
 const { decryptSensitiveFields } = require("../../lib/crypto");
-const { flattenForDoc } = require("../../lib/docgen/studentFlatten");
+const { flattenForDoc, mergeDocData } = require("../../lib/docgen/studentFlatten");
 
 const router = express.Router();
 router.use(auth);
@@ -42,7 +42,8 @@ router.get("/preview-data", asyncHandler(async (req, res) => {
     if (!student) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
 
     // 2. Same parallel fetch pattern as generate.js — student relations + system context
-    const [eduRes, examRes, famRes, sponsorRes, workRes, jpStudyRes, agencyRes, schoolRes, batchRes, branchRes] = await Promise.all([
+    //    + document_data (admin-defined Doc Type-এর field values per student)
+    const [eduRes, examRes, famRes, sponsorRes, workRes, jpStudyRes, agencyRes, schoolRes, batchRes, branchRes, docDataRes] = await Promise.all([
       supabase.from("student_education").select("*").eq("student_id", student_id),
       supabase.from("student_jp_exams").select("*").eq("student_id", student_id),
       supabase.from("student_family").select("*").eq("student_id", student_id),
@@ -57,6 +58,8 @@ router.get("/preview-data", asyncHandler(async (req, res) => {
           : { data: null },
       student.batch_id ? supabase.from("batches").select("*").eq("id", student.batch_id).single() : { data: null },
       student.branch ? supabase.from("branches").select("*").eq("agency_id", req.user.agency_id).eq("name", student.branch).single() : { data: null },
+      // Doc Type-defined field values stored in document_data (TIN, Birth Cert, Passport ইত্যাদি)
+      supabase.from("document_data").select("doc_type_id, field_data, doc_types(name)").eq("student_id", student_id).eq("agency_id", req.user.agency_id),
     ]);
 
     student.student_education = eduRes.data || [];
@@ -74,10 +77,14 @@ router.get("/preview-data", asyncHandler(async (req, res) => {
     // 3. Decrypt PII
     const decrypted = decryptSensitiveFields(student);
 
-    // 4. Flatten — DON'T duplicate logic, reuse shared helper
+    // 4. Flatten student profile + system context — DON'T duplicate logic
     const flat = flattenForDoc(decrypted, { agency, school, batch, branch });
 
-    // 5. Return flat object
+    // 5. Merge namespaced doc-type field values: TIN/Birth Cert/Passport ইত্যাদির data
+    //    "TIN Certificate" → flat["doc_tin_certificate.<field_key>"]
+    mergeDocData(flat, docDataRes.data || []);
+
+    // 6. Return flat object
     res.json({ data: flat });
   } catch (err) {
     console.error("[DocGen preview-data]", err.message);

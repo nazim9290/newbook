@@ -13,7 +13,7 @@ const supabase = require("../../lib/db");
 const auth = require("../../middleware/auth");
 const asyncHandler = require("../../lib/asyncHandler");
 const { decryptSensitiveFields } = require("../../lib/crypto");
-const { flattenForDoc } = require("../../lib/docgen/studentFlatten");
+const { flattenForDoc, mergeDocData } = require("../../lib/docgen/studentFlatten");
 const { resolveValue } = require("../../lib/docgen/valueResolver");
 const { translateToJapanese } = require("../../lib/docgen/aiHelpers");
 
@@ -39,8 +39,8 @@ router.post("/generate", asyncHandler(async (req, res) => {
       .single();
     if (!student) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
 
-    // Related data — আলাদা queries (student relations + system context)
-    const [eduRes, examRes, famRes, sponsorRes, workRes, jpStudyRes, agencyRes, schoolRes, batchRes, branchRes] = await Promise.all([
+    // Related data — আলাদা queries (student relations + system context + doc_type field values)
+    const [eduRes, examRes, famRes, sponsorRes, workRes, jpStudyRes, agencyRes, schoolRes, batchRes, branchRes, docDataRes] = await Promise.all([
       supabase.from("student_education").select("*").eq("student_id", student_id),
       supabase.from("student_jp_exams").select("*").eq("student_id", student_id),
       supabase.from("student_family").select("*").eq("student_id", student_id),
@@ -58,6 +58,8 @@ router.post("/generate", asyncHandler(async (req, res) => {
           : { data: null },
       student.batch_id ? supabase.from("batches").select("*").eq("id", student.batch_id).single() : { data: null },
       student.branch ? supabase.from("branches").select("*").eq("agency_id", req.user.agency_id).eq("name", student.branch).single() : { data: null },
+      // Doc Type-defined field values (TIN/Birth Cert/Passport ইত্যাদি — Documents module-এ user fill করেছে)
+      supabase.from("document_data").select("doc_type_id, field_data, doc_types(name)").eq("student_id", student_id).eq("agency_id", req.user.agency_id),
     ]);
     student.student_education = eduRes.data || [];
     student.student_jp_exams = examRes.data || [];
@@ -76,9 +78,11 @@ router.post("/generate", asyncHandler(async (req, res) => {
     // Decrypt sensitive fields
     const decrypted = decryptSensitiveFields(student);
 
-    // Flatten student data + system context + document-specific data merge
-    // doc_data (user input) priority, তারপর student profile + system context
-    const flat = { ...flattenForDoc(decrypted, { agency, school, batch, branch }), ...doc_data };
+    // Flatten student data + system context. তারপর namespaced doc-type fields merge করি,
+    // সবশেষে generate-time doc_data (user input) priority পায়।
+    const flat = { ...flattenForDoc(decrypted, { agency, school, batch, branch }) };
+    mergeDocData(flat, docDataRes.data || []);
+    Object.assign(flat, doc_data || {});
 
     // Auto-generate issuing_authority — template_type অনুযায়ী
     if (!flat.issuing_authority) {
