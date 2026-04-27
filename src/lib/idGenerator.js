@@ -11,7 +11,7 @@
  *   S = Student, V = Visitor, P = Payment, INV = Invoice, SUB = Submission
  */
 
-const supabase = require("./supabase");
+const supabase = require("./db");
 
 // ═══════════════════════════════════════════════════════
 // Prefix Generator — এজেন্সির নাম থেকে 2-4 অক্ষরের prefix
