@@ -1,4 +1,6 @@
 const express = require("express");
+const path = require("path");
+const fs = require("fs");
 const supabase = require("../lib/db");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
@@ -81,6 +83,42 @@ router.patch("/:id", checkPermission("documents", "write"), asyncHandler(async (
   cache.invalidate(req.user.agency_id);
 
   res.json(data);
+}));
+
+// DELETE /api/documents/:id — agency_id চেক সহ; uploaded file disk থেকেও মুছে
+router.delete("/:id", checkPermission("documents", "delete"), asyncHandler(async (req, res) => {
+  // Lookup first — get file_url for disk cleanup + label for activity log
+  const { data: existing } = await supabase.from("documents")
+    .select("id, label, doc_type, file_url, student_id")
+    .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id)
+    .single();
+  if (!existing) return res.status(404).json({ error: "ডকুমেন্ট পাওয়া যায়নি" });
+
+  // Delete the row — document_fields cascade automatically (FK ON DELETE CASCADE)
+  const { error } = await supabase.from("documents")
+    .delete()
+    .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id);
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Best-effort: remove the local upload file from disk (skip remote URLs / Drive links)
+  if (existing.file_url && existing.file_url.startsWith("/uploads/")) {
+    const filePath = path.join(__dirname, "../..", existing.file_url);
+    try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); }
+    catch (e) { console.error("[FILE DELETE]", e.message); /* file cleanup failure ≠ user-facing failure */ }
+  }
+
+  logActivity({
+    agencyId: req.user.agency_id, userId: req.user.id,
+    action: "delete", module: "documents",
+    recordId: req.params.id,
+    description: `ডকুমেন্ট মুছে ফেলা: ${existing.label || existing.doc_type || req.params.id}`,
+    ip: req.ip,
+  }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
+
+  res.json({ success: true });
 }));
 
 // GET /api/documents/:id/fields — get document extracted fields for cross-validation
