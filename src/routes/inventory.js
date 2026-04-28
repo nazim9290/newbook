@@ -20,6 +20,8 @@ const supabase = require("../lib/db");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { checkPermission } = require("../middleware/checkPermission");
+const { logActivity } = require("../lib/activityLog");
+const cache = require("../lib/cache");
 const router = express.Router();
 router.use(auth);
 
@@ -79,6 +81,11 @@ router.post("/", checkPermission("inventory", "write"), asyncHandler(async (req,
     console.error("[Inventory POST]", error.message);
     return res.status(400).json({ error: "আইটেম যোগ করতে সমস্যা হয়েছে" });
   }
+
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "inventory",
+    recordId: data.id, description: `নতুন আইটেম: ${data.name || ""}${data.category ? ` (${data.category})` : ""}`, ip: req.ip }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
+
   res.status(201).json(data);
 }));
 
@@ -117,6 +124,11 @@ router.patch("/:id", checkPermission("inventory", "write"), asyncHandler(async (
     console.error("[Inventory PATCH]", error.message);
     return res.status(400).json({ error: "আপডেট করতে সমস্যা হয়েছে" });
   }
+
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "inventory",
+    recordId: req.params.id, description: `আইটেম আপডেট: ${data?.name || req.params.id}`, ip: req.ip }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
+
   res.json(data);
 }));
 
@@ -154,6 +166,11 @@ router.patch("/:id/condition", checkPermission("inventory", "write"), asyncHandl
     console.error("[Inventory Condition]", error.message);
     return res.status(400).json({ error: "অবস্থা আপডেট করতে সমস্যা হয়েছে" });
   }
+
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "inventory",
+    recordId: req.params.id, description: `আইটেম অবস্থা: ${data?.name || req.params.id} → ${condition}`, ip: req.ip }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
+
   res.json(data);
 }));
 
@@ -161,6 +178,10 @@ router.patch("/:id/condition", checkPermission("inventory", "write"), asyncHandl
 // DELETE /:id — item মুছে ফেলো (hard delete)
 // ═══════════════════════════════════════════════════════
 router.delete("/:id", checkPermission("inventory", "delete"), asyncHandler(async (req, res) => {
+  // Capture name first for the activity log
+  const { data: existing } = await supabase.from("inventory").select("name, category")
+    .eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
+
   const { error } = await supabase
     .from("inventory")
     .delete()
@@ -170,6 +191,11 @@ router.delete("/:id", checkPermission("inventory", "delete"), asyncHandler(async
     console.error("[Inventory DELETE]", error.message);
     return res.status(400).json({ error: "মুছতে সমস্যা হয়েছে" });
   }
+
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "delete", module: "inventory",
+    recordId: req.params.id, description: `আইটেম মুছে ফেলা: ${existing?.name || req.params.id}${existing?.category ? ` (${existing.category})` : ""}`, ip: req.ip }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
+
   res.json({ success: true });
 }));
 
