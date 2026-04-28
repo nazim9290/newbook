@@ -84,6 +84,54 @@ router.post("/salary", checkPermission("hr", "write"), asyncHandler(async (req, 
   res.status(201).json(data);
 }));
 
+// PATCH /api/hr/salary/:id — correct a salary record (amount/method/note typo)
+const SALARY_PATCH_COLS = ["amount", "month", "method", "note", "notes", "paid_date"];
+router.patch("/salary/:id", checkPermission("hr", "write"), asyncHandler(async (req, res) => {
+  // Optimistic Lock — concurrent edit protection
+  const { updated_at: clientUpdatedAt } = req.body;
+  if (clientUpdatedAt) {
+    const { data: current } = await supabase.from("salary_history").select("updated_at")
+      .eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
+    if (current && current.updated_at && new Date(current.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
+      return res.status(409).json({
+        error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — পেজ রিফ্রেশ করুন",
+        code: "CONFLICT",
+        server_updated_at: current.updated_at,
+      });
+    }
+  }
+  const updates = {};
+  for (const k of SALARY_PATCH_COLS) if (req.body[k] !== undefined) updates[k] = req.body[k];
+  if (updates.paid_date === "") updates.paid_date = null;
+  updates.updated_at = new Date().toISOString();
+
+  const { data, error } = await supabase.from("salary_history").update(updates)
+    .eq("id", req.params.id).eq("agency_id", req.user.agency_id).select("*, employees(name)").single();
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+  if (!data) return res.status(404).json({ error: "রেকর্ড পাওয়া যায়নি" });
+
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "hr",
+    recordId: req.params.id, description: `বেতন আপডেট: ৳${data.amount || 0} (${data.month || ""})`, ip: req.ip }).catch(() => {});
+
+  res.json(data);
+}));
+
+// DELETE /api/hr/salary/:id — remove an erroneous salary record
+router.delete("/salary/:id", checkPermission("hr", "delete"), asyncHandler(async (req, res) => {
+  const { data: existing } = await supabase.from("salary_history").select("amount, month, employees(name)")
+    .eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
+  if (!existing) return res.status(404).json({ error: "রেকর্ড পাওয়া যায়নি" });
+
+  const { error } = await supabase.from("salary_history").delete()
+    .eq("id", req.params.id).eq("agency_id", req.user.agency_id);
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "delete", module: "hr",
+    recordId: req.params.id, description: `বেতন মুছে ফেলা: ${existing.employees?.name || ""} — ৳${existing.amount || 0} (${existing.month || ""})`, ip: req.ip }).catch(() => {});
+
+  res.json({ success: true });
+}));
+
 // ══════════════════════════════════════
 // ছুটি (Leave) Management
 // ══════════════════════════════════════
