@@ -266,4 +266,7 @@ app.listen(PORT, async () => {
   console.log(`AgencyBook API running on http://localhost:${PORT}`);
   // HQ branch cache load — branch-based access control
   try { const { loadHqBranches } = require("./lib/branchFilter"); const supabase = require("./lib/db"); await loadHqBranches(supabase); } catch (e) { console.error("[HQ Cache]", e.message); }
+  // Billing cron — daily 06:00 Asia/Dhaka invoice generation + status transitions
+  // PG advisory lock দিয়ে cluster-safe; শুধু একজন worker actually run করবে
+  try { require("./lib/billingCron").startScheduler(); } catch (e) { console.error("[BillingCron Init]", e.message); }
 });

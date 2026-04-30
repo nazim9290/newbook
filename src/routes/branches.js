@@ -13,6 +13,7 @@ const supabase = require("../lib/db");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { checkPermission } = require("../middleware/checkPermission");
+const { enforceLimit } = require("../middleware/subscriptionGuard");
 const { logActivity } = require("../lib/activityLog");
 const cache = require("../lib/cache");
 const router = express.Router();
@@ -36,8 +37,8 @@ router.get("/:id", asyncHandler(async (req, res) => {
   res.json(data);
 }));
 
-// POST /api/branches — নতুন branch
-router.post("/", checkPermission("settings", "write"), asyncHandler(async (req, res) => {
+// POST /api/branches — নতুন branch (subscription tier max_branches enforce)
+router.post("/", checkPermission("settings", "write"), enforceLimit("branches"), asyncHandler(async (req, res) => {
   const { name, name_bn, city, address, address_bn, phone, email, manager, is_hq } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: "Branch নাম দিন" });
 

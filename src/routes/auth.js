@@ -112,7 +112,9 @@ router.post("/logout", (req, res) => {
 
 // POST /api/auth/register (admin only — create new staff account)
 // auth middleware দিয়ে agency_id নেওয়া হয়
-router.post("/register", auth, asyncHandler(async (req, res) => {
+// subscriptionGuard.enforceLimit('users') — tier max_users hit হলে block (legacy bypass)
+const { enforceLimit: _enforceUserLimit } = require("../middleware/subscriptionGuard");
+router.post("/register", auth, _enforceUserLimit("users"), asyncHandler(async (req, res) => {
   const { name, email, password, role, branch } = req.body;
 
   if (!name || !name.trim()) return res.status(400).json({ error: "নাম দিন" });

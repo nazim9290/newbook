@@ -48,10 +48,25 @@ router.get("/invoices/:id", asyncHandler(async (req, res) => {
   res.json({ invoice: inv, payments: payments || [] });
 }));
 
-// ── GET /invoices/:id/pdf — Phase 1 placeholder ──
+// ── GET /invoices/:id/pdf — generate PDF on-the-fly via pdf-lib ──
 router.get("/invoices/:id/pdf", asyncHandler(async (req, res) => {
-  // Phase 3-এ pdfkit/puppeteer দিয়ে generate হবে
-  res.status(501).json({ error: "PDF generation Phase 3-এ available হবে", code: "NOT_IMPLEMENTED" });
+  const { generateInvoicePdf } = require("../lib/invoicePdf");
+  const { data: inv } = await supabase.from("invoices")
+    .select("*").eq("agency_id", req.user.agency_id).eq("id", req.params.id).maybeSingle();
+  if (!inv) return res.status(404).json({ error: "Invoice পাওয়া যায়নি" });
+
+  const { data: agency } = await supabase.from("agencies")
+    .select("name, name_bn, email, phone, address").eq("id", req.user.agency_id).maybeSingle();
+
+  try {
+    const pdfBytes = await generateInvoicePdf({ invoice: inv, agency });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${inv.invoice_number}.pdf"`);
+    res.send(Buffer.from(pdfBytes));
+  } catch (e) {
+    console.error("[InvoicePDF]", e.message);
+    res.status(500).json({ error: "PDF তৈরি ব্যর্থ" });
+  }
 }));
 
 // ── GET /payments — payment history ──

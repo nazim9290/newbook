@@ -748,4 +748,265 @@ router.delete("/default-templates/:id", asyncHandler(async (req, res) => {
   res.json({ success: true });
 }));
 
+// ═══════════════════════════════════════════════════════════════════════
+// SUBSCRIPTION & BILLING — Super-admin overrides (Master Plan Section 7.2)
+// ═══════════════════════════════════════════════════════════════════════
+
+// GET /subscriptions — সব agency-র subscription overview
+router.get("/subscriptions", asyncHandler(async (req, res) => {
+  const { rows } = await supabase.pool.query(`
+    SELECT s.*, a.name AS agency_name, a.subdomain, a.email AS agency_email,
+           p.code AS plan_code_name, p.name_en AS plan_name, p.monthly_price, p.annual_price
+    FROM agency_subscriptions s
+    JOIN agencies a ON a.id = s.agency_id
+    LEFT JOIN subscription_plans p ON p.id = s.plan_id
+    ORDER BY a.name
+  `);
+  res.json(rows || []);
+}));
+
+// POST /subscriptions/:agencyId/change-plan — super-admin force plan change
+// body: { plan_code, billing_cycle? }
+router.post("/subscriptions/:agencyId/change-plan", asyncHandler(async (req, res) => {
+  const { plan_code, billing_cycle = "monthly" } = req.body || {};
+  if (!plan_code) return res.status(400).json({ error: "plan_code দিন" });
+
+  const { data: plan } = await supabase.from("subscription_plans").select("*").eq("code", plan_code).maybeSingle();
+  if (!plan) return res.status(404).json({ error: "Plan নেই" });
+
+  const now = new Date();
+  const periodEnd = new Date(now);
+  if (billing_cycle === "annual") periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+  else periodEnd.setMonth(periodEnd.getMonth() + 1);
+
+  const { data: cur } = await supabase.from("agency_subscriptions").select("plan_code, legacy_pricing").eq("agency_id", req.params.agencyId).maybeSingle();
+
+  await supabase.from("agency_subscriptions").update({
+    plan_id: plan.id, plan_code: plan.code, billing_cycle, status: "active",
+    current_period_start: now.toISOString(), current_period_end: periodEnd.toISOString(),
+    cancel_at_period_end: false, cancelled_at: null, cancellation_reason: null,
+    legacy_pricing: false, legacy_per_student_rate: null, legacy_migration_deadline: null,
+    updated_at: now.toISOString(),
+  }).eq("agency_id", req.params.agencyId);
+
+  await supabase.from("agencies").update({ plan: plan.code }).eq("id", req.params.agencyId);
+
+  await supabase.from("subscription_history").insert({
+    agency_id: req.params.agencyId, event_type: "upgraded",
+    from_plan_code: cur?.plan_code || (cur?.legacy_pricing ? "legacy" : null),
+    to_plan_code: plan.code, triggered_by: req.user.id,
+    notes: `Super-admin forced plan change to ${plan.code} (${billing_cycle})`,
+  });
+
+  const { invalidateCache } = require("../middleware/subscriptionGuard");
+  invalidateCache(req.params.agencyId);
+  res.json({ success: true, plan_code: plan.code, billing_cycle });
+}));
+
+// POST /subscriptions/:agencyId/extend-trial — extend trial by N days
+// body: { days }
+router.post("/subscriptions/:agencyId/extend-trial", asyncHandler(async (req, res) => {
+  const days = Number(req.body?.days || 0);
+  if (!days || days <= 0) return res.status(400).json({ error: "days > 0 দিন" });
+  const { data: cur } = await supabase.from("agency_subscriptions").select("trial_ends_at, status").eq("agency_id", req.params.agencyId).maybeSingle();
+  const base = cur?.trial_ends_at ? new Date(cur.trial_ends_at) : new Date();
+  base.setDate(base.getDate() + days);
+  await supabase.from("agency_subscriptions").update({
+    trial_ends_at: base.toISOString(), status: "trial",
+    updated_at: new Date().toISOString(),
+  }).eq("agency_id", req.params.agencyId);
+  await supabase.from("subscription_history").insert({
+    agency_id: req.params.agencyId, event_type: "reactivated", triggered_by: req.user.id,
+    notes: `Trial extended by ${days} days → ${base.toISOString().slice(0,10)}`,
+  });
+  const { invalidateCache } = require("../middleware/subscriptionGuard");
+  invalidateCache(req.params.agencyId);
+  res.json({ success: true, trial_ends_at: base.toISOString() });
+}));
+
+// POST /subscriptions/:agencyId/suspend — manual suspend
+router.post("/subscriptions/:agencyId/suspend", asyncHandler(async (req, res) => {
+  await supabase.from("agency_subscriptions").update({ status: "suspended", updated_at: new Date().toISOString() }).eq("agency_id", req.params.agencyId);
+  await supabase.from("subscription_history").insert({
+    agency_id: req.params.agencyId, event_type: "status_changed", triggered_by: req.user.id,
+    notes: "Manually suspended by super-admin",
+  });
+  const { invalidateCache } = require("../middleware/subscriptionGuard");
+  invalidateCache(req.params.agencyId);
+  res.json({ success: true });
+}));
+
+// POST /subscriptions/:agencyId/restore — manual restore from suspended/cancelled
+router.post("/subscriptions/:agencyId/restore", asyncHandler(async (req, res) => {
+  await supabase.from("agency_subscriptions").update({
+    status: "active", cancel_at_period_end: false, cancelled_at: null, cancellation_reason: null,
+    updated_at: new Date().toISOString(),
+  }).eq("agency_id", req.params.agencyId);
+  await supabase.from("subscription_history").insert({
+    agency_id: req.params.agencyId, event_type: "reactivated", triggered_by: req.user.id,
+    notes: "Manually restored to active by super-admin",
+  });
+  const { invalidateCache } = require("../middleware/subscriptionGuard");
+  invalidateCache(req.params.agencyId);
+  res.json({ success: true });
+}));
+
+// ── Invoices (super-admin scope) ──
+
+// GET /billing/invoices — all agencies-এর invoice list
+router.get("/billing/invoices", asyncHandler(async (req, res) => {
+  const { status, agency_id, limit = 100 } = req.query;
+  const { rows } = await supabase.pool.query(`
+    SELECT i.*, a.name AS agency_name, a.subdomain
+    FROM invoices i
+    JOIN agencies a ON a.id = i.agency_id
+    WHERE ($1::text IS NULL OR i.status = $1)
+      AND ($2::uuid IS NULL OR i.agency_id = $2)
+    ORDER BY i.issue_date DESC, i.created_at DESC
+    LIMIT $3
+  `, [status && status !== "All" ? status : null, agency_id || null, Math.min(Number(limit) || 100, 500)]);
+  res.json(rows || []);
+}));
+
+// POST /billing/invoices/generate — manual invoice generation for an agency-period
+// body: { agency_id, period_start, period_end, line_items: [{ description, qty, unit_price, total }], notes? }
+router.post("/billing/invoices/generate", asyncHandler(async (req, res) => {
+  const { agency_id, period_start, period_end, line_items = [], notes } = req.body || {};
+  if (!agency_id || !period_start || !period_end) return res.status(400).json({ error: "agency_id, period_start, period_end দিন" });
+  if (!Array.isArray(line_items) || line_items.length === 0) return res.status(400).json({ error: "line_items দিন" });
+
+  const subtotal = line_items.reduce((s, i) => s + Number(i.total || 0), 0);
+  const dueDate = new Date(period_end); dueDate.setDate(dueDate.getDate() + 7);
+
+  // Generate invoice number (same logic as cron)
+  const { rows: lastRows } = await supabase.pool.query(
+    `SELECT invoice_number FROM invoices WHERE invoice_number LIKE $1 ORDER BY invoice_number DESC LIMIT 1`,
+    [`INV-${new Date().toISOString().slice(0, 7).replace("-", "")}-%`]
+  );
+  let next = 1;
+  if (lastRows.length) { const n = parseInt(lastRows[0].invoice_number.split("-").pop(), 10); if (!Number.isNaN(n)) next = n + 1; }
+  const invoiceNumber = `INV-${new Date().toISOString().slice(0, 7).replace("-", "")}-${String(next).padStart(4, "0")}`;
+
+  const { data: sub } = await supabase.from("agency_subscriptions").select("id").eq("agency_id", agency_id).maybeSingle();
+
+  const { data, error } = await supabase.from("invoices").insert({
+    invoice_number: invoiceNumber, agency_id, subscription_id: sub?.id,
+    period_start, period_end, issue_date: new Date().toISOString().slice(0, 10),
+    due_date: dueDate.toISOString().slice(0, 10),
+    subtotal, total_amount: subtotal, currency: "BDT",
+    line_items, status: "sent", sent_at: new Date().toISOString(), notes,
+  }).select().single();
+  if (error) return res.status(500).json({ error: "Invoice তৈরি ব্যর্থ: " + error.message });
+  res.json(data);
+}));
+
+// POST /billing/payments/manual — record a manual payment
+// body: { agency_id, invoice_id?, amount, payment_method, transaction_id?, notes? }
+router.post("/billing/payments/manual", asyncHandler(async (req, res) => {
+  const { agency_id, invoice_id, amount, payment_method, transaction_id, notes } = req.body || {};
+  if (!agency_id || !amount || !payment_method) return res.status(400).json({ error: "agency_id, amount, payment_method দিন" });
+
+  const { data: payment, error } = await supabase.from("subscription_payments").insert({
+    agency_id, invoice_id: invoice_id || null,
+    amount: Number(amount), currency: "BDT",
+    payment_method, transaction_id, status: "completed",
+    paid_at: new Date().toISOString(),
+    recorded_by: req.user.id, notes,
+  }).select().single();
+  if (error) return res.status(500).json({ error: "Payment record ব্যর্থ" });
+
+  // If linked to invoice, update paid_amount / status
+  if (invoice_id) {
+    const { data: inv } = await supabase.from("invoices").select("total_amount, paid_amount").eq("id", invoice_id).maybeSingle();
+    if (inv) {
+      const newPaid = Number(inv.paid_amount || 0) + Number(amount);
+      const status = newPaid >= Number(inv.total_amount) ? "paid" : "sent";
+      const updates = { paid_amount: newPaid, status, updated_at: new Date().toISOString() };
+      if (status === "paid") updates.paid_at = new Date().toISOString();
+      await supabase.from("invoices").update(updates).eq("id", invoice_id);
+    }
+  }
+
+  res.json(payment);
+}));
+
+// GET /billing/payments — all payments
+router.get("/billing/payments", asyncHandler(async (req, res) => {
+  const { agency_id, limit = 100 } = req.query;
+  let q = supabase.from("subscription_payments")
+    .select("*, agencies(name, subdomain)")
+    .order("paid_at", { ascending: false })
+    .limit(Math.min(Number(limit) || 100, 500));
+  if (agency_id) q = q.eq("agency_id", agency_id);
+  const { data } = await q;
+  res.json(data || []);
+}));
+
+// POST /billing/cron/run — manually trigger the billing cron (testing aid)
+router.post("/billing/cron/run", asyncHandler(async (req, res) => {
+  const { runAllJobs } = require("../lib/billingCron");
+  try {
+    const result = await runAllJobs(true);
+    res.json({ success: true, result });
+  } catch (e) {
+    console.error("[CronManualTrigger]", e.message);
+    res.status(500).json({ error: "Cron run ব্যর্থ: " + e.message });
+  }
+}));
+
+// GET /billing/cron/status — last run info
+router.get("/billing/cron/status", asyncHandler(async (req, res) => {
+  const { data } = await supabase.from("platform_settings").select("value, updated_at").eq("key", "billing_cron_last_run").maybeSingle();
+  res.json(data || { value: null });
+}));
+
+// GET /metrics/revenue — basic MRR/revenue calc
+router.get("/metrics/revenue", asyncHandler(async (req, res) => {
+  // Active subs × monthly_price
+  const { rows: mrrRows } = await supabase.pool.query(`
+    SELECT
+      COUNT(*) FILTER (WHERE s.status IN ('active','trial')) AS active_count,
+      COALESCE(SUM(CASE WHEN s.billing_cycle = 'annual' THEN p.annual_price/12 ELSE p.monthly_price END) FILTER (WHERE s.status = 'active' AND s.legacy_pricing = false), 0) AS mrr,
+      COUNT(*) FILTER (WHERE s.legacy_pricing = true) AS legacy_count,
+      COUNT(*) FILTER (WHERE s.status = 'past_due') AS past_due_count,
+      COUNT(*) FILTER (WHERE s.status = 'suspended') AS suspended_count,
+      COUNT(*) FILTER (WHERE s.status = 'cancelled') AS cancelled_count
+    FROM agency_subscriptions s
+    LEFT JOIN subscription_plans p ON p.id = s.plan_id
+  `);
+
+  // Plan-wise distribution
+  const { rows: planDist } = await supabase.pool.query(`
+    SELECT COALESCE(p.code, 'legacy') AS plan_code, COUNT(*) AS count
+    FROM agency_subscriptions s
+    LEFT JOIN subscription_plans p ON p.id = s.plan_id
+    GROUP BY COALESCE(p.code, 'legacy')
+  `);
+
+  // Outstanding total
+  const { rows: outRows } = await supabase.pool.query(`
+    SELECT COALESCE(SUM(total_amount - paid_amount), 0) AS outstanding
+    FROM invoices WHERE status IN ('sent', 'overdue')
+  `);
+
+  // YTD revenue
+  const yearStart = `${new Date().getFullYear()}-01-01`;
+  const { rows: ytdRows } = await supabase.pool.query(`
+    SELECT COALESCE(SUM(amount), 0) AS ytd FROM subscription_payments WHERE status = 'completed' AND paid_at >= $1
+  `, [yearStart]);
+
+  res.json({
+    mrr: Number(mrrRows[0]?.mrr || 0),
+    arr: Number(mrrRows[0]?.mrr || 0) * 12,
+    active_count: Number(mrrRows[0]?.active_count || 0),
+    legacy_count: Number(mrrRows[0]?.legacy_count || 0),
+    past_due_count: Number(mrrRows[0]?.past_due_count || 0),
+    suspended_count: Number(mrrRows[0]?.suspended_count || 0),
+    cancelled_count: Number(mrrRows[0]?.cancelled_count || 0),
+    outstanding: Number(outRows[0]?.outstanding || 0),
+    ytd_revenue: Number(ytdRows[0]?.ytd || 0),
+    plan_distribution: planDist || [],
+  });
+}));
+
 module.exports = router;
