@@ -771,7 +771,7 @@ router.post("/subscriptions/:agencyId/change-plan", asyncHandler(async (req, res
   const { plan_code, billing_cycle = "monthly" } = req.body || {};
   if (!plan_code) return res.status(400).json({ error: "plan_code দিন" });
 
-  const { data: plan } = await supabase.from("subscription_plans").select("*").eq("code", plan_code).maybeSingle();
+  const { data: plan } = await supabase.from("subscription_plans").select("*").eq("code", plan_code).single();
   if (!plan) return res.status(404).json({ error: "Plan নেই" });
 
   const now = new Date();
@@ -779,7 +779,7 @@ router.post("/subscriptions/:agencyId/change-plan", asyncHandler(async (req, res
   if (billing_cycle === "annual") periodEnd.setFullYear(periodEnd.getFullYear() + 1);
   else periodEnd.setMonth(periodEnd.getMonth() + 1);
 
-  const { data: cur } = await supabase.from("agency_subscriptions").select("plan_code, legacy_pricing").eq("agency_id", req.params.agencyId).maybeSingle();
+  const { data: cur } = await supabase.from("agency_subscriptions").select("plan_code, legacy_pricing").eq("agency_id", req.params.agencyId).single();
 
   await supabase.from("agency_subscriptions").update({
     plan_id: plan.id, plan_code: plan.code, billing_cycle, status: "active",
@@ -808,7 +808,7 @@ router.post("/subscriptions/:agencyId/change-plan", asyncHandler(async (req, res
 router.post("/subscriptions/:agencyId/extend-trial", asyncHandler(async (req, res) => {
   const days = Number(req.body?.days || 0);
   if (!days || days <= 0) return res.status(400).json({ error: "days > 0 দিন" });
-  const { data: cur } = await supabase.from("agency_subscriptions").select("trial_ends_at, status").eq("agency_id", req.params.agencyId).maybeSingle();
+  const { data: cur } = await supabase.from("agency_subscriptions").select("trial_ends_at, status").eq("agency_id", req.params.agencyId).single();
   const base = cur?.trial_ends_at ? new Date(cur.trial_ends_at) : new Date();
   base.setDate(base.getDate() + days);
   await supabase.from("agency_subscriptions").update({
@@ -887,7 +887,7 @@ router.post("/billing/invoices/generate", asyncHandler(async (req, res) => {
   if (lastRows.length) { const n = parseInt(lastRows[0].invoice_number.split("-").pop(), 10); if (!Number.isNaN(n)) next = n + 1; }
   const invoiceNumber = `INV-${new Date().toISOString().slice(0, 7).replace("-", "")}-${String(next).padStart(4, "0")}`;
 
-  const { data: sub } = await supabase.from("agency_subscriptions").select("id").eq("agency_id", agency_id).maybeSingle();
+  const { data: sub } = await supabase.from("agency_subscriptions").select("id").eq("agency_id", agency_id).single();
 
   const { data, error } = await supabase.from("invoices").insert({
     invoice_number: invoiceNumber, agency_id, subscription_id: sub?.id,
@@ -917,7 +917,7 @@ router.post("/billing/payments/manual", asyncHandler(async (req, res) => {
 
   // If linked to invoice, update paid_amount / status
   if (invoice_id) {
-    const { data: inv } = await supabase.from("invoices").select("total_amount, paid_amount").eq("id", invoice_id).maybeSingle();
+    const { data: inv } = await supabase.from("invoices").select("total_amount, paid_amount").eq("id", invoice_id).single();
     if (inv) {
       const newPaid = Number(inv.paid_amount || 0) + Number(amount);
       const status = newPaid >= Number(inv.total_amount) ? "paid" : "sent";
@@ -956,7 +956,7 @@ router.post("/billing/cron/run", asyncHandler(async (req, res) => {
 
 // GET /billing/cron/status — last run info
 router.get("/billing/cron/status", asyncHandler(async (req, res) => {
-  const { data } = await supabase.from("platform_settings").select("value, updated_at").eq("key", "billing_cron_last_run").maybeSingle();
+  const { data } = await supabase.from("platform_settings").select("value, updated_at").eq("key", "billing_cron_last_run").single();
   res.json(data || { value: null });
 }));
 

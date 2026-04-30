@@ -51,6 +51,32 @@ router.post("/login", loginLimiter, asyncHandler(async (req, res) => {
   const valid = await bcrypt.compare(password, user.password_hash);
   if (!valid) return res.status(401).json({ error: "Email বা password ভুল" });
 
+  // ── 2FA check ──
+  // super_admin role-এ 2FA বাধ্যতামূলক (recommended hardcoded — brief §9)
+  const role = String(user.role || "").toLowerCase();
+  const need2FA = !!user.totp_enabled || !!user.totp_required || role === "super_admin";
+
+  if (need2FA && !user.totp_enabled) {
+    // Admin enabled (or super_admin policy) but user hasn't enrolled yet — issue 10-min enroll token
+    const enrollToken = jwt.sign(
+      { userId: user.id, mode: "enroll" },
+      process.env.JWT_SECRET + "_MFA",
+      { expiresIn: "10m" }
+    );
+    return res.json({ mfaRequired: true, mustEnroll: true, enrollToken });
+  }
+
+  if (need2FA && user.totp_enabled) {
+    // Issue 5-min MFA session — frontend will POST /api/auth/2fa/verify
+    const mfaSession = jwt.sign(
+      { userId: user.id },
+      process.env.JWT_SECRET + "_MFA",
+      { expiresIn: "5m" }
+    );
+    return res.json({ mfaRequired: true, mfaSession });
+  }
+
+  // ── No 2FA — existing flow ──
   const token = jwt.sign(
     { id: user.id, email: user.email, role: user.role, branch: user.branch, agency_id: user.agency_id },
     process.env.JWT_SECRET,

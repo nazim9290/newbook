@@ -37,7 +37,7 @@ router.get("/invoices", asyncHandler(async (req, res) => {
 // ── GET /invoices/:id — detail + payments ──
 router.get("/invoices/:id", asyncHandler(async (req, res) => {
   const { data: inv, error } = await supabase.from("invoices")
-    .select("*").eq("agency_id", req.user.agency_id).eq("id", req.params.id).maybeSingle();
+    .select("*").eq("agency_id", req.user.agency_id).eq("id", req.params.id).single();
   if (error) return res.status(500).json({ error: "Invoice লোড ব্যর্থ" });
   if (!inv) return res.status(404).json({ error: "Invoice পাওয়া যায়নি" });
 
@@ -52,11 +52,11 @@ router.get("/invoices/:id", asyncHandler(async (req, res) => {
 router.get("/invoices/:id/pdf", asyncHandler(async (req, res) => {
   const { generateInvoicePdf } = require("../lib/invoicePdf");
   const { data: inv } = await supabase.from("invoices")
-    .select("*").eq("agency_id", req.user.agency_id).eq("id", req.params.id).maybeSingle();
+    .select("*").eq("agency_id", req.user.agency_id).eq("id", req.params.id).single();
   if (!inv) return res.status(404).json({ error: "Invoice পাওয়া যায়নি" });
 
   const { data: agency } = await supabase.from("agencies")
-    .select("name, name_bn, email, phone, address").eq("id", req.user.agency_id).maybeSingle();
+    .select("name, name_bn, email, phone, address").eq("id", req.user.agency_id).single();
 
   try {
     const pdfBytes = await generateInvoicePdf({ invoice: inv, agency });
@@ -101,7 +101,7 @@ router.get("/summary", asyncHandler(async (req, res) => {
 
   // Last & next bill (from subscription)
   const { data: sub } = await supabase.from("agency_subscriptions")
-    .select("current_period_end, billing_cycle, status").eq("agency_id", agencyId).maybeSingle();
+    .select("current_period_end, billing_cycle, status").eq("agency_id", agencyId).single();
 
   res.json({
     outstanding_amount: outstanding,

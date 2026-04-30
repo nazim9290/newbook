@@ -41,7 +41,7 @@ router.get("/current", asyncHandler(async (req, res) => {
 
   // Subscription record (one per agency — UNIQUE constraint)
   const { data: sub, error: subErr } = await supabase.from("agency_subscriptions")
-    .select("*").eq("agency_id", agencyId).maybeSingle();
+    .select("*").eq("agency_id", agencyId).single();
   if (subErr) return res.status(500).json({ error: "Subscription লোড ব্যর্থ" });
   if (!sub) return res.status(404).json({ error: "এই agency-র জন্য subscription record নেই", code: "NO_SUBSCRIPTION" });
 
@@ -49,7 +49,7 @@ router.get("/current", asyncHandler(async (req, res) => {
   let plan = null;
   if (sub.plan_id) {
     const { data: planRow } = await supabase.from("subscription_plans")
-      .select("*").eq("id", sub.plan_id).maybeSingle();
+      .select("*").eq("id", sub.plan_id).single();
     plan = planRow || null;
   }
 
@@ -87,11 +87,11 @@ router.get("/usage", asyncHandler(async (req, res) => {
   const agencyId = req.user.agency_id;
 
   const { data: sub } = await supabase.from("agency_subscriptions")
-    .select("plan_id, legacy_pricing").eq("agency_id", agencyId).maybeSingle();
+    .select("plan_id, legacy_pricing").eq("agency_id", agencyId).single();
 
   let plan = null;
   if (sub?.plan_id) {
-    const { data } = await supabase.from("subscription_plans").select("*").eq("id", sub.plan_id).maybeSingle();
+    const { data } = await supabase.from("subscription_plans").select("*").eq("id", sub.plan_id).single();
     plan = data;
   }
 
@@ -137,7 +137,7 @@ router.get("/usage", asyncHandler(async (req, res) => {
 router.get("/check-limits", asyncHandler(async (req, res) => {
   const agencyId = req.user.agency_id;
   const { data: sub } = await supabase.from("agency_subscriptions")
-    .select("plan_id, legacy_pricing, status").eq("agency_id", agencyId).maybeSingle();
+    .select("plan_id, legacy_pricing, status").eq("agency_id", agencyId).single();
 
   // Legacy clients: কোনো limit enforce না
   if (sub?.legacy_pricing) return res.json({ ok: true, legacy: true, blocking: [] });
@@ -149,7 +149,7 @@ router.get("/check-limits", asyncHandler(async (req, res) => {
 
   if (!sub?.plan_id) return res.json({ ok: true, legacy: false, blocking: [] });
 
-  const { data: plan } = await supabase.from("subscription_plans").select("*").eq("id", sub.plan_id).maybeSingle();
+  const { data: plan } = await supabase.from("subscription_plans").select("*").eq("id", sub.plan_id).single();
   if (!plan) return res.json({ ok: true, blocking: [] });
 
   const [usersUsed, branchesUsed] = await Promise.all([
@@ -205,19 +205,19 @@ router.post("/upgrade", asyncHandler(async (req, res) => {
 
   // Target plan
   const { data: targetPlan } = await supabase.from("subscription_plans")
-    .select("*").eq("code", plan_code).eq("is_active", true).maybeSingle();
+    .select("*").eq("code", plan_code).eq("is_active", true).single();
   if (!targetPlan) return res.status(404).json({ error: "এই plan available নেই" });
 
   // Current sub
   const { data: cur } = await supabase.from("agency_subscriptions")
-    .select("*").eq("agency_id", agencyId).maybeSingle();
+    .select("*").eq("agency_id", agencyId).single();
   if (!cur) return res.status(404).json({ error: "Subscription record নেই" });
 
   // Determine event type — upgrade vs downgrade vs migration
   const fromOrder = cur.plan_id ? null : 0;     // legacy = 0
   let eventType = "upgraded";
   if (!cur.legacy_pricing && cur.plan_id) {
-    const { data: oldPlan } = await supabase.from("subscription_plans").select("sort_order").eq("id", cur.plan_id).maybeSingle();
+    const { data: oldPlan } = await supabase.from("subscription_plans").select("sort_order").eq("id", cur.plan_id).single();
     if (oldPlan && oldPlan.sort_order > targetPlan.sort_order) eventType = "downgraded";
   } else if (cur.legacy_pricing) {
     eventType = "upgraded";   // legacy → tier = treated as upgrade (legacy migration to new system)
@@ -280,7 +280,7 @@ router.post("/cancel", asyncHandler(async (req, res) => {
   const agencyId = req.user.agency_id;
   const { reason } = req.body || {};
 
-  const { data: cur } = await supabase.from("agency_subscriptions").select("*").eq("agency_id", agencyId).maybeSingle();
+  const { data: cur } = await supabase.from("agency_subscriptions").select("*").eq("agency_id", agencyId).single();
   if (!cur) return res.status(404).json({ error: "Subscription নেই" });
   if (cur.status === "cancelled") return res.status(400).json({ error: "ইতিমধ্যে cancel" });
 
@@ -304,7 +304,7 @@ router.post("/reactivate", asyncHandler(async (req, res) => {
   if (!isOwnerOrSuperAdmin(req.user)) return res.status(403).json({ error: "শুধুমাত্র owner/admin" });
   const agencyId = req.user.agency_id;
 
-  const { data: cur } = await supabase.from("agency_subscriptions").select("*").eq("agency_id", agencyId).maybeSingle();
+  const { data: cur } = await supabase.from("agency_subscriptions").select("*").eq("agency_id", agencyId).single();
   if (!cur) return res.status(404).json({ error: "Subscription নেই" });
   if (!cur.cancel_at_period_end) return res.status(400).json({ error: "Cancel scheduled নেই" });
 
@@ -357,12 +357,12 @@ router.delete("/addons/:id", asyncHandler(async (req, res) => {
   if (!isOwnerOrSuperAdmin(req.user)) return res.status(403).json({ error: "শুধুমাত্র owner/admin" });
 
   // Get current period end for this agency to set ends_at
-  const { data: sub } = await supabase.from("agency_subscriptions").select("current_period_end").eq("agency_id", req.user.agency_id).maybeSingle();
+  const { data: sub } = await supabase.from("agency_subscriptions").select("current_period_end").eq("agency_id", req.user.agency_id).single();
   const endsAt = sub?.current_period_end || new Date().toISOString();
 
   const { data, error } = await supabase.from("subscription_addons")
     .update({ status: "cancelled", cancelled_at: new Date().toISOString(), ends_at: endsAt, updated_at: new Date().toISOString() })
-    .eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().maybeSingle();
+    .eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error || !data) return res.status(404).json({ error: "Add-on পাওয়া যায়নি" });
 
   await recordHistory(req.user.agency_id, "addon_removed", null, null, req.user.id, `Add-on cancelled: ${data.addon_code}`, { addon_code: data.addon_code });

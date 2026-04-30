@@ -212,6 +212,8 @@ app.use("/api/public", require("./routes/public"));              // Unauthentica
 app.use("/api/dashboard", require("./routes/dashboard"));       // Dashboard stats
 app.use("/api/super-admin", require("./routes/super-admin"));   // Super Admin — agency management
 app.use("/api/auth", require("./routes/auth"));                 // লগইন ও রেজিস্ট্রেশন
+app.use("/api/auth/2fa/admin", require("./routes/auth-2fa-admin")); // ২FA admin management (mount BEFORE /2fa)
+app.use("/api/auth/2fa", require("./routes/auth-2fa"));         // ২FA self-service (TOTP)
 app.use("/api/students", require("./routes/students"));         // স্টুডেন্ট CRUD
 app.use("/api/alumni", require("./routes/alumni"));              // Alumni network — post-arrival tracking
 app.use("/api/visitors", require("./routes/visitors"));         // ভিজিটর/লিড CRUD

@@ -29,7 +29,7 @@ async function loadSubscription(agencyId) {
 
   const { data: sub } = await supabase.from("agency_subscriptions")
     .select("status, plan_id, legacy_pricing, trial_ends_at, current_period_end")
-    .eq("agency_id", agencyId).maybeSingle();
+    .eq("agency_id", agencyId).single();
   if (!sub) {
     const empty = { sub: null, plan: null };
     cache.set(agencyId, { t: Date.now(), data: empty });
@@ -39,7 +39,7 @@ async function loadSubscription(agencyId) {
   if (sub.plan_id) {
     const { data: p } = await supabase.from("subscription_plans")
       .select("max_users, max_branches, max_storage_gb, soft_max_students, code")
-      .eq("id", sub.plan_id).maybeSingle();
+      .eq("id", sub.plan_id).single();
     plan = p;
   }
   const data = { sub, plan };
