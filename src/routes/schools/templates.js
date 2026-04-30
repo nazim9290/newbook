@@ -2,15 +2,19 @@
  * schools/templates.js — list templates linked to a school.
  *
  * GET /api/schools/:id/templates
- *   → all default_templates linked to this school via default_template_schools,
- *     PLUS global templates (no school link). Useful for SchoolDetailView's Documents tab.
+ *   Returns BOTH:
+ *     - default_templates linked via default_template_schools (super-admin catalog)
+ *       + global default_templates (no school link)
+ *     - agency's own excel_templates linked via excel_template_schools (or legacy school_id)
  *
  * Query params:
  *   tag=resume                   filter by tag (single)
- *   include_global=0|1           include global (no school link) templates (default 1)
+ *   include_global=0|1           include global (no school link) default templates (default 1)
  *
- * Response shape (per row): { id, name, name_bn, category, sub_category, country, tags,
- *                             file_name, file_url, scope: "school" | "global", template_data }
+ * Response shape (per row):
+ *   default_templates row → { ..., source: "default", scope: "school"|"global" }
+ *   excel_templates row    → { id, name (=school_name + file), category: "excel",
+ *                               tags, file_name, file_url, source: "agency", scope: "school" }
  */
 
 const express = require("express");
@@ -46,22 +50,63 @@ router.get("/:id/templates", asyncHandler(async (req, res) => {
   }
 
   const allIds = [...new Set([...linkedIds, ...globalIds])];
-  if (allIds.length === 0) return res.json([]);
 
-  // 3. Fetch template rows + filter by tag if provided
-  let q = supabase.from("default_templates")
-    .select("id, name, name_bn, description, category, sub_category, country, tags, file_url, file_name, template_data, sort_order")
-    .in("id", allIds)
-    .eq("is_active", true)
-    .order("sort_order");
-  const { data, error } = await q;
-  if (error) return res.status(500).json({ error: "Template লোড ব্যর্থ" });
+  // 3. Fetch default-template rows
+  let list = [];
+  if (allIds.length > 0) {
+    const { data, error } = await supabase.from("default_templates")
+      .select("id, name, name_bn, description, category, sub_category, country, tags, file_url, file_name, template_data, sort_order")
+      .in("id", allIds)
+      .eq("is_active", true)
+      .order("sort_order");
+    if (error) return res.status(500).json({ error: "Template লোড ব্যর্থ" });
+    list = (data || []).map(t => ({
+      ...t,
+      tags: t.tags || [],
+      source: "default",
+      scope: linkedIds.has(t.id) ? "school" : "global",
+    }));
+  }
 
-  let list = (data || []).map(t => ({
-    ...t,
-    tags: t.tags || [],
-    scope: linkedIds.has(t.id) ? "school" : "global",
-  }));
+  // 4. Agency's own excel_templates linked to this school (via junction OR legacy school_id)
+  try {
+    const { rows: agencyRows } = await pool.query(`
+      SELECT et.id, et.school_name, et.file_name, et.template_url, et.tags,
+             et.total_fields, et.mapped_fields, et.created_at
+        FROM excel_templates et
+       WHERE et.agency_id = $1
+         AND (
+           et.school_id = $2
+           OR EXISTS (
+             SELECT 1 FROM excel_template_schools ets
+              WHERE ets.template_id = et.id AND ets.school_id = $2
+           )
+         )
+    `, [req.user.agency_id, schoolId]);
+
+    for (const e of agencyRows) {
+      const fileBaseUrl = (e.template_url || "").startsWith("/")
+        ? e.template_url
+        : `/uploads/excel-templates/${(e.template_url || "").split(/[\\\\/]/).pop()}`;
+      list.push({
+        id: e.id,
+        name: `${e.school_name || ""} — ${e.file_name || ""}`.trim().replace(/^—\s*/, ""),
+        name_bn: null,
+        category: "excel",
+        sub_category: "resume",
+        country: null,
+        tags: e.tags || [],
+        file_name: e.file_name,
+        file_url: fileBaseUrl,
+        source: "agency",
+        scope: "school",
+        total_fields: e.total_fields,
+        mapped_fields: e.mapped_fields,
+      });
+    }
+  } catch (err) {
+    console.error("[schools/templates] agency excel fetch:", err.message);
+  }
 
   if (tagFilter) {
     list = list.filter(t => Array.isArray(t.tags) && t.tags.includes(tagFilter));

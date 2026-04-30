@@ -23,6 +23,37 @@ const { SYSTEM_FIELDS } = require("../../lib/excel/systemContext");
 const router = express.Router();
 router.use(auth);
 
+// ── Helpers (tags + M:N school link) ─────────────────────────
+function parseArrayField(val) {
+  if (val == null || val === "") return null;
+  if (Array.isArray(val)) return val;
+  try { const p = JSON.parse(val); return Array.isArray(p) ? p : null; } catch { return null; }
+}
+
+async function replaceTemplateSchoolLinks(templateId, schoolIds) {
+  const pool = supabase.pool;
+  await pool.query(`DELETE FROM excel_template_schools WHERE template_id = $1`, [templateId]);
+  if (Array.isArray(schoolIds) && schoolIds.length > 0) {
+    const valuesSql = schoolIds.map((_, i) => `($1, $${i + 2})`).join(", ");
+    await pool.query(
+      `INSERT INTO excel_template_schools (template_id, school_id) VALUES ${valuesSql} ON CONFLICT DO NOTHING`,
+      [templateId, ...schoolIds]
+    );
+  }
+}
+
+async function loadTemplateSchoolMap(templateIds) {
+  if (!templateIds || templateIds.length === 0) return {};
+  const pool = supabase.pool;
+  const { rows } = await pool.query(
+    `SELECT template_id, school_id FROM excel_template_schools WHERE template_id = ANY($1)`,
+    [templateIds]
+  );
+  const map = {};
+  for (const r of rows) { (map[r.template_id] ||= []).push(r.school_id); }
+  return map;
+}
+
 // ================================================================
 // POST /api/excel/upload-template
 // Upload .xlsx → parse ALL cells → return for mapping
@@ -33,6 +64,8 @@ router.post("/upload-template", upload.single("file"), asyncHandler(async (req, 
 
     const { school_name } = req.body;
     if (!school_name) return res.status(400).json({ error: "স্কুলের নাম দিন" });
+    const tags = parseArrayField(req.body.tags) || [];
+    const schoolIds = parseArrayField(req.body.school_ids) || [];
 
     const agencyId = req.user.agency_id || "a0000000-0000-0000-0000-000000000001";
 
@@ -96,21 +129,32 @@ router.post("/upload-template", upload.single("file"), asyncHandler(async (req, 
     });
 
     // 3. Save template record to DB
+    // school_id legacy column: keep first selected school as the "primary" for read paths
+    // that haven't been migrated yet (generate.js etc.). Junction is the source of truth.
     const { data: tmpl, error } = await supabase
       .from("excel_templates")
       .insert({
         agency_id: agencyId,
         school_name,
+        school_id: schoolIds[0] || null,
         file_name: req.file.originalname,
         template_url: permanentPath, // VPS local path — getTemplateBuffer এখান থেকে পড়বে
         mappings: JSON.stringify(placeholders), // {{}} mappings — JSONB column-এ string হিসেবে পাঠাই
         total_fields: placeholders.length,
         mapped_fields: placeholders.filter(p => p.field).length,
+        tags,
       })
       .select()
       .single();
 
     if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+
+    if (tmpl && schoolIds.length > 0) {
+      await replaceTemplateSchoolLinks(tmpl.id, schoolIds);
+      tmpl.school_ids = schoolIds;
+    } else if (tmpl) {
+      tmpl.school_ids = [];
+    }
 
     res.json({
       template: tmpl,
@@ -126,7 +170,7 @@ router.post("/upload-template", upload.single("file"), asyncHandler(async (req, 
 }));
 
 // ================================================================
-// GET /api/excel/templates
+// GET /api/excel/templates  — tags + school_ids[] সহ
 // ================================================================
 router.get("/templates", asyncHandler(async (req, res) => {
   const { data, error } = await supabase
@@ -135,6 +179,44 @@ router.get("/templates", asyncHandler(async (req, res) => {
     .eq("agency_id", req.user.agency_id)
     .order("created_at", { ascending: false });
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  const list = data || [];
+  const map = await loadTemplateSchoolMap(list.map(t => t.id));
+  for (const t of list) {
+    t.tags = t.tags || [];
+    t.school_ids = map[t.id] || (t.school_id ? [t.school_id] : []);
+  }
+  res.json(list);
+}));
+
+// ================================================================
+// PATCH /api/excel/templates/:id  — tags / school_ids / school_name update
+// ================================================================
+router.patch("/templates/:id", asyncHandler(async (req, res) => {
+  const updates = { updated_at: new Date().toISOString() };
+  if (req.body.school_name !== undefined) updates.school_name = req.body.school_name;
+  const tags = parseArrayField(req.body.tags);
+  if (tags !== null) updates.tags = tags;
+  const schoolIds = parseArrayField(req.body.school_ids);
+  if (schoolIds !== null) {
+    updates.school_id = schoolIds[0] || null; // keep legacy column in sync
+  }
+
+  const { data, error } = await supabase
+    .from("excel_templates")
+    .update(updates)
+    .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id)
+    .select()
+    .single();
+  if (error) return res.status(400).json({ error: "Update ব্যর্থ" });
+
+  if (data && schoolIds !== null) {
+    await replaceTemplateSchoolLinks(data.id, schoolIds);
+    data.school_ids = schoolIds;
+  } else if (data) {
+    const map = await loadTemplateSchoolMap([data.id]);
+    data.school_ids = map[data.id] || (data.school_id ? [data.school_id] : []);
+  }
   res.json(data);
 }));
 
