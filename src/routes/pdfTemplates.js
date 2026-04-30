@@ -151,13 +151,35 @@ router.get("/:id/generate", asyncHandler(async (req, res) => {
   };
 
   // ── (A) Fill AcroForm fields ─────────────────────────────────
+  // For each field we resolve in this priority:
+  //   1. Field's CURRENT VALUE = "{{key}}" → admin typed an inline placeholder; resolve `key`
+  //   2. Explicit mapping by field name → resolve mapping
+  //   3. Field name itself matches a system field (rare for cryptic XFA names)
   const form = pdfDoc.getForm();
   const acroFields = form.getFields();
   for (const field of acroFields) {
     const fieldName = field.getName();
-    const value = resolveByName(fieldName);
-    if (value === null) continue;
     const typ = field.constructor.name;
+
+    // Read current value to detect inline {{...}} placeholder
+    let currentValue = "";
+    try {
+      if (typ === "PDFTextField")        currentValue = field.getText() || "";
+      else if (typ === "PDFDropdown")    currentValue = (field.getSelected() || [])[0] || "";
+    } catch {}
+    const inlineMatch = /^\s*\{\{\s*([^{}]+?)\s*\}\}\s*$/.exec(currentValue);
+    let value;
+    if (inlineMatch) {
+      const key = inlineMatch[1].trim();
+      // Mapping under the placeholder key takes priority over direct lookup
+      const mappedKey = mappings[key] || mappings[fieldName];
+      const lookup = mappedKey || key;
+      const v = resolveValue(flat, lookup);
+      value = (v === undefined || v === null || v === "") ? null : String(v);
+    } else {
+      value = resolveByName(fieldName);
+    }
+    if (value === null) continue;
     try {
       if (typ === "PDFTextField") {
         field.setText(value || "");

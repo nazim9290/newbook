@@ -552,15 +552,28 @@ router.post("/default-templates/pdf", upload.single("file"), asyncHandler(async 
 
   const pdfBytes = fs.readFileSync(pdfDest);
 
-  // (A) Parse AcroForm fields with pdf-lib
+  // (A) Parse AcroForm fields with pdf-lib — also read each field's CURRENT VALUE.
+  //     If the value contains {{key}}, treat it as an inline placeholder — admin typed
+  //     the placeholder text directly into the field via PDFescape/Acrobat default-value.
   const fields = [];
   try {
     const pdfDoc = await _PDFDocPDFTpl.load(pdfBytes, { ignoreEncryption: true });
     const form = pdfDoc.getForm();
     for (const f of form.getFields()) {
+      const typ = f.constructor.name;
+      let value = "";
+      try {
+        if (typ === "PDFTextField")        value = f.getText() || "";
+        else if (typ === "PDFCheckBox")    value = f.isChecked() ? "true" : "";
+        else if (typ === "PDFDropdown")    value = (f.getSelected() || [])[0] || "";
+        else if (typ === "PDFRadioGroup")  value = f.getSelected() || "";
+      } catch {}
+      const phMatch = value && /^\s*\{\{\s*([^{}]+?)\s*\}\}\s*$/.exec(value);
+      const placeholderKey = phMatch ? phMatch[1].trim() : null;
       fields.push({
         name: f.getName(),
-        type: f.constructor.name.replace(/^PDF/, ""),  // "TextField" / "CheckBox" / "Dropdown" / etc.
+        type: typ.replace(/^PDF/, ""),     // "TextField" / "CheckBox" / "Dropdown" / etc.
+        placeholderKey,                     // null OR "Given Name" if user typed {{Given Name}} as default value
       });
     }
   } catch (err) {
@@ -583,10 +596,13 @@ router.post("/default-templates/pdf", upload.single("file"), asyncHandler(async 
     });
   }
 
-  // For consistent UI, expose placeholders as fields too (type: "Placeholder")
+  // For consistent UI, expose text-overlay placeholders as fields too (type: "Placeholder").
+  // AcroForm fields whose default value already contains {{key}} get a placeholderKey on the field row.
   const allFields = [
     ...fields,
-    ...placeholders.filter(k => !fields.some(f => f.name === k)).map(k => ({ name: k, type: "Placeholder" })),
+    ...placeholders
+      .filter(k => !fields.some(f => f.name === k || f.placeholderKey === k))
+      .map(k => ({ name: k, type: "Placeholder", placeholderKey: k })),
   ];
 
   const stages = (() => {
