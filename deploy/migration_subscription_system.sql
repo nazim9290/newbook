@@ -184,18 +184,21 @@ INSERT INTO subscription_plans (code, name_en, name_bn, monthly_price, annual_pr
   max_users, max_branches, max_storage_gb, max_api_calls_per_day, soft_max_students,
   features, support_first_response_hours, support_resolution_business_days, sort_order)
 VALUES
+  -- NOTE: Limits halved 2026-04-30 vs Master Plan v1.0 — infra cost optimization (esp. storage).
+  -- Pricing unchanged. To revert, double max_users / max_branches / max_storage_gb /
+  -- max_api_calls_per_day / soft_max_students for the three paid tiers (Section 2.3).
   ('starter',      'Starter',      'শুরু',          5000,  60000,  false,
-    5,    1,   5,   5000,    200,
+    3,    1,   2.5, 2500,    100,
     '{"student_crm":true,"visitor_pipeline":true,"school_mgmt":true,"course_batch":true,"doc_management":true,"doc_generation":true,"ocr_tesseract":true,"ocr_claude_vision":false,"excel_autofill":false,"smart_match":false,"ai_translation":false,"multi_branch":false,"analytics":"basic","reports_export":"basic","api_access":false,"custom_domain":false,"white_label":false,"self_hosted":false,"priority_support":false,"dedicated_manager":false,"sla_uptime":false}'::jsonb,
     24, 3, 10),
 
   ('professional', 'Professional', 'পেশাদার',       12000, 144000, false,
-    15,   3,   20,  25000,   800,
+    8,    2,   10,  12500,   400,
     '{"student_crm":true,"visitor_pipeline":true,"school_mgmt":true,"course_batch":true,"doc_management":true,"doc_generation":true,"ocr_tesseract":true,"ocr_claude_vision":true,"excel_autofill":true,"smart_match":true,"ai_translation":true,"multi_branch":true,"analytics":"advanced","reports_export":"advanced","api_access":false,"custom_domain":false,"white_label":false,"self_hosted":false,"priority_support":true,"dedicated_manager":false,"sla_uptime":false}'::jsonb,
     12, 2, 20),
 
   ('business',     'Business',     'ব্যবসা',          25000, 300000, false,
-    50,   10,  50,  100000,  2500,
+    25,   5,   25,  50000,   1250,
     '{"student_crm":true,"visitor_pipeline":true,"school_mgmt":true,"course_batch":true,"doc_management":true,"doc_generation":true,"ocr_tesseract":true,"ocr_claude_vision":true,"excel_autofill":true,"smart_match":true,"ai_translation":true,"multi_branch":true,"analytics":"advanced","reports_export":"advanced","api_access":true,"custom_domain":true,"white_label":false,"self_hosted":false,"priority_support":true,"dedicated_manager":false,"sla_uptime":true}'::jsonb,
     2, 1, 30),
 
