@@ -21,6 +21,37 @@ const { flattenForDoc, mergeDocData } = require("../../lib/docgen/studentFlatten
 const router = express.Router();
 router.use(auth);
 
+// ── Helpers (tags + M:N school link) ─────────────────────────
+function parseArrayField(val) {
+  if (val == null || val === "") return null;
+  if (Array.isArray(val)) return val;
+  try { const p = JSON.parse(val); return Array.isArray(p) ? p : null; } catch { return null; }
+}
+
+async function replaceTemplateSchoolLinks(templateId, schoolIds) {
+  const pool = supabase.pool;
+  await pool.query(`DELETE FROM doc_template_schools WHERE template_id = $1`, [templateId]);
+  if (Array.isArray(schoolIds) && schoolIds.length > 0) {
+    const valuesSql = schoolIds.map((_, i) => `($1, $${i + 2})`).join(", ");
+    await pool.query(
+      `INSERT INTO doc_template_schools (template_id, school_id) VALUES ${valuesSql} ON CONFLICT DO NOTHING`,
+      [templateId, ...schoolIds]
+    );
+  }
+}
+
+async function loadTemplateSchoolMap(templateIds) {
+  if (!templateIds || templateIds.length === 0) return {};
+  const pool = supabase.pool;
+  const { rows } = await pool.query(
+    `SELECT template_id, school_id FROM doc_template_schools WHERE template_id = ANY($1)`,
+    [templateIds]
+  );
+  const map = {};
+  for (const r of rows) { (map[r.template_id] ||= []).push(r.school_id); }
+  return map;
+}
+
 // ================================================================
 // GET /api/docgen/preview-data?student_id=X
 // Returns flat student object — same shape as generate.js feeds to
@@ -103,11 +134,47 @@ router.get("/templates", asyncHandler(async (req, res) => {
     .order("created_at", { ascending: false });
 
   if (error) {
-    // Table না থাকলে empty return
     if (error.message && error.message.includes("does not exist")) return res.json([]);
     return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
   }
-  res.json(data || []);
+  const list = data || [];
+  const map = await loadTemplateSchoolMap(list.map(t => t.id));
+  for (const t of list) {
+    t.tags = t.tags || [];
+    t.school_ids = map[t.id] || [];
+  }
+  res.json(list);
+}));
+
+// ================================================================
+// PATCH /api/docgen/templates/:id — name / category / description / tags / school_ids
+// ================================================================
+router.patch("/templates/:id", asyncHandler(async (req, res) => {
+  const updates = { updated_at: new Date().toISOString() };
+  ["name", "category", "description", "linked_doc_type"].forEach(k => {
+    if (req.body[k] !== undefined) updates[k] = req.body[k];
+  });
+  const tags = parseArrayField(req.body.tags);
+  if (tags !== null) updates.tags = tags;
+  const schoolIds = parseArrayField(req.body.school_ids);
+
+  const { data, error } = await supabase
+    .from("doc_templates")
+    .update(updates)
+    .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id)
+    .select()
+    .single();
+  if (error) return res.status(400).json({ error: "Update ব্যর্থ" });
+
+  if (data && schoolIds !== null) {
+    await replaceTemplateSchoolLinks(data.id, schoolIds);
+    data.school_ids = schoolIds;
+  } else if (data) {
+    const map = await loadTemplateSchoolMap([data.id]);
+    data.school_ids = map[data.id] || [];
+  }
+  res.json(data);
 }));
 
 // ================================================================
@@ -118,6 +185,8 @@ router.post("/upload", upload.single("file"), asyncHandler(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "ফাইল দিন" });
     const { template_name, category } = req.body;
     if (!template_name) return res.status(400).json({ error: "Template নাম দিন" });
+    const tags = parseArrayField(req.body.tags) || [];
+    const schoolIds = parseArrayField(req.body.school_ids) || [];
 
     const agencyId = req.user.agency_id || "a0000000-0000-0000-0000-000000000001";
 
@@ -181,11 +250,19 @@ router.post("/upload", upload.single("file"), asyncHandler(async (req, res) => {
         field_mappings: JSON.stringify(placeholders),
         placeholders: JSON.stringify(placeholders),
         default_template_id: null,
+        tags,
       })
       .select()
       .single();
 
     if (dbErr) { console.error("[DB]", dbErr.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+    if (tmpl && schoolIds.length > 0) {
+      await replaceTemplateSchoolLinks(tmpl.id, schoolIds);
+      tmpl.school_ids = schoolIds;
+    } else if (tmpl) {
+      tmpl.school_ids = [];
+    }
 
     res.json({ template: tmpl, placeholders });
   } catch (err) {

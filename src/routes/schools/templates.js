@@ -108,6 +108,43 @@ router.get("/:id/templates", asyncHandler(async (req, res) => {
     console.error("[schools/templates] agency excel fetch:", err.message);
   }
 
+  // 5. Agency's own doc_templates (Translation / Certificate / Letter) linked to this school
+  try {
+    const { rows: docRows } = await pool.query(`
+      SELECT dt.id, dt.name, dt.category, dt.description, dt.template_url,
+             dt.tags, dt.created_at
+        FROM doc_templates dt
+       WHERE dt.agency_id = $1
+         AND EXISTS (
+           SELECT 1 FROM doc_template_schools dts
+            WHERE dts.template_id = dt.id AND dts.school_id = $2
+         )
+    `, [req.user.agency_id, schoolId]);
+
+    for (const d of docRows) {
+      const filePath = d.template_url || "";
+      const fileBaseUrl = filePath.startsWith("/")
+        ? filePath
+        : `/uploads/doc-templates/${filePath.split(/[\\\\/]/).pop()}`;
+      list.push({
+        id: d.id,
+        name: d.name,
+        name_bn: null,
+        category: "docgen",
+        sub_category: d.category || null,
+        description: d.description || null,
+        country: null,
+        tags: d.tags || [],
+        file_name: filePath.split(/[\\\\/]/).pop(),
+        file_url: fileBaseUrl,
+        source: "agency",
+        scope: "school",
+      });
+    }
+  } catch (err) {
+    console.error("[schools/templates] agency doc fetch:", err.message);
+  }
+
   if (tagFilter) {
     list = list.filter(t => Array.isArray(t.tags) && t.tags.includes(tagFilter));
   }
