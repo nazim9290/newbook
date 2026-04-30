@@ -24,6 +24,11 @@ const STUDENT_COLUMNS = [
   "father_dob", "father_occupation", "mother_dob", "mother_occupation",
   // Smart Matching — পছন্দের অঞ্চল (optional)
   "preferred_region",
+  // Alumni snapshot — post-arrival current state (timeline lives in alumni_updates table)
+  "alumni_current_status", "alumni_school_name", "alumni_school_start",
+  "alumni_company_name", "alumni_company_position", "alumni_company_start",
+  "alumni_city", "alumni_prefecture", "alumni_phone_jp", "alumni_email_jp",
+  "alumni_last_contact", "alumni_referrals_count", "alumni_arrived_date", "alumni_notes",
 ];
 
 // Import Excel upload — 10MB limit, uploads/ folder-এ temp save

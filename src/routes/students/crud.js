@@ -205,6 +205,13 @@ router.patch("/:id", checkPermission("students", "write"), asyncHandler(async (r
   ["school_id", "batch_id", "agent_id", "partner_id", "assignee_id"].forEach(k => {
     if (updates[k] === "") updates[k] = null;
   });
+  // Date columns — empty string → null (PostgreSQL DATE rejects "")
+  ["dob", "passport_issue", "passport_expiry", "father_dob", "mother_dob",
+   "alumni_school_start", "alumni_company_start", "alumni_last_contact", "alumni_arrived_date"].forEach(k => {
+    if (updates[k] === "") updates[k] = null;
+  });
+  // Integer column — empty string → null (or 0)
+  if (updates.alumni_referrals_count === "") updates.alumni_referrals_count = null;
 
   // প্রতিটি save-এ updated_at নতুন করে সেট — পরবর্তী conflict check-এর জন্য
   updates.updated_at = new Date().toISOString();
