@@ -23,6 +23,7 @@ const router = express.Router();
 // Static paths প্রথমে — /:id wildcard এর আগে
 router.use(require("./match-data"));
 router.use(require("./import"));
+router.use(require("./overview"));   // /quick-stats (POST) + /:id/overview (GET) — /:id wildcard এর আগে register
 
 // CRUD routes (/:id)
 router.use(require("./crud"));
