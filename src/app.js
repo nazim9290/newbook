@@ -243,6 +243,8 @@ app.use("/api/pre-departure", require("./routes/pre-departure"));   // প্র
 app.use("/api/holidays", require("./routes/holidays"));             // সরকারি ছুটি ম্যানেজমেন্ট (batch calculation-এ exclude হয়)
 app.use("/api/ocr", heavyLimiter, require("./routes/ocr"));                       // OCR — জন্ম নিবন্ধন স্ক্যান (Google Vision) — heavy limit
 app.use("/api/analytics", require("./routes/analytics"));         // ফিচার ব্যবহার ট্র্যাকিং
+app.use("/api/subscriptions", require("./routes/subscriptions")); // সাবস্ক্রিপশন — plans, current, usage (Phase 1: read-only)
+app.use("/api/billing", require("./routes/billing"));             // বিলিং — invoices, payments, summary
 
 // ── 404 Handler — route না পেলে error (path leak করবে না) ──
 app.use((req, res) => {
