@@ -208,6 +208,7 @@ app.get("/api/default-templates", agencyAuth, agencyAsync(async (req, res) => {
 // ═══════════════════════════════════════════════════════
 // API Routes — প্রতিটি module আলাদা route file-এ
 // ═══════════════════════════════════════════════════════
+app.use("/api/public", require("./routes/public"));              // Unauthenticated visitor form (kiosk URL)
 app.use("/api/dashboard", require("./routes/dashboard"));       // Dashboard stats
 app.use("/api/super-admin", require("./routes/super-admin"));   // Super Admin — agency management
 app.use("/api/auth", require("./routes/auth"));                 // লগইন ও রেজিস্ট্রেশন
