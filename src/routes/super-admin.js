@@ -371,16 +371,65 @@ router.get("/ocr-summary", asyncHandler(async (req, res) => {
 // Default Templates — গ্লোবাল টেমপ্লেট ম্যানেজমেন্ট
 // ═══════════════════════════════════════════════════
 
-// GET /default-templates — সব default template list
+// ── Helpers ──────────────────────────────────────────────────
+// Parse tags / school_ids from body (accepts JSON string OR array).
+function parseArrayField(val) {
+  if (val == null || val === "") return null;
+  if (Array.isArray(val)) return val;
+  try {
+    const p = JSON.parse(val);
+    return Array.isArray(p) ? p : null;
+  } catch { return null; }
+}
+
+// Replace junction-table rows for a template (delete-all then insert).
+async function replaceTemplateSchoolLinks(templateId, schoolIds) {
+  const pool = supabase.pool;
+  await pool.query(`DELETE FROM default_template_schools WHERE template_id = $1`, [templateId]);
+  if (Array.isArray(schoolIds) && schoolIds.length > 0) {
+    const valuesSql = schoolIds.map((_, i) => `($1, $${i + 2})`).join(", ");
+    await pool.query(
+      `INSERT INTO default_template_schools (template_id, school_id) VALUES ${valuesSql} ON CONFLICT DO NOTHING`,
+      [templateId, ...schoolIds]
+    );
+  }
+}
+
+// Load { templateId: [schoolId, ...] } for a list of template ids.
+async function loadTemplateSchoolMap(templateIds) {
+  if (!templateIds || templateIds.length === 0) return {};
+  const pool = supabase.pool;
+  const { rows } = await pool.query(
+    `SELECT template_id, school_id FROM default_template_schools WHERE template_id = ANY($1)`,
+    [templateIds]
+  );
+  const map = {};
+  for (const r of rows) {
+    if (!map[r.template_id]) map[r.template_id] = [];
+    map[r.template_id].push(r.school_id);
+  }
+  return map;
+}
+
+// GET /default-templates — সব default template list (tags + school_ids সহ)
 router.get("/default-templates", asyncHandler(async (req, res) => {
   const { data } = await supabase.from("default_templates").select("*").order("sort_order");
-  res.json(data || []);
+  const list = data || [];
+  const ids = list.map(t => t.id);
+  const schoolMap = await loadTemplateSchoolMap(ids);
+  for (const t of list) {
+    t.tags = t.tags || [];
+    t.school_ids = schoolMap[t.id] || [];
+  }
+  res.json(list);
 }));
 
 // POST /default-templates — নতুন template আপলোড (multer file upload সহ)
 // .docx ফাইল হলে {{placeholder}} detect করে template_data-তে সংরক্ষণ করে
 router.post("/default-templates", upload.single("file"), asyncHandler(async (req, res) => {
   const { name, name_bn, description, category, sub_category, country } = req.body;
+  const tags = parseArrayField(req.body.tags) || [];
+  const schoolIds = parseArrayField(req.body.school_ids) || [];
   if (!name) return res.status(400).json({ error: "Name required" });
 
   let file_url = null, file_name = null;
@@ -432,8 +481,16 @@ router.post("/default-templates", upload.single("file"), asyncHandler(async (req
   const { data } = await supabase.from("default_templates").insert({
     name, name_bn, description, category: category || "excel", sub_category, country: country || "Japan",
     file_url, file_name,
+    tags,
     template_data: templateData ? JSON.stringify(templateData) : null,
   }).select().single();
+
+  if (data && schoolIds.length > 0) {
+    await replaceTemplateSchoolLinks(data.id, schoolIds);
+    data.school_ids = schoolIds;
+  } else if (data) {
+    data.school_ids = [];
+  }
 
   res.json(data);
 }));
@@ -465,6 +522,12 @@ router.patch("/default-templates/:id", upload.single("file"), asyncHandler(async
   ["name", "name_bn", "description", "category", "sub_category", "country"].forEach(k => {
     if (req.body[k] !== undefined) updates[k] = req.body[k];
   });
+
+  // tags column — array
+  const tags = parseArrayField(req.body.tags);
+  if (tags !== null) updates.tags = tags;
+  // school_ids — write to junction table after the main update
+  const schoolIds = parseArrayField(req.body.school_ids);
 
   // ── নতুন file upload হলে — file save + placeholder re-detect ──
   if (req.file) {
@@ -507,6 +570,15 @@ router.patch("/default-templates/:id", upload.single("file"), asyncHandler(async
   }
 
   const { data } = await supabase.from("default_templates").update(updates).eq("id", req.params.id).select().single();
+
+  if (data && schoolIds !== null) {
+    await replaceTemplateSchoolLinks(data.id, schoolIds);
+    data.school_ids = schoolIds;
+  } else if (data) {
+    const map = await loadTemplateSchoolMap([data.id]);
+    data.school_ids = map[data.id] || [];
+  }
+
   res.json(data);
 }));
 
@@ -539,6 +611,8 @@ const { scanPdfPlaceholders, uniqueKeys: _phUniqueKeys } = require("../lib/pdfPl
 // POST /default-templates/pdf — Upload a PDF; detect AcroForm fields and/or {{placeholder}} text.
 router.post("/default-templates/pdf", upload.single("file"), asyncHandler(async (req, res) => {
   const { name, name_bn, description, sub_category, country, stage_visibility } = req.body;
+  const tags = parseArrayField(req.body.tags) || [];
+  const schoolIds = parseArrayField(req.body.school_ids) || [];
   if (!name) return res.status(400).json({ error: "Name required" });
   if (!req.file) return res.status(400).json({ error: "PDF file required" });
 
@@ -625,8 +699,16 @@ router.post("/default-templates/pdf", upload.single("file"), asyncHandler(async 
     sub_category: sub_category || null,
     country: country || "Japan",
     file_url, file_name: req.file.originalname,
+    tags,
     template_data: JSON.stringify(td),
   }).select().single();
+
+  if (row && schoolIds.length > 0) {
+    await replaceTemplateSchoolLinks(row.id, schoolIds);
+    row.school_ids = schoolIds;
+  } else if (row) {
+    row.school_ids = [];
+  }
 
   res.json(row);
 }));

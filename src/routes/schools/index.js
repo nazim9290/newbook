@@ -16,6 +16,7 @@ const router = express.Router();
 // Static/sub-path routes first (otherwise /:id would match "submissions")
 router.use(require("./submissions"));
 router.use(require("./template"));
+router.use(require("./templates"));     // NEW: /:id/templates — linked default templates list
 router.use(require("./interview"));
 
 // /:id CRUD last
