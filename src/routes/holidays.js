@@ -16,11 +16,15 @@ const express = require("express");
 const supabase = require("../lib/db");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
+const { checkPermission } = require("../middleware/checkPermission");
 const { logActivity } = require("../lib/activityLog");
+const cache = require("../lib/cache");
 
 const router = express.Router();
 
 // সব endpoint-এ auth লাগবে — JWT token থেকে agency_id পাওয়া যায়
+// Reads stay open (calendar / batch hours calc needs the list).
+// Writes/deletes are gated to "settings" permission (owner only by default).
 router.use(auth);
 
 // ── GET /api/holidays — এজেন্সির সব ছুটি আনো (তারিখ অনুযায়ী) ──
@@ -38,7 +42,7 @@ router.get("/", asyncHandler(async (req, res) => {
 }));
 
 // ── POST /api/holidays — নতুন ছুটি যোগ ──
-router.post("/", asyncHandler(async (req, res) => {
+router.post("/", checkPermission("settings", "write"), asyncHandler(async (req, res) => {
   const { date, name, name_bn, recurring } = req.body;
 
   // Validation — তারিখ ও নাম আবশ্যক
@@ -74,12 +78,13 @@ router.post("/", asyncHandler(async (req, res) => {
     recordId: data.id, description: `নতুন ছুটি: ${name} (${date})`,
     ip: req.ip,
   }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
 
   res.status(201).json(data);
 }));
 
 // ── PATCH /api/holidays/:id — ছুটি আপডেট ──
-router.patch("/:id", asyncHandler(async (req, res) => {
+router.patch("/:id", checkPermission("settings", "write"), asyncHandler(async (req, res) => {
   const { date, name, name_bn, recurring } = req.body;
   const updates = {};
   if (date !== undefined) updates.date = date;
@@ -107,12 +112,13 @@ router.patch("/:id", asyncHandler(async (req, res) => {
     recordId: req.params.id, description: `ছুটি আপডেট: ${data.name || req.params.id}`,
     ip: req.ip,
   }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
 
   res.json(data);
 }));
 
 // ── DELETE /api/holidays/:id — ছুটি মুছে ফেলো ──
-router.delete("/:id", asyncHandler(async (req, res) => {
+router.delete("/:id", checkPermission("settings", "delete"), asyncHandler(async (req, res) => {
   // আগে নামটা নিয়ে রাখো activity log-এর জন্য
   const { data: existing } = await supabase
     .from("holidays")
@@ -139,6 +145,7 @@ router.delete("/:id", asyncHandler(async (req, res) => {
     recordId: req.params.id, description: `ছুটি মুছে ফেলা হয়েছে: ${existing?.name || req.params.id}`,
     ip: req.ip,
   }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
 
   res.json({ success: true });
 }));

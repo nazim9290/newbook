@@ -165,4 +165,75 @@ router.post("/payments", checkPermission("accounts", "write"), asyncHandler(asyn
   res.status(201).json(data);
 }));
 
+// ═══════════════════════════════════════════════════════
+// PATCH + DELETE — error correction path for accountants
+// ═══════════════════════════════════════════════════════
+// /income, /payments both store in `payments` table; /expenses in `expenses`.
+// All three need the same optimistic-lock + activity-log + cache-invalidate
+// pattern to be safe in a multi-tenant, multi-staff environment.
+
+// Whitelisted columns for PATCH (drop unknown keys silently)
+const PAYMENT_PATCH_COLS = ["amount", "category", "date", "method", "note", "notes", "receipt_no", "student_id", "branch", "tax_amount", "discount"];
+const EXPENSE_PATCH_COLS = ["amount", "category", "description", "date", "paid_by", "branch", "receipt_url"];
+
+const sanitize = (cols, body) => {
+  const clean = {};
+  for (const k of cols) if (body[k] !== undefined) clean[k] = body[k];
+  if (clean.date === "") clean.date = null;   // Postgres date column rejects ""
+  return clean;
+};
+
+// Shared PATCH handler — table = "payments" or "expenses", cols = whitelist, label = activity-log noun
+const patchHandler = (table, cols, label) => asyncHandler(async (req, res) => {
+  // Optimistic lock — concurrent edit protection
+  const { updated_at: clientUpdatedAt } = req.body;
+  if (clientUpdatedAt) {
+    const { data: current } = await supabase.from(table).select("updated_at")
+      .eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
+    if (current && current.updated_at && new Date(current.updated_at).getTime() !== new Date(clientUpdatedAt).getTime()) {
+      return res.status(409).json({
+        error: "এই ডাটা অন্য কেউ পরিবর্তন করেছে — পেজ রিফ্রেশ করুন",
+        code: "CONFLICT",
+        server_updated_at: current.updated_at,
+      });
+    }
+  }
+  const updates = sanitize(cols, req.body);
+  updates.updated_at = new Date().toISOString();
+
+  const { data, error } = await supabase.from(table).update(updates)
+    .eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+  if (!data) return res.status(404).json({ error: "রেকর্ড পাওয়া যায়নি" });
+
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "accounts",
+    recordId: req.params.id, description: `${label} আপডেট: ৳${data.amount || 0}`, ip: req.ip }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
+  res.json(data);
+});
+
+const deleteHandler = (table, label) => asyncHandler(async (req, res) => {
+  // Capture amount for activity log before delete
+  const { data: existing } = await supabase.from(table).select("amount, category")
+    .eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
+  if (!existing) return res.status(404).json({ error: "রেকর্ড পাওয়া যায়নি" });
+
+  const { error } = await supabase.from(table).delete()
+    .eq("id", req.params.id).eq("agency_id", req.user.agency_id);
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "delete", module: "accounts",
+    recordId: req.params.id, description: `${label} মুছে ফেলা: ৳${existing.amount || 0}${existing.category ? ` — ${existing.category}` : ""}`, ip: req.ip }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
+  res.json({ success: true });
+});
+
+// /income and /payments are both views over the `payments` table — both get identical handlers
+router.patch("/income/:id",   checkPermission("accounts", "write"),  patchHandler("payments", PAYMENT_PATCH_COLS, "আয়"));
+router.delete("/income/:id",  checkPermission("accounts", "delete"), deleteHandler("payments", "আয়"));
+router.patch("/payments/:id", checkPermission("accounts", "write"),  patchHandler("payments", PAYMENT_PATCH_COLS, "পেমেন্ট"));
+router.delete("/payments/:id",checkPermission("accounts", "delete"), deleteHandler("payments", "পেমেন্ট"));
+router.patch("/expenses/:id", checkPermission("accounts", "write"),  patchHandler("expenses", EXPENSE_PATCH_COLS, "খরচ"));
+router.delete("/expenses/:id",checkPermission("accounts", "delete"), deleteHandler("expenses", "খরচ"));
+
 module.exports = router;

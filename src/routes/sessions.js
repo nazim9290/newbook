@@ -9,10 +9,14 @@ const express = require("express");
 const supabase = require("../lib/db");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
+const { checkPermission } = require("../middleware/checkPermission");
 const { logActivity } = require("../lib/activityLog");
+const cache = require("../lib/cache");
 
 const router = express.Router();
 router.use(auth);
+// Reads stay open — every form needs the intake dropdown.
+// Writes/deletes are gated to "settings" permission (owner only by default).
 
 // ── Allowed session columns — unknown keys drop ──
 const ALLOWED = ["name", "country", "start_date", "end_date", "status", "notes"];
@@ -32,7 +36,7 @@ router.get("/", asyncHandler(async (req, res) => {
 }));
 
 // ── POST /api/sessions — নতুন session তৈরি ──
-router.post("/", asyncHandler(async (req, res) => {
+router.post("/", checkPermission("settings", "write"), asyncHandler(async (req, res) => {
   const clean = sanitize(req.body);
   if (!clean.name || !String(clean.name).trim()) return res.status(400).json({ error: "Session name দিন" });
   clean.name = String(clean.name).trim();
@@ -45,22 +49,26 @@ router.post("/", asyncHandler(async (req, res) => {
   }
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "sessions",
     recordId: data.id, description: `Session: ${data.name}`, ip: req.ip }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
   res.status(201).json(data);
 }));
 
 // ── PATCH /api/sessions/:id — update ──
-router.patch("/:id", asyncHandler(async (req, res) => {
+router.patch("/:id", checkPermission("settings", "write"), asyncHandler(async (req, res) => {
   const clean = sanitize(req.body);
   if (clean.name) clean.name = String(clean.name).trim();
   clean.updated_at = new Date().toISOString();
   const { data, error } = await supabase.from("sessions").update(clean)
     .eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "sessions",
+    recordId: req.params.id, description: `Session updated: ${data?.name || req.params.id}`, ip: req.ip }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
   res.json(data);
 }));
 
 // ── DELETE /api/sessions/:id — usage check first ──
-router.delete("/:id", asyncHandler(async (req, res) => {
+router.delete("/:id", checkPermission("settings", "delete"), asyncHandler(async (req, res) => {
   // Get session name first (usage check করতে)
   const { data: ses } = await supabase.from("sessions").select("name")
     .eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
@@ -78,6 +86,7 @@ router.delete("/:id", asyncHandler(async (req, res) => {
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি" }); }
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "delete", module: "sessions",
     recordId: req.params.id, description: `Session deleted: ${ses.name}`, ip: req.ip }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
   res.json({ success: true });
 }));
 

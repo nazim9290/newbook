@@ -1,4 +1,6 @@
 const express = require("express");
+const path = require("path");
+const fs = require("fs");
 const supabase = require("../lib/db");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
@@ -81,6 +83,42 @@ router.patch("/:id", checkPermission("documents", "write"), asyncHandler(async (
   cache.invalidate(req.user.agency_id);
 
   res.json(data);
+}));
+
+// DELETE /api/documents/:id — agency_id চেক সহ; uploaded file disk থেকেও মুছে
+router.delete("/:id", checkPermission("documents", "delete"), asyncHandler(async (req, res) => {
+  // Lookup first — get file_url for disk cleanup + label for activity log
+  const { data: existing } = await supabase.from("documents")
+    .select("id, label, doc_type, file_url, student_id")
+    .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id)
+    .single();
+  if (!existing) return res.status(404).json({ error: "ডকুমেন্ট পাওয়া যায়নি" });
+
+  // Delete the row — document_fields cascade automatically (FK ON DELETE CASCADE)
+  const { error } = await supabase.from("documents")
+    .delete()
+    .eq("id", req.params.id)
+    .eq("agency_id", req.user.agency_id);
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  // Best-effort: remove the local upload file from disk (skip remote URLs / Drive links)
+  if (existing.file_url && existing.file_url.startsWith("/uploads/")) {
+    const filePath = path.join(__dirname, "../..", existing.file_url);
+    try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); }
+    catch (e) { console.error("[FILE DELETE]", e.message); /* file cleanup failure ≠ user-facing failure */ }
+  }
+
+  logActivity({
+    agencyId: req.user.agency_id, userId: req.user.id,
+    action: "delete", module: "documents",
+    recordId: req.params.id,
+    description: `ডকুমেন্ট মুছে ফেলা: ${existing.label || existing.doc_type || req.params.id}`,
+    ip: req.ip,
+  }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
+
+  res.json({ success: true });
 }));
 
 // GET /api/documents/:id/fields — get document extracted fields for cross-validation
@@ -202,16 +240,54 @@ router.get("/cross-validate/:studentId", checkPermission("documents", "read"), a
     doc.fields = docFields.filter(f => f.document_id === doc.id);
   });
 
-  // ── document_data table থেকেও check (DocType system storage) — doc_type name সহ ──
+  // ── document_data table থেকেও check (DocType system storage) — doc_type name + category সহ ──
   const { data: docdata } = await supabase
     .from("document_data")
-    .select("doc_type_id, field_data, doc_types(name)")
+    .select("doc_type_id, field_data, doc_types(name, category)")
     .eq("student_id", req.params.studentId)
     .eq("agency_id", req.user.agency_id);
-  // doc_type name resolve
+  // doc_type name + category resolve
   (docdata || []).forEach(dd => {
     dd.doc_type_name = dd.doc_types?.name || dd.doc_type_id;
+    dd.doc_type_category = dd.doc_types?.category || "personal";
   });
+
+  // ── Sponsor data fetch — sponsor-related docs (TIN/Income Tax/Annual Income)-এর জন্য ──
+  const { data: sponsorRow } = await supabase
+    .from("sponsors")
+    .select("*")
+    .eq("student_id", req.params.studentId)
+    .single();
+  const sponsor = sponsorRow ? decryptSensitiveFields(sponsorRow) : null;
+
+  // Sponsor fields normalize — frontend display + comparison-এর জন্য
+  const sponsorData = sponsor ? {
+    name_en: sponsor.name_en || sponsor.name || "",
+    father_name: sponsor.father_name || "",
+    mother_name: sponsor.mother_name || "",
+    present_address: sponsor.present_address || sponsor.address || "",
+    permanent_address: sponsor.permanent_address || sponsor.address || "",
+    tin: sponsor.tin || "",
+    nid: sponsor.nid || "",
+    dob: sponsor.dob ? formatDate(sponsor.dob) : "",
+    company_name: sponsor.company_name || "",
+    company_address: sponsor.company_address || "",
+    trade_license: sponsor.trade_license_no || sponsor.trade_license || "",
+    // 3-row repeatable: year-wise income/tax records
+    rows: [1, 2, 3].map(n => ({
+      year: sponsor[`income_year_${n}`] || "",
+      source: sponsor[`income_source_${n}`] || "",
+      income: sponsor[`annual_income_y${n}`] || "",
+      tax: sponsor[`tax_y${n}`] || "",
+    })).filter(r => r.year || r.income || r.tax),
+  } : null;
+
+  // Sponsor banks — Bank Statement comparison-এর জন্য (multi-row)
+  let sponsorBanks = [];
+  if (sponsor?.id) {
+    const { data: banks } = await supabase.from("sponsor_banks").select("*").eq("sponsor_id", sponsor.id);
+    sponsorBanks = (banks || []).map(b => decryptSensitiveFields(b));
+  }
 
   // ── Step 3: Compare — Profile data vs Document data ──
   // তুলনাযোগ্য fields — student profile key → document field key variations
@@ -261,8 +337,9 @@ router.get("/cross-validate/:studentId", checkPermission("documents", "read"), a
       }
     }
 
-    // docdata table থেকেও check
+    // docdata table থেকেও check — sponsor-category docs বাদ (সেগুলো sponsor profile-এর সাথে compare হবে)
     for (const dd of (docdata || [])) {
+      if (dd.doc_type_category === "sponsor") continue;
       const fd = dd.field_data || {};
       for (const dk of cf.docKeys) {
         const docValue = (fd[dk] || "").toString().trim().toLowerCase();
@@ -281,11 +358,198 @@ router.get("/cross-validate/:studentId", checkPermission("documents", "read"), a
     }
   }
 
+  // ── Step 4: Sponsor profile vs Sponsor-category documents ──
+  // Sponsor docs শনাক্ত: doc_types.category === "sponsor"
+  // Currently covered: TIN, Income Tax, Annual Income, Sponsor NID, Trade License, Bank Statement
+  // Repeatable rows (tax_payments / income_records) match হয় Year-এর ভিত্তিতে
+  const SPONSOR_COMPARE_FIELDS = [
+    { profileKey: "name_en", docKeys: ["name_en", "name", "full_name", "owner_name", "account_holder_name"], label: "Sponsor Name" },
+    { profileKey: "father_name", docKeys: ["father_name", "fathers_name", "father", "father_husband_name"], label: "Father's Name" },
+    { profileKey: "mother_name", docKeys: ["mother_name", "mothers_name", "mother"], label: "Mother's Name" },
+    { profileKey: "present_address", docKeys: ["present_address", "current_address"], label: "Present Address" },
+    { profileKey: "permanent_address", docKeys: ["permanent_address", "address"], label: "Permanent Address" },
+    { profileKey: "tin", docKeys: ["tin_number", "etin", "tin", "e_tin"], label: "TIN / e-TIN" },
+    { profileKey: "nid", docKeys: ["nid_number", "nid", "national_id", "nid_passport"], label: "NID" },
+    { profileKey: "dob", docKeys: ["dob", "date_of_birth", "birth_date"], label: "Date of Birth" },
+    { profileKey: "company_name", docKeys: ["business_name", "company_name"], label: "Business / Company Name" },
+    { profileKey: "company_address", docKeys: ["business_address", "company_address"], label: "Business Address" },
+    { profileKey: "trade_license", docKeys: ["license_no", "trade_license", "trade_license_no"], label: "Trade License No" },
+  ];
+
+  const sponsorMismatches = [];
+  const sponsorMatches = [];
+
+  if (sponsorData) {
+    const sponsorDocs = (docdata || []).filter(dd => dd.doc_type_category === "sponsor");
+
+    // ── Scalar fields compare (name, father, mother, addresses, TIN) ──
+    for (const cf of SPONSOR_COMPARE_FIELDS) {
+      const profileValue = (sponsorData[cf.profileKey] || "").toString().trim().toLowerCase();
+      if (!profileValue) continue;
+      // TIN match — ignore "/", "-", spaces — "339989116751/C-022" vs "339989116751" both ok
+      const normalizeTin = (v) => cf.profileKey === "tin"
+        ? String(v).toLowerCase().replace(/[\s\-/]/g, "").replace(/c$/, "")
+        : String(v).trim().toLowerCase();
+
+      for (const dd of sponsorDocs) {
+        const fd = dd.field_data || {};
+        for (const dk of cf.docKeys) {
+          const rawDoc = fd[dk];
+          if (rawDoc === undefined || rawDoc === null || rawDoc === "") continue;
+          const docNorm = normalizeTin(rawDoc);
+          const profNorm = normalizeTin(sponsorData[cf.profileKey]);
+          // TIN special: doc-side often has full "339989116751/C-022", profile may have just digits — substring match
+          const isTinMatch = cf.profileKey === "tin" && (docNorm.includes(profNorm) || profNorm.includes(docNorm));
+          if (docNorm !== profNorm && !isTinMatch) {
+            sponsorMismatches.push({
+              field: cf.label,
+              profile_value: sponsorData[cf.profileKey],
+              doc_type: dd.doc_type_name || "Document",
+              doc_value: rawDoc,
+            });
+          } else {
+            sponsorMatches.push({ field: cf.label, doc_type: dd.doc_type_name });
+          }
+        }
+      }
+    }
+
+    // ── Repeatable rows compare — year-wise tax/income records ──
+    // Income Tax cert: tax_payments [{Year, Amount}]
+    // Annual Income cert: income_records [{Year, Source, Amount}]
+    for (const dd of sponsorDocs) {
+      const fd = dd.field_data || {};
+      const docName = (dd.doc_type_name || "").toLowerCase();
+      const isIncomeTax = docName.includes("income tax");
+      const isAnnualIncome = docName.includes("annual income");
+      if (!isIncomeTax && !isAnnualIncome) continue;
+
+      const docRows = Array.isArray(fd._members) ? fd._members : [];
+      if (docRows.length === 0) continue;
+
+      // প্রতিটি sponsor row-এর জন্য — Year দিয়ে match করো document row-এ
+      for (const sr of sponsorData.rows) {
+        if (!sr.year) continue;
+        const matchRow = docRows.find(dr => String(dr.Year || "").trim() === String(sr.year).trim());
+        if (!matchRow) {
+          // sponsor profile-এ year আছে কিন্তু document-এ নেই
+          sponsorMismatches.push({
+            field: `${sr.year} → ${isIncomeTax ? "Tax row" : "Income row"} missing in document`,
+            profile_value: isIncomeTax ? `Tax: ${sr.tax}` : `Income: ${sr.income}`,
+            doc_type: dd.doc_type_name,
+            doc_value: "—",
+          });
+          continue;
+        }
+
+        if (isIncomeTax) {
+          const profileTax = String(sr.tax || "").replace(/[,\s]/g, "");
+          const docTax = String(matchRow.Amount || "").replace(/[,\s]/g, "");
+          if (profileTax && docTax && profileTax !== docTax) {
+            sponsorMismatches.push({
+              field: `${sr.year} → Tax Paid`,
+              profile_value: sr.tax,
+              doc_type: dd.doc_type_name,
+              doc_value: matchRow.Amount,
+            });
+          } else if (profileTax && docTax) {
+            sponsorMatches.push({ field: `${sr.year} Tax`, doc_type: dd.doc_type_name });
+          }
+        }
+
+        if (isAnnualIncome) {
+          const profileInc = String(sr.income || "").replace(/[,\s]/g, "");
+          const docInc = String(matchRow.Amount || "").replace(/[,\s]/g, "");
+          if (profileInc && docInc && profileInc !== docInc) {
+            sponsorMismatches.push({
+              field: `${sr.year} → Annual Income`,
+              profile_value: sr.income,
+              doc_type: dd.doc_type_name,
+              doc_value: matchRow.Amount,
+            });
+          } else if (profileInc && docInc) {
+            sponsorMatches.push({ field: `${sr.year} Income`, doc_type: dd.doc_type_name });
+          }
+          // Source compare (case-insensitive partial: "Business" vs "Business Income")
+          if (sr.source && matchRow.Source) {
+            const ps = String(sr.source).toLowerCase();
+            const ds = String(matchRow.Source).toLowerCase();
+            if (!ps.includes(ds) && !ds.includes(ps)) {
+              sponsorMismatches.push({
+                field: `${sr.year} → Income Source`,
+                profile_value: sr.source,
+                doc_type: dd.doc_type_name,
+                doc_value: matchRow.Source,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // ── Bank Statement docs vs sponsor_banks rows (multi-row, match by account_no) ──
+    const bankDocs = sponsorDocs.filter(dd => /bank statement/i.test(dd.doc_type_name || ""));
+    for (const dd of bankDocs) {
+      const fd = dd.field_data || {};
+      const docAcct = String(fd.account_no || "").replace(/[\s\-]/g, "");
+      const docBank = String(fd.bank_name || "").trim().toLowerCase();
+      if (!docAcct && !docBank) continue;
+
+      // Match: account_no first, fallback bank_name
+      const matched = sponsorBanks.find(b => {
+        const profAcct = String(b.account_no || "").replace(/[\s\-]/g, "");
+        if (docAcct && profAcct && profAcct === docAcct) return true;
+        if (docBank && b.bank_name && String(b.bank_name).trim().toLowerCase() === docBank) return true;
+        return false;
+      });
+
+      if (!matched) {
+        sponsorMismatches.push({
+          field: "Bank Account not in profile",
+          profile_value: sponsorBanks.length === 0 ? "(no banks saved)" : `${sponsorBanks.length} bank(s) saved`,
+          doc_type: dd.doc_type_name,
+          doc_value: `${fd.bank_name || ""} ${fd.account_no || ""}`.trim() || "(unknown)",
+        });
+        continue;
+      }
+
+      // Per-field compare: bank_name, branch, balance, balance_date
+      const bankFields = [
+        { key: "bank_name", label: "Bank Name", profile: matched.bank_name, doc: fd.bank_name },
+        { key: "branch", label: "Branch", profile: matched.branch, doc: fd.branch },
+        { key: "balance", label: "Balance", profile: matched.balance, doc: fd.balance, numeric: true },
+        { key: "balance_date", label: "Balance Date", profile: matched.balance_date ? formatDate(matched.balance_date) : "", doc: fd.balance_date },
+      ];
+      for (const bf of bankFields) {
+        const p = bf.numeric
+          ? String(bf.profile || "").replace(/[,\s]/g, "")
+          : String(bf.profile || "").trim().toLowerCase();
+        const d = bf.numeric
+          ? String(bf.doc || "").replace(/[,\s]/g, "")
+          : String(bf.doc || "").trim().toLowerCase();
+        if (!p || !d) continue;
+        if (p !== d) {
+          sponsorMismatches.push({
+            field: `${matched.bank_name || "Bank"} → ${bf.label}`,
+            profile_value: bf.profile,
+            doc_type: dd.doc_type_name,
+            doc_value: bf.doc,
+          });
+        } else {
+          sponsorMatches.push({ field: `Bank ${bf.label}`, doc_type: dd.doc_type_name });
+        }
+      }
+    }
+  }
+
   res.json({
     mismatches,
     matches_count: matches.length,
     total_docs: (docs || []).length + (docdata || []).length,
     profile: profileData,
+    sponsor_mismatches: sponsorMismatches,
+    sponsor_matches_count: sponsorMatches.length,
+    sponsor: sponsorData,
   });
 }));
 

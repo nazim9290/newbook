@@ -64,8 +64,16 @@ router.patch("/:id", checkPermission("agents", "write"), asyncHandler(async (req
 }));
 
 router.delete("/:id", checkPermission("agents", "delete"), asyncHandler(async (req, res) => {
+  // Capture name first for activity log
+  const { data: existing } = await supabase.from("agents").select("name")
+    .eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
+
   const { error } = await supabase.from("agents").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "delete", module: "agents",
+    recordId: req.params.id, description: `এজেন্ট মুছে ফেলা: ${existing?.name || req.params.id}`, ip: req.ip }).catch(() => {});
+
   res.json({ success: true });
 }));
 

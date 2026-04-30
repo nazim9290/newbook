@@ -510,6 +510,134 @@ router.patch("/default-templates/:id", upload.single("file"), asyncHandler(async
   res.json(data);
 }));
 
+// ═══════════════════════════════════════════════════
+// PDF Templates — fillable PDFs (visa form etc.) — TWO modes:
+//   A) AcroForm fillable PDF — named form fields filled by name
+//   B) Text placeholder PDF — literal {{key}} text in the PDF, replaced at generate time
+//
+// Workflow:
+//   1. Admin opens PDF in any editor (PDFescape / LibreOffice / Acrobat) and either
+//      (A) adds named form fields, OR (B) types {{student.name_en}}-style placeholders.
+//   2. Uploads here — backend detects whichever it finds (or both).
+//   3. Admin maps each detected field/placeholder → system variable key.
+//      For B, the placeholder text itself can BE the variable key (no mapping needed).
+//   4. Generate fills AcroForm fields and/or replaces placeholder text in-place.
+//
+// Stored as default_templates with category='pdf'.
+// template_data: {
+//   type: "pdf",
+//   fields: [{name, type}],         // AcroForm fields  (type: "TextField" / "CheckBox" / ...)
+//   placeholders: [keys...],        // unique {{...}} keys
+//   mappings: {fieldName: "student.name_en:upper"},
+//   stage_visibility: [...]
+// }
+// ═══════════════════════════════════════════════════
+
+const { PDFDocument: _PDFDocPDFTpl } = require("pdf-lib");
+const { scanPdfPlaceholders, uniqueKeys: _phUniqueKeys } = require("../lib/pdfPlaceholders");
+
+// POST /default-templates/pdf — Upload a PDF; detect AcroForm fields and/or {{placeholder}} text.
+router.post("/default-templates/pdf", upload.single("file"), asyncHandler(async (req, res) => {
+  const { name, name_bn, description, sub_category, country, stage_visibility } = req.body;
+  if (!name) return res.status(400).json({ error: "Name required" });
+  if (!req.file) return res.status(400).json({ error: "PDF file required" });
+
+  const destDir = path.join(__dirname, "../../uploads/default-templates");
+  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+
+  // Save PDF
+  const pdfDest = path.join(destDir, `${Date.now()}_${req.file.originalname.replace(/[^A-Za-z0-9._-]+/g, "_")}`);
+  fs.renameSync(req.file.path, pdfDest);
+  const file_url = `/uploads/default-templates/${path.basename(pdfDest)}`;
+
+  const pdfBytes = fs.readFileSync(pdfDest);
+
+  // (A) Parse AcroForm fields with pdf-lib
+  const fields = [];
+  try {
+    const pdfDoc = await _PDFDocPDFTpl.load(pdfBytes, { ignoreEncryption: true });
+    const form = pdfDoc.getForm();
+    for (const f of form.getFields()) {
+      fields.push({
+        name: f.getName(),
+        type: f.constructor.name.replace(/^PDF/, ""),  // "TextField" / "CheckBox" / "Dropdown" / etc.
+      });
+    }
+  } catch (err) {
+    console.error("[PDF Template] AcroForm parse failed:", err.message);
+    // non-fatal — placeholder mode may still work
+  }
+
+  // (B) Scan for {{...}} text placeholders
+  let placeholders = [];
+  try {
+    const found = await scanPdfPlaceholders(pdfBytes);
+    placeholders = _phUniqueKeys(found);
+  } catch (err) {
+    console.error("[PDF Template] Placeholder scan failed:", err.message);
+  }
+
+  if (fields.length === 0 && placeholders.length === 0) {
+    return res.status(400).json({
+      error: "এই PDF-এ form field বা {{placeholder}} text কিছুই পাওয়া যায়নি — PDF-এ {{student.name_en}}-এর মতো placeholder টাইপ করুন অথবা form field বসান",
+    });
+  }
+
+  // For consistent UI, expose placeholders as fields too (type: "Placeholder")
+  const allFields = [
+    ...fields,
+    ...placeholders.filter(k => !fields.some(f => f.name === k)).map(k => ({ name: k, type: "Placeholder" })),
+  ];
+
+  const stages = (() => {
+    if (!stage_visibility) return [];
+    if (Array.isArray(stage_visibility)) return stage_visibility;
+    try { return JSON.parse(stage_visibility); } catch { return [stage_visibility]; }
+  })();
+
+  const td = {
+    type: "pdf",
+    fields: allFields,
+    placeholders,
+    mappings: {},
+    stage_visibility: stages,
+  };
+
+  const { data: row } = await supabase.from("default_templates").insert({
+    name, name_bn, description,
+    category: "pdf",
+    sub_category: sub_category || null,
+    country: country || "Japan",
+    file_url, file_name: req.file.originalname,
+    template_data: JSON.stringify(td),
+  }).select().single();
+
+  res.json(row);
+}));
+
+// PATCH /default-templates/:id/pdf-mapping — save field-name → system-variable mappings
+router.patch("/default-templates/:id/pdf-mapping", asyncHandler(async (req, res) => {
+  let { mappings, stage_visibility } = req.body || {};
+  if (typeof mappings === "string") { try { mappings = JSON.parse(mappings); } catch {} }
+  if (typeof mappings !== "object" || Array.isArray(mappings) || mappings === null) {
+    return res.status(400).json({ error: "mappings object required" });
+  }
+
+  // Read existing template_data to preserve fields list
+  const { data: existing } = await supabase.from("default_templates").select("template_data").eq("id", req.params.id).single();
+  if (!existing) return res.status(404).json({ error: "Template not found" });
+  const td = (typeof existing.template_data === "string" ? JSON.parse(existing.template_data) : existing.template_data) || {};
+
+  td.mappings = mappings;
+  if (Array.isArray(stage_visibility)) td.stage_visibility = stage_visibility;
+
+  const { data, error } = await supabase.from("default_templates")
+    .update({ template_data: JSON.stringify(td), updated_at: new Date().toISOString() })
+    .eq("id", req.params.id).select().single();
+  if (error) return res.status(500).json({ error: "Mapping সংরক্ষণ ব্যর্থ" });
+  res.json(data);
+}));
+
 // DELETE /default-templates/:id — template মুছে ফেলা
 router.delete("/default-templates/:id", asyncHandler(async (req, res) => {
   // ফাইল থাকলে ডিস্ক থেকে মুছো

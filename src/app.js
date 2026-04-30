@@ -218,6 +218,8 @@ app.use("/api/accounts", require("./routes/accounts"));         // আয়-ব
 app.use("/api/schools", require("./routes/schools"));           // ভাষা স্কুল
 app.use("/api/batches", require("./routes/batches"));           // কোর্স ব্যাচ
 app.use("/api/documents", require("./routes/documents"));       // ডকুমেন্ট ম্যানেজমেন্ট
+app.use("/api/pdf-templates", require("./routes/pdfTemplates")); // PDF default templates — agency-side (visa form etc.)
+// NOTE: /api/visa-form (hardcoded) was replaced by /api/pdf-templates with super-admin upload + visual mapping
 app.use("/api/hr", require("./routes/hr"));                     // কর্মচারী ও বেতন
 app.use("/api/tasks", require("./routes/tasks"));               // টাস্ক ম্যানেজমেন্ট
 app.use("/api/excel", require("./routes/excel"));               // Excel রিজুইমি Auto-fill

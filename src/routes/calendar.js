@@ -3,6 +3,8 @@ const supabase = require("../lib/db");
 const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { checkPermission } = require("../middleware/checkPermission");
+const { logActivity } = require("../lib/activityLog");
+const cache = require("../lib/cache");
 const { getBranchFilter } = require("../lib/branchFilter");
 const router = express.Router();
 router.use(auth);
@@ -30,8 +32,12 @@ function sanitizeBody(body) {
 // Regular staff → শুধু তাদের branch-এর event (branches = {} মানে সবার জন্য)
 router.get("/", checkPermission("calendar", "read"), asyncHandler(async (req, res) => {
   const { month, type } = req.query;
+  // Server-side LIMIT 1000 guard — calendar grows over years; cap defensively
+  const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);
+  const offset = Math.max(0, parseInt(req.query.offset) || 0);
   let q = supabase.from("calendar_events").select("*, students(name_en)")
-    .eq("agency_id", req.user.agency_id).order("date");
+    .eq("agency_id", req.user.agency_id).order("date")
+    .range(offset, offset + limit - 1);
   if (month) q = q.gte("date", month + "-01").lte("date", month + "-31");
   if (type && type !== "All") q = q.eq("type", type);
   const { data, error } = await q;
@@ -57,6 +63,11 @@ router.post("/", checkPermission("calendar", "write"), asyncHandler(async (req, 
   const payload = { ...clean, agency_id: req.user.agency_id, created_by: req.user.id };
   const { data, error } = await supabase.from("calendar_events").insert(payload).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "calendar",
+    recordId: data.id, description: `নতুন ইভেন্ট: ${data.title || ""} (${data.date || ""})`, ip: req.ip }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
+
   res.status(201).json(data);
 }));
 
@@ -81,12 +92,26 @@ router.patch("/:id", checkPermission("calendar", "write"), asyncHandler(async (r
   const { data, error } = await supabase.from("calendar_events").update(payload)
     .eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "calendar",
+    recordId: req.params.id, description: `ইভেন্ট আপডেট: ${data?.title || req.params.id}`, ip: req.ip }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
+
   res.json(data);
 }));
 
 router.delete("/:id", checkPermission("calendar", "delete"), asyncHandler(async (req, res) => {
+  // Capture title for activity log before delete
+  const { data: existing } = await supabase.from("calendar_events").select("title, date")
+    .eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
+
   const { error } = await supabase.from("calendar_events").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "delete", module: "calendar",
+    recordId: req.params.id, description: `ইভেন্ট মুছে ফেলা: ${existing?.title || req.params.id}${existing?.date ? ` (${existing.date})` : ""}`, ip: req.ip }).catch(() => {});
+  cache.invalidate(req.user.agency_id);
+
   res.json({ success: true });
 }));
 

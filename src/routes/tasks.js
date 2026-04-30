@@ -9,11 +9,18 @@ const router = express.Router();
 router.use(auth);
 
 // GET /api/tasks — agency_id ফিল্টার সহ
+// Server-side LIMIT 500 guard — defends against runaway loads when an
+// agency's task count grows. Frontend client-side paginates within this
+// window. If you need the full set, ?limit=500&offset=N can be added.
 router.get("/", checkPermission("tasks", "read"), asyncHandler(async (req, res) => {
   const { status, assigned_to, priority } = req.query;
+  const limit = Math.min(parseInt(req.query.limit) || 500, 500);
+  const offset = Math.max(0, parseInt(req.query.offset) || 0);
+
   let query = supabase.from("tasks").select("*, students(name_en), schools(name_en)")
     .eq("agency_id", req.user.agency_id)
-    .order("due_date");
+    .order("due_date")
+    .range(offset, offset + limit - 1);
   if (status && status !== "All") query = query.eq("status", status);
   if (assigned_to) query = query.eq("assigned_to", assigned_to);
   if (priority && priority !== "All") query = query.eq("priority", priority);
