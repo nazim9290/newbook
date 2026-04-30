@@ -102,16 +102,45 @@ router.get("/usage", asyncHandler(async (req, res) => {
     countFor("students", agencyId),
   ]);
 
-  // Storage — file_size column থেকে SUM (যদি থাকে); নাহলে 0
-  // Phase 1-এ approximation; Phase 3-এ proper file storage tracking
-  let storageMb = 0;
+  // ── OCR Credits balance + last topup ──
+  let ocrCredits = { balance: 0, last_topup_at: null, last_topup_amount: 0 };
   try {
-    const { rows } = await supabase.pool.query(
-      "SELECT COALESCE(SUM(file_size),0) AS bytes FROM documents WHERE agency_id = $1",
+    const { rows: agRows } = await supabase.pool.query(
+      "SELECT COALESCE(ocr_credits, 0) AS balance FROM agencies WHERE id = $1",
       [agencyId]
     );
-    storageMb = Number(rows?.[0]?.bytes || 0) / (1024 * 1024);
-  } catch { /* table or column missing — ignore */ }
+    ocrCredits.balance = Number(agRows?.[0]?.balance || 0);
+    const { rows: topRows } = await supabase.pool.query(
+      "SELECT amount, created_at FROM ocr_credit_log WHERE agency_id = $1 AND type = 'topup' ORDER BY created_at DESC LIMIT 1",
+      [agencyId]
+    );
+    if (topRows?.[0]) {
+      ocrCredits.last_topup_amount = Number(topRows[0].amount || 0);
+      ocrCredits.last_topup_at = topRows[0].created_at;
+    }
+  } catch { /* ignore */ }
+
+  // ── Doc Generation counts (docgen + excel + docdata create events) ──
+  // Source: activity_log create events from doc-generation modules
+  let docGen = { this_month: 0, last_month: 0, avg_per_student: 0 };
+  try {
+    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+    const lastMonthStart = new Date(monthStart); lastMonthStart.setMonth(lastMonthStart.getMonth() - 1);
+    const { rows } = await supabase.pool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE created_at >= $2) AS this_month,
+        COUNT(*) FILTER (WHERE created_at >= $3 AND created_at < $2) AS last_month
+      FROM activity_log
+      WHERE agency_id = $1
+        AND action = 'create'
+        AND module IN ('docgen', 'excel', 'docdata')
+    `, [agencyId, monthStart.toISOString(), lastMonthStart.toISOString()]);
+    docGen.this_month = Number(rows?.[0]?.this_month || 0);
+    docGen.last_month = Number(rows?.[0]?.last_month || 0);
+    if (studentsUsed > 0) {
+      docGen.avg_per_student = Math.round((docGen.this_month / studentsUsed) * 10) / 10;
+    }
+  } catch { /* ignore */ }
 
   // Build usage object
   const fmt = (used, limit) => ({
@@ -128,8 +157,8 @@ router.get("/usage", asyncHandler(async (req, res) => {
     users:    fmt(usersUsed,    plan?.max_users),
     branches: fmt(branchesUsed, plan?.max_branches),
     students: { ...fmt(studentsUsed, plan?.soft_max_students), is_soft_cap: true },
-    storage:  fmt(Math.round(storageMb * 100) / 100, plan ? plan.max_storage_gb * 1024 : null),  // both in MB
-    storage_unit: "MB",
+    ocr_credits: ocrCredits,
+    doc_gen: docGen,
   });
 }));
 
