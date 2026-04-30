@@ -135,6 +135,111 @@ router.post("/quick-stats", checkPermission("students", "read"), asyncHandler(as
   });
 }));
 
+// POST /api/students/quick-stats/details — per-student flat row data for export
+// body: { ids: [studentId, ...] }
+// returns: { rows: [{ id, name_en, name_bn, phone, batch, ..., jlpt_latest_*, school_*, vfs_*, visa_*, coe_*, flight_* }] }
+// Quick Stats Card-এর underlying data — এজেন্সি column পছন্দ করে CSV download করবে
+router.post("/quick-stats/details", checkPermission("students", "read"), asyncHandler(async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(Boolean) : [];
+  if (ids.length === 0) return res.json({ rows: [] });
+  const agencyId = req.user.agency_id;
+  const { decryptMany } = require("../../lib/crypto");
+
+  // Students core
+  const { data: students, error: stuErr } = await supabase
+    .from("students")
+    .select("id, name_en, name_bn, phone, status, country, school, batch, intake, branch, visa_type")
+    .eq("agency_id", agencyId)
+    .in("id", ids);
+  if (stuErr) return res.status(500).json({ error: "সার্ভার ত্রুটি" });
+  const decryptedStudents = decryptMany(students || []);
+
+  // JLPT latest per student + count
+  const { data: jpExams } = await supabase
+    .from("student_jp_exams")
+    .select("student_id, exam_type, level, score, result, exam_date")
+    .in("student_id", ids)
+    .order("exam_date", { ascending: false, nullsFirst: false });
+  const jpLatest = {}; const jpCount = {};
+  (jpExams || []).forEach(e => {
+    if (!jpLatest[e.student_id]) jpLatest[e.student_id] = e;
+    jpCount[e.student_id] = (jpCount[e.student_id] || 0) + 1;
+  });
+
+  // Submissions latest per student + school name
+  const { data: subs } = await supabase
+    .from("submissions")
+    .select("student_id, status, submission_date, interview_date, coe_received_date, schools(name_en, name_jp)")
+    .eq("agency_id", agencyId)
+    .in("student_id", ids)
+    .order("submission_date", { ascending: false, nullsFirst: false });
+  const subLatest = {};
+  (subs || []).forEach(s => { if (!subLatest[s.student_id]) subLatest[s.student_id] = s; });
+
+  // Pre-departure rows
+  const { data: pds } = await supabase
+    .from("pre_departure")
+    .select("student_id, coe_number, coe_date, vfs_appointment_date, vfs_docs_submitted, visa_status, visa_date, visa_expiry, flight_date, flight_number, arrival_confirmed")
+    .eq("agency_id", agencyId)
+    .in("student_id", ids);
+  const pdMap = {};
+  (pds || []).forEach(p => { pdMap[p.student_id] = p; });
+
+  // Format for CSV — boolean → হ্যাঁ/না, dates → YYYY-MM-DD
+  const fmtBool = (v) => v === true ? "হ্যাঁ" : v === false ? "না" : "";
+  const fmtDate = (d) => {
+    if (!d) return "";
+    if (d instanceof Date) return d.toISOString().slice(0, 10);
+    return String(d).slice(0, 10);
+  };
+
+  const rows = decryptedStudents.map(s => {
+    const jp = jpLatest[s.id] || {};
+    const sub = subLatest[s.id] || {};
+    const subSchool = sub.schools?.name_en || sub.schools?.name_jp || "";
+    const pd = pdMap[s.id] || {};
+    return {
+      id: s.id,
+      name_en: s.name_en || "",
+      name_bn: s.name_bn || "",
+      phone: s.phone || "",
+      status: s.status || "",
+      country: s.country || "",
+      school: s.school || "",
+      batch: s.batch || "",
+      intake: s.intake || "",
+      branch: s.branch || "",
+      visa_type: s.visa_type || "",
+      // JLPT
+      jlpt_latest_type: jp.exam_type || "",
+      jlpt_latest_level: jp.level || "",
+      jlpt_latest_result: jp.result || "",
+      jlpt_latest_score: jp.score || "",
+      jlpt_latest_date: fmtDate(jp.exam_date),
+      jlpt_attempts: jpCount[s.id] || 0,
+      // School submission
+      school_submitted_to: subSchool,
+      school_submission_status: sub.status || "",
+      school_submission_date: fmtDate(sub.submission_date),
+      school_interview_date: fmtDate(sub.interview_date),
+      school_coe_received_date: fmtDate(sub.coe_received_date),
+      // VFS / Visa / COE / Flight
+      coe_number: pd.coe_number || "",
+      coe_date: fmtDate(pd.coe_date),
+      vfs_appointment_date: fmtDate(pd.vfs_appointment_date),
+      vfs_docs_submitted: fmtBool(pd.vfs_docs_submitted),
+      visa_status: pd.visa_status || "",
+      visa_date: fmtDate(pd.visa_date),
+      visa_expiry: fmtDate(pd.visa_expiry),
+      flight_date: fmtDate(pd.flight_date),
+      flight_number: pd.flight_number || "",
+      arrived: fmtBool(pd.arrival_confirmed),
+    };
+  });
+
+  res.json({ rows });
+}));
+
 // GET /api/students/:id/overview — single student-এর key info modal-এর জন্য
 router.get("/:id/overview", checkPermission("students", "read"), asyncHandler(async (req, res) => {
   const agencyId = req.user.agency_id;
