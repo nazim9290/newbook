@@ -44,31 +44,42 @@ const VALID_UPDATE_TYPES = new Set([
 router.get("/", checkPermission("students", "read"), asyncHandler(async (req, res) => {
   const { current_status, city, arrived_year, search } = req.query;
 
-  let q = supabase.from("students")
-    .select("id, name_en, name_bn, photo_url, status, school, school_id, batch, batch_id, branch, agent_id, country, source, intake, alumni_current_status, alumni_school_name, alumni_company_name, alumni_company_position, alumni_city, alumni_prefecture, alumni_last_contact, alumni_referrals_count, alumni_arrived_date, alumni_notes, updated_at")
-    .eq("agency_id", req.user.agency_id);
+  // Use raw SQL — supabase-js .or() with .in.(A,B,C) inside breaks the comma parser
+  // and silently returns ALL agency students (the bug fix this commit addresses).
+  const conds = ["agency_id = $1"];
+  const params = [req.user.agency_id];
+  conds.push("(status IN ('VISA_GRANTED','ARRIVED','COMPLETED') OR alumni_current_status IS NOT NULL)");
 
-  // Alumni starts at VISA_GRANTED — moment student is Japan-bound. Continues through ARRIVED/COMPLETED.
-  // Also include any record that already has alumni_* data set.
-  q = q.or(`status.in.(VISA_GRANTED,ARRIVED,COMPLETED),alumni_current_status.not.is.null`);
-
-  if (current_status) q = q.eq("alumni_current_status", current_status);
-  if (city)           q = q.eq("alumni_city", city);
-  if (search)         q = q.ilike("name_en", `%${search}%`);
+  if (current_status) { params.push(current_status); conds.push(`alumni_current_status = $${params.length}`); }
+  if (city)           { params.push(city);           conds.push(`alumni_city = $${params.length}`); }
+  if (search)         { params.push(`%${search}%`);  conds.push(`name_en ILIKE $${params.length}`); }
   if (arrived_year) {
-    q = q.gte("alumni_arrived_date", `${arrived_year}-01-01`)
-         .lte("alumni_arrived_date", `${arrived_year}-12-31`);
+    params.push(`${arrived_year}-01-01`);
+    conds.push(`alumni_arrived_date >= $${params.length}::date`);
+    params.push(`${arrived_year}-12-31`);
+    conds.push(`alumni_arrived_date <= $${params.length}::date`);
   }
 
-  q = q.order("alumni_last_contact", { ascending: false, nullsLast: true })
-       .order("updated_at", { ascending: false });
+  const sql = `
+    SELECT id, name_en, name_bn, photo_url, status, school, school_id, batch, batch_id, branch, agent_id,
+           country, source, intake,
+           alumni_current_status, alumni_school_name, alumni_company_name, alumni_company_position,
+           alumni_city, alumni_prefecture, alumni_last_contact, alumni_referrals_count,
+           alumni_arrived_date, alumni_notes, updated_at
+    FROM students
+    WHERE ${conds.join(" AND ")}
+    ORDER BY alumni_last_contact DESC NULLS LAST, updated_at DESC
+  `;
 
-  const { data, error } = await q;
-  if (error) { console.error("[Alumni list]", error.message); return res.status(500).json({ error: "Alumni লোড ব্যর্থ" }); }
-
-  // photo_url not sensitive; rest of these columns aren't in SENSITIVE_FIELDS so decryptMany is a no-op,
-  // but call it for safety in case future fields are added.
-  res.json(decryptMany(data || []));
+  try {
+    const { rows } = await supabase.pool.query(sql, params);
+    // alumni_* columns aren't in SENSITIVE_FIELDS, but decryptMany is a no-op for plain rows
+    // and gives forward-compat if any field becomes encrypted later.
+    res.json(decryptMany(rows));
+  } catch (err) {
+    console.error("[Alumni list]", err.message);
+    return res.status(500).json({ error: "Alumni লোড ব্যর্থ" });
+  }
 }));
 
 // ════════════════════════════════════════════════════════════
