@@ -45,11 +45,12 @@ router.get("/", checkPermission("students", "read"), asyncHandler(async (req, re
   const { current_status, city, arrived_year, search } = req.query;
 
   let q = supabase.from("students")
-    .select("id, name_en, name_bn, photo_url, status, school, batch, country, alumni_current_status, alumni_school_name, alumni_company_name, alumni_company_position, alumni_city, alumni_prefecture, alumni_last_contact, alumni_referrals_count, alumni_arrived_date, alumni_notes, updated_at")
+    .select("id, name_en, name_bn, photo_url, status, school, school_id, batch, batch_id, branch, agent_id, country, source, intake, alumni_current_status, alumni_school_name, alumni_company_name, alumni_company_position, alumni_city, alumni_prefecture, alumni_last_contact, alumni_referrals_count, alumni_arrived_date, alumni_notes, updated_at")
     .eq("agency_id", req.user.agency_id);
 
-  // Only show students who reached arrival OR have any alumni data
-  q = q.or(`status.in.(ARRIVED,COMPLETED),alumni_current_status.not.is.null`);
+  // Alumni starts at VISA_GRANTED — moment student is Japan-bound. Continues through ARRIVED/COMPLETED.
+  // Also include any record that already has alumni_* data set.
+  q = q.or(`status.in.(VISA_GRANTED,ARRIVED,COMPLETED),alumni_current_status.not.is.null`);
 
   if (current_status) q = q.eq("alumni_current_status", current_status);
   if (city)           q = q.eq("alumni_city", city);
@@ -77,7 +78,7 @@ router.get("/stats", checkPermission("students", "read"), asyncHandler(async (re
   const pool = supabase.pool;
   const { rows } = await pool.query(`
     SELECT
-      COUNT(*) FILTER (WHERE status IN ('ARRIVED','COMPLETED') OR alumni_current_status IS NOT NULL)::int AS total_alumni,
+      COUNT(*) FILTER (WHERE status IN ('VISA_GRANTED','ARRIVED','COMPLETED') OR alumni_current_status IS NOT NULL)::int AS total_alumni,
       COUNT(*) FILTER (WHERE alumni_current_status = 'language_school')::int AS language_school,
       COUNT(*) FILTER (WHERE alumni_current_status = 'senmon')::int          AS senmon,
       COUNT(*) FILTER (WHERE alumni_current_status = 'university')::int      AS university,
