@@ -142,10 +142,50 @@ router.get("/status", auth, asyncHandler(async (req, res) => {
   });
 }));
 
+// ── Auth resolver: accept regular JWT OR enrollToken (forced-enroll flow) ──
+// During forced enrollment, user has enrollToken signed with JWT_SECRET + "_MFA"
+// (mode: "enroll"). They're not fully logged in yet, so the regular auth
+// middleware can't be used — but /setup-init and /setup-verify must still
+// authenticate them. This middleware accepts either path.
+function authOrEnroll(req, res, next) {
+  // Try regular JWT first (cookie or Bearer)
+  let token = (req.cookies && req.cookies.agencybook_token) || null;
+  if (!token) {
+    const header = req.headers.authorization;
+    if (header && header.startsWith("Bearer ")) token = header.slice(7);
+  }
+
+  if (token) {
+    try {
+      req.user = jwt.verify(token, process.env.JWT_SECRET);
+      return next();
+    } catch {
+      // fall through to enrollToken
+    }
+  }
+
+  // Fall back to enrollToken in body
+  const enrollToken = req.body && req.body.enrollToken;
+  if (enrollToken) {
+    try {
+      const payload = jwt.verify(enrollToken, mfaSecretKey());
+      if (payload.mode === "enroll" && payload.userId) {
+        req.user = { id: payload.userId, _enrollOnly: true };
+        return next();
+      }
+    } catch {
+      // fall through to 401
+    }
+  }
+
+  return res.status(401).json({ error: "Token প্রয়োজন" });
+}
+
 // ════════════════════════════════════════════════════════════
 // POST /setup-init — generate fresh secret + QR
+// (auth OR enrollToken — supports forced-enroll flow)
 // ════════════════════════════════════════════════════════════
-router.post("/setup-init", auth, asyncHandler(async (req, res) => {
+router.post("/setup-init", authOrEnroll, asyncHandler(async (req, res) => {
   const user = await loadUser(req.user.id);
   if (!user) return res.status(404).json({ error: "User পাওয়া যায়নি" });
 
@@ -173,7 +213,7 @@ router.post("/setup-init", auth, asyncHandler(async (req, res) => {
 // ════════════════════════════════════════════════════════════
 // POST /setup-verify — confirm first TOTP, return backup codes
 // ════════════════════════════════════════════════════════════
-router.post("/setup-verify", auth, setupVerifyLimiter, asyncHandler(async (req, res) => {
+router.post("/setup-verify", authOrEnroll, setupVerifyLimiter, asyncHandler(async (req, res) => {
   const { token } = req.body || {};
   if (!token) return res.status(400).json({ error: "৬ digit কোড দিন" });
 
