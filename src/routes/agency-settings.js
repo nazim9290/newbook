@@ -43,6 +43,7 @@ const PUBLIC_PATCH_COLS = new Set([
   "enable_doc_expiry_alerts", "enable_anomaly_alerts", "enable_offsite_backup",
   "backup_target", "backup_drive_folder_id", "backup_retention_days", "backup_schedule_cron",
   "sms_provider", "whatsapp_phone_number_id",
+  "bot_llm_enabled",
 ]);
 
 // ── Encrypted credential columns ──

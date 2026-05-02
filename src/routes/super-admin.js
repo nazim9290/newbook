@@ -173,6 +173,21 @@ router.post("/agencies", multiTenantGuard(), asyncHandler(async (req, res) => {
     await supabase.from("portal_form_config").insert(newConfigs);
   }
 
+  // Seed bot_knowledge — clone every is_seed=TRUE entry from the demo agency
+  // so the new agency boots with the curated FAQ. Owner can edit/delete later.
+  try {
+    await supabase.pool.query(
+      `INSERT INTO bot_knowledge
+         (agency_id, question, answer, keywords, category, min_role, query_type, permission_required, is_seed, is_active, created_by)
+       SELECT $1, question, answer, keywords, category, min_role, query_type, permission_required, TRUE, TRUE, $2
+         FROM bot_knowledge
+        WHERE agency_id = $3 AND is_seed = TRUE`,
+      [agency.id, adminUser?.id || null, "a0000000-0000-0000-0000-000000000001"]
+    );
+  } catch (err) {
+    console.warn("[Agency Create] bot_knowledge seed skipped:", err.message);
+  }
+
   res.status(201).json({ agency, admin: { id: adminUser.id, name: adminUser.name, email: adminUser.email } });
 }));
 
