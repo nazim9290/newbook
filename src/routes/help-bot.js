@@ -115,11 +115,14 @@ router.post('/ask', asyncHandler(async (req, res) => {
   // ── 1. KB lookup (top N candidates, role-gated, agency-scoped) ──
   // Three signals, take the strongest:
   //   a) trigram similarity on question text (handles typos/phrasing)
-  //   b) keyword overlap, but ONLY for keywords ≥ 4 chars AND with word
-  //      boundaries — prevents "what"/"add"/"কী" from false-firing on
-  //      every question that happens to contain those substrings
-  //   c) full-question phrase ILIKE (only fires if user typed the exact
-  //      question wording, basically)
+  //   b) keyword overlap — keywords MUST be ≥ 5 chars to be considered.
+  //      Short keywords like "what"/"add"/"কী" matched too many unrelated
+  //      questions via ILIKE substring. 5+ char threshold drops most
+  //      generic English/Bengali stop-words while keeping domain terms
+  //      ("student", "visitor", "agency", etc.).
+  //   c) full-question phrase ILIKE — only fires when user input is ≥ 8
+  //      chars (so "test" doesn't trigger a phrase match on every entry
+  //      with "test" in it).
   // Pull TOP_N+4, then filter by min_role + permission in JS.
   const sql = `
     SELECT id, question, answer, category, keywords, min_role, query_type, permission_required,
@@ -127,8 +130,8 @@ router.post('/ask', asyncHandler(async (req, res) => {
              similarity(question, $1),
              CASE WHEN EXISTS (
                SELECT 1 FROM unnest(keywords) k
-                WHERE char_length(k) >= 4
-                  AND ($1 ~* ('(^|[^[:alnum:]])' || k || '($|[^[:alnum:]])'))
+                WHERE char_length(k) >= 5
+                  AND $1 ILIKE '%' || k || '%'
              ) THEN 0.9 ELSE 0 END,
              CASE WHEN char_length($1) >= 8 AND question ILIKE '%' || $1 || '%' THEN 0.85 ELSE 0 END
            ) AS score
