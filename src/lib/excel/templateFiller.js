@@ -12,35 +12,23 @@ const ExcelJS = require("exceljs");
 const path = require("path");
 const fs = require("fs");
 const supabase = require("../db");
+const storage = require("../storage");
 const { decrypt } = require("../crypto");
 const { getCellText, encName, looksEncrypted } = require("./cellUtils");
 const { flattenStudent, resolveFieldValue } = require("./studentData");
 
-// Template file আনো — local path / fallback locations চেক
-// VPS-এ deploy/restart-এ subfolder wipe হলেও পুরনো ফাইল root-level uploads-এ
-// থাকতে পারে — সেটাও cover করি যাতে DB-র stale absolute path silently break না করে।
+// Template file আনো — storage backend (local FS or R2) থেকে।
+// local backend-এ legacy absolute path / basename fallback already built in.
 async function getTemplateBuffer(templateUrl) {
   if (!templateUrl) return null;
-  const base = path.basename(templateUrl);
-
-  const candidates = [
-    templateUrl, // 1. Absolute path stored at upload-time
-    path.join(__dirname, "../../../uploads/excel-templates", base), // 2. Standard subfolder
-    path.join(__dirname, "../../../uploads", base), // 3. Legacy: pre-refactor root uploads
-    path.join(__dirname, "../../..", templateUrl), // 4. Backend-root relative path
-  ];
-
-  for (const p of candidates) {
-    try {
-      if (p && fs.existsSync(p)) {
-        if (p !== templateUrl) console.warn("[Excel] template fallback hit:", p);
-        return fs.readFileSync(p);
-      }
-    } catch { /* path resolution issue, try next */ }
+  try {
+    const buf = await storage.get(templateUrl);
+    if (!buf) console.error("[Excel] template not found in storage:", templateUrl, "backend:", storage.kind);
+    return buf;
+  } catch (e) {
+    console.error("[Excel] storage.get error:", e.message);
+    return null;
   }
-
-  console.error("Template file not found anywhere:", templateUrl, "tried:", candidates);
-  return null;
 }
 
 // Buffer থেকে template পড়ে student data + system context fill করে return

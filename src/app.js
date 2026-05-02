@@ -158,9 +158,19 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── Static Files — uploads ফোল্ডার serve (avatars, logos, documents) ──
+// ── Storage backend init ──
+// STORAGE_BACKEND=local (default) বা r2 — lib/storage/index.js দেখুন।
+// local backend-এ boot-এ standard subdirs (excel-templates, doc-templates ইত্যাদি)
+// auto-create করি যাতে VPS deploy/restart-এ folder মিসিং থাকলেও সেলফ-হিল হয়।
 const path = require("path");
-app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+const storage = require("./lib/storage");
+try { storage.ensureDirs(); } catch (e) { console.error("[storage] ensureDirs failed:", e.message); }
+
+// ── Static Files — uploads ফোল্ডার serve (avatars, logos, documents) ──
+// শুধু local backend-এ relevant — R2-তে files সরাসরি cloud থেকে আসে।
+if (storage.kind === "local") {
+  app.use("/uploads", express.static(storage.UPLOADS_DIR));
+}
 
 // ── Health Check — সার্ভার ও ডাটাবেস চালু আছে কিনা check করতে ──
 const { pool } = require("./lib/db");

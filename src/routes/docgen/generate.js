@@ -10,6 +10,7 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const supabase = require("../../lib/db");
+const storage = require("../../lib/storage");
 const auth = require("../../middleware/auth");
 const asyncHandler = require("../../lib/asyncHandler");
 const { decryptSensitiveFields } = require("../../lib/crypto");
@@ -96,29 +97,15 @@ router.post("/generate", asyncHandler(async (req, res) => {
       flat.issuing_line2 = flat.union_name ? [flat.upazila_name, flat.district_name].filter(Boolean).join(", ") : flat.zone ? `Zone-${flat.zone}` : "";
     }
 
-    // Get template file buffer — try multiple known locations so a stale
-    // absolute path or wiped subfolder doesn't silently break generation.
-    let templateBuffer;
+    // Storage backend (local FS or R2) থেকে template buffer load করি।
+    // local backend-এ legacy absolute path / basename fallback already built in,
+    // R2-তে object key দিয়ে fetch।
     const tmplPath = tmpl.template_url || tmpl.file_path;
-    if (tmplPath) {
-      const base = path.basename(tmplPath);
-      const candidates = [
-        tmplPath, // absolute as stored
-        path.join(__dirname, "../../../uploads/doc-templates", base), // standard subfolder
-        path.join(__dirname, "../../../uploads", base), // legacy root uploads
-      ];
-      for (const p of candidates) {
-        try {
-          if (fs.existsSync(p)) {
-            if (p !== tmplPath) console.warn("[DocGen] template fallback hit:", p);
-            templateBuffer = fs.readFileSync(p);
-            break;
-          }
-        } catch {}
-      }
-    }
+    let templateBuffer = null;
+    try { templateBuffer = await storage.get(tmplPath); }
+    catch (e) { console.error("[DocGen] storage.get error:", e.message); }
     if (!templateBuffer) {
-      console.error("[DocGen] template missing — DB path:", tmplPath);
+      console.error("[DocGen] template missing — DB path:", tmplPath, "backend:", storage.kind);
       return res.status(400).json({ error: "Template file পাওয়া যায়নি — admin-কে template আবার upload করতে বলুন" });
     }
 

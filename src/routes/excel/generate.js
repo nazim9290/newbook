@@ -18,7 +18,6 @@ const { buildSystemContext } = require("../../lib/excel/systemContext");
 const {
   getTemplateBuffer,
   fillSingleStudentFromBuffer,
-  generateCSV,
 } = require("../../lib/excel/templateFiller");
 const { detectMappings } = require("../../lib/excel/aiAnalyzer");
 

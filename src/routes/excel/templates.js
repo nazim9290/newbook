@@ -14,6 +14,7 @@ const ExcelJS = require("exceljs");
 const path = require("path");
 const fs = require("fs");
 const supabase = require("../../lib/db");
+const storage = require("../../lib/storage");
 const auth = require("../../middleware/auth");
 const asyncHandler = require("../../lib/asyncHandler");
 const { upload } = require("./_shared");
@@ -69,18 +70,19 @@ router.post("/upload-template", upload.single("file"), asyncHandler(async (req, 
 
     const agencyId = req.user.agency_id || "a0000000-0000-0000-0000-000000000001";
 
-    // 1. Local VPS-এ ফাইল রাখি — permanent path-এ move
-    const permanentDir = path.join(__dirname, "../../../uploads/excel-templates");
-    if (!fs.existsSync(permanentDir)) fs.mkdirSync(permanentDir, { recursive: true });
+    // 1. ফাইল storage-এ save করো (local FS বা R2 — STORAGE_BACKEND env দ্বারা নির্ধারিত)
+    // DB-তে relative key store হয় (`excel-templates/<filename>`) — absolute path নয়
+    // যাতে VPS migrate / backend redeploy / cwd change-এ ভাঙে না।
     const safeName = `${agencyId}_${Date.now()}_${req.file.originalname.replace(/[^a-zA-Z0-9._\-]/g, "_")}`;
-    const permanentPath = path.join(permanentDir, safeName);
-    fs.copyFileSync(req.file.path, permanentPath);
-    try { fs.unlinkSync(req.file.path); } catch {} // temp file মুছি
-    console.log("Template saved locally:", permanentPath);
+    const storageKey = `excel-templates/${safeName}`;
+    const fileBuffer = fs.readFileSync(req.file.path);
+    await storage.put(storageKey, fileBuffer);
+    try { fs.unlinkSync(req.file.path); } catch {} // multer temp file মুছি
+    console.log("[Excel] Template saved:", storageKey, "via", storage.kind);
 
-    // 2. Parse Excel — শুধু {{placeholder}} cells detect করো
+    // 2. Parse Excel — শুধু {{placeholder}} cells detect করো (buffer থেকে — local/R2 uniform)
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(permanentPath);
+    await workbook.xlsx.load(fileBuffer);
 
     const placeholders = []; // শুধু {{...}} আছে এমন cells
     const seen = new Set();  // duplicate detect (merged cells একই data repeat করে)
@@ -138,7 +140,7 @@ router.post("/upload-template", upload.single("file"), asyncHandler(async (req, 
         school_name,
         school_id: schoolIds[0] || null,
         file_name: req.file.originalname,
-        template_url: permanentPath, // VPS local path — getTemplateBuffer এখান থেকে পড়বে
+        template_url: storageKey, // relative key — backend-agnostic (local FS or R2)
         mappings: JSON.stringify(placeholders), // {{}} mappings — JSONB column-এ string হিসেবে পাঠাই
         total_fields: placeholders.length,
         mapped_fields: placeholders.filter(p => p.field).length,
@@ -265,10 +267,7 @@ router.post("/templates/:id/mapping", asyncHandler(async (req, res) => {
 router.delete("/templates/:id", asyncHandler(async (req, res) => {
   const { data: tmpl } = await supabase.from("excel_templates").select("template_url").eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
   if (tmpl && tmpl.template_url) {
-    // Delete from local
-    if (fs.existsSync(tmpl.template_url)) fs.unlinkSync(tmpl.template_url);
-    // Delete from Supabase Storage
-    await supabase.storage.from("templates").remove([tmpl.template_url]);
+    try { await storage.del(tmpl.template_url); } catch (e) { console.warn("[Excel] storage delete:", e.message); }
   }
   const { error } = await supabase.from("excel_templates").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });

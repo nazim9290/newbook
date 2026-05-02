@@ -12,6 +12,7 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const supabase = require("../../lib/db");
+const storage = require("../../lib/storage");
 const auth = require("../../middleware/auth");
 const asyncHandler = require("../../lib/asyncHandler");
 const { upload } = require("./_shared");
@@ -190,15 +191,13 @@ router.post("/upload", upload.single("file"), asyncHandler(async (req, res) => {
 
     const agencyId = req.user.agency_id || "a0000000-0000-0000-0000-000000000001";
 
-    // Local VPS-এ permanent path-এ save
-    const permanentDir = path.join(__dirname, "../../../uploads/doc-templates");
-    if (!fs.existsSync(permanentDir)) fs.mkdirSync(permanentDir, { recursive: true });
+    // ফাইল storage-এ save (local FS বা R2 — STORAGE_BACKEND env দ্বারা)
+    // DB-তে relative key (`doc-templates/<filename>`) — absolute path নয়
     const safeName = `${agencyId}_${Date.now()}_${req.file.originalname.replace(/[^a-zA-Z0-9._\-]/g, "_")}`;
-    const permanentPath = path.join(permanentDir, safeName);
-    fs.copyFileSync(req.file.path, permanentPath);
-    try { fs.unlinkSync(req.file.path); } catch {}
-
-    const fileBuffer = fs.readFileSync(permanentPath);
+    const storageKey = `doc-templates/${safeName}`;
+    const fileBuffer = fs.readFileSync(req.file.path);
+    await storage.put(storageKey, fileBuffer);
+    try { fs.unlinkSync(req.file.path); } catch {} // multer temp file
 
     // Parse .docx (ZIP of XML files) to find {{placeholders}}
     const AdmZip = require("adm-zip");
@@ -245,8 +244,8 @@ router.post("/upload", upload.single("file"), asyncHandler(async (req, res) => {
         name: template_name,
         category: category || "translation",
         description: req.body.description || req.file.originalname,
-        template_url: permanentPath,
-        file_path: permanentPath,
+        template_url: storageKey,
+        file_path: storageKey,
         field_mappings: JSON.stringify(placeholders),
         placeholders: JSON.stringify(placeholders),
         default_template_id: null,
@@ -281,22 +280,22 @@ router.post("/create-from-default", asyncHandler(async (req, res) => {
   const { data: dt } = await supabase.from("default_templates").select("*").eq("id", default_template_id).single();
   if (!dt || !dt.file_url) return res.status(404).json({ error: "Default template পাওয়া যায়নি বা ফাইল নেই" });
 
-  // File copy — default → agency template
+  // Default template-গুলো repo-র সাথে shipped (deploy/default_templates/...) — তাই
+  // সরাসরি filesystem থেকে পড়ি, storage backend-এ না। তারপর agency-এর copy
+  // storage.put() দিয়ে save করি — যেটা local বা R2 যেখানে set করা।
   const srcPath = path.join(__dirname, "../../..", dt.file_url);
   if (!fs.existsSync(srcPath)) return res.status(404).json({ error: "Template file পাওয়া যায়নি: " + dt.file_url });
+  const srcBuffer = fs.readFileSync(srcPath);
 
-  const ext = path.extname(dt.file_name || "template.docx");
   const destName = `${req.user.agency_id}_${Date.now()}_${(dt.file_name || "template.docx").replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-  const destDir = path.join(__dirname, "../../../uploads/doc-templates");
-  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-  const destPath = path.join(destDir, destName);
-  fs.copyFileSync(srcPath, destPath);
+  const storageKey = `doc-templates/${destName}`;
+  await storage.put(storageKey, srcBuffer);
 
-  // Detect placeholders from copied file
+  // Detect placeholders from buffer (zip parse uniformly)
   let placeholders = [];
   try {
     const AdmZip = require("adm-zip");
-    const zip = new AdmZip(destPath);
+    const zip = new AdmZip(srcBuffer);
     const foundKeys = new Set();
     zip.getEntries().forEach(entry => {
       if (entry.entryName.endsWith(".xml")) {
@@ -350,8 +349,8 @@ router.post("/create-from-default", asyncHandler(async (req, res) => {
     category: category || "translation",
     description: description || dt.description || "",
     linked_doc_type: linked_doc_type || "",
-    template_url: destPath,
-    file_path: destPath,
+    template_url: storageKey,
+    file_path: storageKey,
     field_mappings: JSON.stringify(placeholders),
     placeholders: JSON.stringify(placeholders),
     default_template_id: default_template_id,
@@ -387,8 +386,8 @@ router.post("/templates/:id/mapping", asyncHandler(async (req, res) => {
 // ================================================================
 router.delete("/templates/:id", asyncHandler(async (req, res) => {
   const { data: tmpl } = await supabase.from("doc_templates").select("template_url").eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
-  if (tmpl?.template_url && fs.existsSync(tmpl.template_url)) {
-    try { fs.unlinkSync(tmpl.template_url); } catch {}
+  if (tmpl?.template_url) {
+    try { await storage.del(tmpl.template_url); } catch (e) { console.warn("[DocGen] storage delete:", e.message); }
   }
   const { error } = await supabase.from("doc_templates").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
