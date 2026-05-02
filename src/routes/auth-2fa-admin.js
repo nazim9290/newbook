@@ -90,7 +90,10 @@ router.post("/enable/:userId", asyncHandler(async (req, res) => {
 }));
 
 // ════════════════════════════════════════════════════════════
-// POST /disable/:userId — admin fully disables 2FA
+// POST /disable/:userId — admin removes the force-required flag only
+// User's existing 2FA setup (secret, backup codes, enabled flag) stays
+// intact — admin cannot destroy a user's own 2FA data.
+// To wipe a user's setup (e.g. lost phone), use /reset.
 // ════════════════════════════════════════════════════════════
 router.post("/disable/:userId", asyncHandler(async (req, res) => {
   const target = await loadTarget(req, res);
@@ -98,15 +101,11 @@ router.post("/disable/:userId", asyncHandler(async (req, res) => {
 
   await supabase.from("users").update({
     totp_required: false,
-    totp_enabled: false,
-    totp_secret: null,
-    totp_backup_codes: null,
-    totp_enrolled_at: null,
   }).eq("id", target.id);
 
   log2FAEvent({
     supabase, agencyId: target.agency_id, userId: target.id, actorId: req.user.id,
-    event: "admin_disabled", ip: req.ip, userAgent: req.headers["user-agent"],
+    event: "admin_unrequired", ip: req.ip, userAgent: req.headers["user-agent"],
     metadata: { target_email: target.email },
   });
 
