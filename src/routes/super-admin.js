@@ -1030,4 +1030,72 @@ router.get("/metrics/revenue", asyncHandler(async (req, res) => {
   });
 }));
 
+// ═══════════════════════════════════════════════════
+// GET /integrations-overview — cross-agency BYOK status table
+// Read-only audit view: which agencies have configured which services,
+// when they were last validated, last errors. No credential decryption —
+// shows masked metadata only.
+// ═══════════════════════════════════════════════════
+router.get("/integrations-overview", asyncHandler(async (req, res) => {
+  const { rows } = await supabase.pool.query(`
+    SELECT
+      a.id AS agency_id, a.name AS agency_name, a.subdomain, a.plan,
+      i.service, i.enabled, i.validated_at, i.last_error, i.updated_at,
+      u.call_count AS month_usage
+    FROM agencies a
+    LEFT JOIN agency_integrations i ON i.agency_id = a.id
+    LEFT JOIN agency_api_usage u
+      ON u.agency_id = a.id AND u.service = i.service
+      AND u.period = to_char(now(), 'YYYY-MM')
+    WHERE a.status = 'active'
+    ORDER BY a.name, i.service
+  `);
+
+  // Group by agency
+  const byAgency = {};
+  for (const r of rows) {
+    if (!byAgency[r.agency_id]) {
+      byAgency[r.agency_id] = {
+        agency_id: r.agency_id,
+        agency_name: r.agency_name,
+        subdomain: r.subdomain,
+        plan: r.plan,
+        integrations: {},
+      };
+    }
+    if (r.service) {
+      byAgency[r.agency_id].integrations[r.service] = {
+        enabled: r.enabled,
+        validated_at: r.validated_at,
+        last_error: r.last_error,
+        updated_at: r.updated_at,
+        month_usage: r.month_usage || 0,
+      };
+    }
+  }
+
+  // Also fetch this month's platform-key usage (agencies that haven't BYOK'd
+  // for a service still consume the platform key — surface that too)
+  const { rows: usageRows } = await supabase.pool.query(`
+    SELECT u.agency_id, u.service, u.call_count
+    FROM agency_api_usage u
+    WHERE u.period = to_char(now(), 'YYYY-MM')
+      AND NOT EXISTS (
+        SELECT 1 FROM agency_integrations i
+        WHERE i.agency_id = u.agency_id AND i.service = u.service AND i.enabled = true
+      )
+  `);
+  for (const r of usageRows) {
+    if (byAgency[r.agency_id]) {
+      byAgency[r.agency_id].platform_usage ||= {};
+      byAgency[r.agency_id].platform_usage[r.service] = r.call_count;
+    }
+  }
+
+  res.json({
+    period: new Date().toISOString().slice(0, 7),
+    agencies: Object.values(byAgency),
+  });
+}));
+
 module.exports = router;

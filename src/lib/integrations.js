@@ -357,10 +357,38 @@ async function testSmtp(credentials) {
   return { ok: true, host: credentials.host };
 }
 
+async function testStripe(credentials) {
+  // Hit Stripe's /v1/balance endpoint with the secret key — it returns 200
+  // only for live valid keys, doesn't move money, doesn't create charges.
+  // If the publishable_key is provided, we don't validate it here (Stripe
+  // doesn't expose a server-side check for it; it's used in the browser).
+  if (!credentials.secret_key) throw new Error("secret_key required");
+  if (!credentials.secret_key.startsWith("sk_")) {
+    throw new Error("secret_key should start with sk_test_ or sk_live_");
+  }
+  const res = await fetch("https://api.stripe.com/v1/balance", {
+    method: "GET",
+    headers: { Authorization: `Bearer ${credentials.secret_key}` },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `Stripe API error ${res.status}`);
+  }
+  const balance = await res.json();
+  const mode = credentials.secret_key.startsWith("sk_live_") ? "live" : "test";
+  return {
+    ok: true,
+    mode,
+    livemode: balance.livemode,
+    available_currencies: (balance.available || []).map(b => b.currency),
+  };
+}
+
 async function testCredential(service, credentials) {
   if (service === "anthropic") return testAnthropic(credentials);
   if (service === "r2") return testR2(credentials);
   if (service === "smtp") return testSmtp(credentials);
+  if (service === "stripe") return testStripe(credentials);
   throw new Error(`No test handler for service: ${service}`);
 }
 
