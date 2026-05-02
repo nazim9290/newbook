@@ -116,6 +116,8 @@ async function scanAgency(agency) {
             field: f.field,
             expiryDate,
             daysRemaining,
+            // Deep-link for in-app inbox + push click → opens that student's detail
+            url: `/students/${stu.id}`,
           },
         });
 

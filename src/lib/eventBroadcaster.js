@@ -129,6 +129,7 @@ async function visaGrantedPush() {
           actorName: stu.name_en || stu.name_bn,
           details: { school: stu.school_name, message: "Student visa পেয়েছে — congratulate করুন!" },
           agencyName: "",
+          url: `/students/${stu.id}`,
         },
       });
       await pool.query(
@@ -159,7 +160,7 @@ async function largePaymentPush() {
   for (const agency of agencies) {
     const threshold = Number(agency.large_payment_threshold || 100000);
     const { rows: payments } = await pool.query(`
-      SELECT p.id, p.amount, p.method, p.date,
+      SELECT p.id, p.amount, p.method, p.date, p.student_id,
              s.name_en, s.name_bn
       FROM payments p
       LEFT JOIN students s ON s.id = p.student_id
@@ -183,6 +184,8 @@ async function largePaymentPush() {
             actorName: p.name_en || p.name_bn || "—",
             details: { amount: `৳${Number(p.amount).toLocaleString("en-IN")}`, method: p.method, date: p.date },
             agencyName: agency.name,
+            // Deep-link to the student so user can verify the payment in context
+            url: p.student_id ? `/students/${p.student_id}` : "/accounts",
           },
         });
         await pool.query(

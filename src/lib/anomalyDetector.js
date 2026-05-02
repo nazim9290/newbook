@@ -81,7 +81,7 @@ async function recordTrigger({ agencyId, rule, actorId, details }) {
       agencyId,
       topic: "anomaly",
       template: "anomaly_alert",
-      data: { ruleType: rule.rule_type, actorName, details, agencyName },
+      data: { ruleType: rule.rule_type, actorName, details, agencyName, url: "/audit-log" },
     });
     if (dispatch.sent > 0) {
       await pool.query(`UPDATE anomaly_events SET notified = TRUE WHERE id = $1`, [ev[0].id]);
