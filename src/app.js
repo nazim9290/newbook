@@ -266,6 +266,7 @@ app.use("/api/system", require("./routes/system"));               // System info
 app.use("/api/ops", require("./routes/ops"));                     // Operator console — heartbeat ingress + dashboard (Phase 3)
 app.use("/api/onboarding", require("./routes/onboarding"));       // Excel/CSV import wizard (Phase 4)
 app.use("/api/exit", require("./routes/exit"));                   // Customer data export (Phase 5)
+app.use("/api/api-keys", require("./routes/api-keys"));           // Public API key management (Phase 13)
 // ── Owner Power-Up Pack (Phase 1) ──
 app.use("/api/agency-settings", require("./routes/agency-settings")); // owner-tunable thresholds + provider creds
 app.use("/api/backup", require("./routes/backup"));               // offsite backup admin (super_admin)
