@@ -46,10 +46,21 @@ router.post("/login", loginLimiter, asyncHandler(async (req, res) => {
   const { data: user, error } = await supabase
     .from("users").select("*").eq("email", email.toLowerCase()).single();
 
-  if (error || !user) return res.status(401).json({ error: "Email বা password ভুল" });
+  if (error || !user) {
+    // Track failed login (for anomaly detection) — no user-id since no match
+    require("../lib/anomalyDetector").recordFailedLogin({
+      email: email.toLowerCase(), ip: req.ip, userAgent: req.headers["user-agent"],
+    }).catch(() => {});
+    return res.status(401).json({ error: "Email বা password ভুল" });
+  }
 
   const valid = await bcrypt.compare(password, user.password_hash);
-  if (!valid) return res.status(401).json({ error: "Email বা password ভুল" });
+  if (!valid) {
+    require("../lib/anomalyDetector").recordFailedLogin({
+      email: email.toLowerCase(), ip: req.ip, userAgent: req.headers["user-agent"],
+    }).catch(() => {});
+    return res.status(401).json({ error: "Email বা password ভুল" });
+  }
 
   // ── 2FA check ──
   // super_admin role-এ 2FA বাধ্যতামূলক (recommended hardcoded — brief §9)

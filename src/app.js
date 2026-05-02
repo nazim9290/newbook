@@ -77,8 +77,9 @@ app.use(express.json({ limit: "1mb" }));
 const sanitizeBody = require("./middleware/sanitizeBody");
 app.use(sanitizeBody);
 
-// ── Auto Activity Log — POST/PATCH/DELETE response-এর পর log ──
+// ── Auto Activity Log — POST/PATCH/DELETE response-এর পর log + anomaly inspect ──
 const { logActivity } = require("./lib/activityLog");
+const anomalyDetector = require("./lib/anomalyDetector");
 app.use((req, res, next) => {
   if (!["POST", "PATCH", "DELETE"].includes(req.method)) return next();
   const oldJson = res.json.bind(res);
@@ -93,6 +94,9 @@ app.use((req, res, next) => {
         action, module: mod, recordId: req.params?.id || data?.id || null,
         description: `${action} ${mod}`, ip: req.ip,
       }).catch(() => {});
+
+      // Anomaly inspection — fire-and-forget, non-blocking
+      anomalyDetector.inspect(req, res, data).catch(() => {});
     }
     return oldJson(data);
   };
@@ -247,6 +251,12 @@ app.use("/api/ocr", heavyLimiter, require("./routes/ocr"));                     
 app.use("/api/analytics", require("./routes/analytics"));         // ফিচার ব্যবহার ট্র্যাকিং
 app.use("/api/subscriptions", require("./routes/subscriptions")); // সাবস্ক্রিপশন — plans, current, usage (Phase 1: read-only)
 app.use("/api/billing", require("./routes/billing"));             // বিলিং — invoices, payments, summary
+app.use("/api/system", require("./routes/system"));               // System info — license, deployment mode (Phase 0)
+// ── Owner Power-Up Pack (Phase 1) ──
+app.use("/api/agency-settings", require("./routes/agency-settings")); // owner-tunable thresholds + provider creds
+app.use("/api/backup", require("./routes/backup"));               // offsite backup admin (super_admin)
+app.use("/api/alerts", require("./routes/alerts"));               // doc expiry alerts
+app.use("/api/anomaly", require("./routes/anomaly"));             // security anomaly events + rules
 
 // ── 404 Handler — route না পেলে error (path leak করবে না) ──
 app.use((req, res) => {
@@ -271,4 +281,54 @@ app.listen(PORT, async () => {
   // Billing cron — daily 06:00 Asia/Dhaka invoice generation + status transitions
   // PG advisory lock দিয়ে cluster-safe; শুধু একজন worker actually run করবে
   try { require("./lib/billingCron").startScheduler(); } catch (e) { console.error("[BillingCron Init]", e.message); }
+
+  // ── Owner Power-Up Pack cron jobs ──
+  try {
+    const scheduler = require("./lib/scheduler");
+    const offsite = require("./lib/offsiteBackup");
+    const expiryScanner = require("./lib/expiryScanner");
+    const anomalyDetector = require("./lib/anomalyDetector");
+
+    // Doc expiry scan — daily 07:00 Asia/Dhaka
+    scheduler.register({
+      name: "doc_expiry_scan",
+      runAt: scheduler.dailyAt(7, 0),
+      handler: () => expiryScanner.runScan(),
+      lockKey: 9876500001,
+      dailyOnce: true,
+    });
+
+    // Offsite backup — daily 02:00 Asia/Dhaka
+    scheduler.register({
+      name: "offsite_backup",
+      runAt: scheduler.dailyAt(2, 0),
+      handler: async () => {
+        try { return await offsite.runBackup(); }
+        catch (e) { return { error: e.message }; }
+      },
+      lockKey: 9876500002,
+      dailyOnce: true,
+    });
+
+    // Anomaly cleanup + window scans — every 30 min
+    scheduler.register({
+      name: "anomaly_window_scan",
+      runAt: scheduler.everyNMinutes(30),
+      handler: () => anomalyDetector.runScan(),
+      lockKey: 9876500003,
+      dailyOnce: false,
+    });
+
+    scheduler.startAll();
+  } catch (e) {
+    console.error("[OwnerPack Cron Init]", e.message);
+  }
+  // License boot integrity — verify agency count <= max_agencies for this instance.
+  // strict=true exits the process on violation (use in customer-vps + on-premise).
+  // Default false → log + continue (safe for demo where license may not be seeded yet).
+  try {
+    const { bootIntegrityCheck } = require("./middleware/licenseGate");
+    const strict = process.env.LICENSE_STRICT === "true";
+    await bootIntegrityCheck({ strict });
+  } catch (e) { console.error("[License Boot]", e.message); }
 });
