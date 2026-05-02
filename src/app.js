@@ -274,6 +274,7 @@ app.use("/api/forecast", require("./routes/forecast"));           // cash flow f
 app.use("/api/push", require("./routes/push"));                   // web push subscription
 app.use("/api/feedback", require("./routes/feedback"));           // NPS / reviews (public + auth)
 app.use("/api/broadcasts", require("./routes/broadcasts"));       // bulk WhatsApp/SMS (disabled until configured)
+app.use("/api/notification-subscriptions", require("./routes/notification-subscriptions")); // user opt-in/out
 
 // ── 404 Handler — route না পেলে error (path leak করবে না) ──
 app.use((req, res) => {
@@ -344,6 +345,43 @@ app.listen(PORT, async () => {
       handler: () => quotaAlerts.runScan(),
       lockKey: 9876500004,
       dailyOnce: true,
+    });
+
+    // ── Phase 2/3 event broadcaster cron jobs ──
+    const eventBroadcaster = require("./lib/eventBroadcaster");
+
+    // Daily 8am summary
+    scheduler.register({
+      name: "daily_summary",
+      runAt: scheduler.dailyAt(8, 0),
+      handler: () => eventBroadcaster.dailySummary(),
+      lockKey: 9876500004,
+      dailyOnce: true,
+    });
+
+    // Auto NPS invite — every hour
+    scheduler.register({
+      name: "auto_nps_invite",
+      runAt: scheduler.hourly(15),
+      handler: () => eventBroadcaster.autoNpsInvite(),
+      lockKey: 9876500005,
+      dailyOnce: false,
+    });
+
+    // Visa-granted + large-payment push — every 15 min
+    scheduler.register({
+      name: "visa_granted_push",
+      runAt: (now) => now.getUTCMinutes() % 15 === 5,
+      handler: () => eventBroadcaster.visaGrantedPush(),
+      lockKey: 9876500006,
+      dailyOnce: false,
+    });
+    scheduler.register({
+      name: "large_payment_push",
+      runAt: (now) => now.getUTCMinutes() % 15 === 10,
+      handler: () => eventBroadcaster.largePaymentPush(),
+      lockKey: 9876500007,
+      dailyOnce: false,
     });
 
     scheduler.startAll();

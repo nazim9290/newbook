@@ -329,7 +329,44 @@ async function _dispatchSubs(agencyId, subs, template, data) {
       allErrors.push(...result.errors);
     }
   }
+
+  // ── ALSO send push to all push_subscriptions that have this topic ──
+  // (push subs live in their own table, separate from notification_subscriptions)
+  try {
+    const webPush = require("./webPush");
+    const subject = TEMPLATES[template]
+      ? TEMPLATES[template](data || {}).subject
+      : template;
+    const text = TEMPLATES[template]
+      ? TEMPLATES[template](data || {}).text
+      : "";
+    const pushResult = await webPush.sendToTopic({
+      agencyId,
+      topic: data?.topic || _topicFromTemplate(template),
+      payload: {
+        title: subject || "AgencyOS",
+        body: text || "",
+        url: data?.url || "/",
+        tag: template,
+      },
+    });
+    totalSent += pushResult.sent || 0;
+    totalFailed += pushResult.failed || 0;
+  } catch (err) {
+    console.error("[notify push fanout]", err.message);
+  }
+
   return { sent: totalSent, failed: totalFailed, errors: allErrors };
+}
+
+// Map template name → topic key for push subscription matching
+function _topicFromTemplate(template) {
+  if (template === "doc_expiry") return "doc_expiry";
+  if (template === "anomaly_alert") return "anomaly";
+  if (template === "backup_failed" || template === "backup_success") return "backup_failed";
+  if (template === "feedback_invite") return "feedback_invite";
+  if (template === "daily_summary") return "daily_summary";
+  return "all";
 }
 
 /**

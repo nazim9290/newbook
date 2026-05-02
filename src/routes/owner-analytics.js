@@ -59,7 +59,8 @@ router.get("/counselor-leaderboard", requireOwner, asyncHandler(async (req, res)
     const { rows: vRows } = await supabase.pool.query(`
       SELECT COUNT(*)::int AS visitors_received,
              COUNT(*) FILTER (WHERE converted_student_id IS NOT NULL)::int AS visitors_converted,
-             AVG(EXTRACT(DAY FROM (last_follow_up - visit_date)))::float AS avg_followup_lag
+             AVG(EXTRACT(DAY FROM (last_follow_up - visit_date)))
+               FILTER (WHERE last_follow_up IS NOT NULL AND visit_date IS NOT NULL)::float AS avg_followup_lag
       FROM visitors
       WHERE agency_id = $1
         AND visit_date BETWEEN $2 AND $3
