@@ -257,6 +257,12 @@ app.use("/api/agency-settings", require("./routes/agency-settings")); // owner-t
 app.use("/api/backup", require("./routes/backup"));               // offsite backup admin (super_admin)
 app.use("/api/alerts", require("./routes/alerts"));               // doc expiry alerts
 app.use("/api/anomaly", require("./routes/anomaly"));             // security anomaly events + rules
+// ── Owner Power-Up Pack (Phase 2 + 3) ──
+app.use("/api/owner-analytics", require("./routes/owner-analytics")); // counselor leaderboard, branch P&L, school ROI
+app.use("/api/forecast", require("./routes/forecast"));           // cash flow forecast
+app.use("/api/push", require("./routes/push"));                   // web push subscription
+app.use("/api/feedback", require("./routes/feedback"));           // NPS / reviews (public + auth)
+app.use("/api/broadcasts", require("./routes/broadcasts"));       // bulk WhatsApp/SMS (disabled until configured)
 
 // ── 404 Handler — route না পেলে error (path leak করবে না) ──
 app.use((req, res) => {
