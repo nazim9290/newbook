@@ -178,6 +178,50 @@ async function generateUpcomingInvoices() {
   return result;
 }
 
+// ── Helper: send a lifecycle email after a status transition ──
+// Fire-and-forget; never blocks the transition.
+async function fireLifecycleEmail(agencyId, kind) {
+  try {
+    const { sendEmail } = require("./email");
+    const { buildSuspendedEmail, buildCancelledEmail, buildReactivatedEmail, buildWelcomeEmail } = require("./emailTemplates/lifecycleEmails");
+    const supabase = require("./db");
+
+    const { data: agency } = await supabase.from("agencies")
+      .select("id, name, email, billing_email, subdomain").eq("id", agencyId).maybeSingle();
+    const recipient = agency?.billing_email || agency?.email;
+    if (!recipient) return;
+
+    let payload;
+    if (kind === "suspended") {
+      // Pull latest unpaid invoice for context
+      const { rows } = await pool.query(
+        `SELECT * FROM invoices WHERE agency_id = $1 AND status IN ('sent', 'overdue') ORDER BY due_date ASC LIMIT 1`,
+        [agencyId]
+      );
+      payload = buildSuspendedEmail({ agency, lastInvoice: rows[0] });
+    } else if (kind === "cancelled") {
+      const { data: sub } = await supabase.from("agency_subscriptions")
+        .select("cancellation_reason").eq("agency_id", agencyId).maybeSingle();
+      payload = buildCancelledEmail({ agency, reason: sub?.cancellation_reason });
+    } else if (kind === "reactivated") {
+      const { data: sub } = await supabase.from("agency_subscriptions")
+        .select("plan_id, current_period_end").eq("agency_id", agencyId).maybeSingle();
+      let plan = null;
+      if (sub?.plan_id) {
+        const { data: p } = await supabase.from("subscription_plans").select("*").eq("id", sub.plan_id).maybeSingle();
+        plan = p;
+      }
+      payload = buildReactivatedEmail({ agency, plan, periodEnd: sub?.current_period_end });
+    } else {
+      return;
+    }
+
+    await sendEmail(null, { to: recipient, ...payload });
+  } catch (e) {
+    console.error(`[LifecycleEmail:${kind}] agency=${agencyId}:`, e.message);
+  }
+}
+
 // ── Job 2: status transitions (Section 4.4) ──
 async function transitionStatuses() {
   const result = { trial_to_past_due: 0, past_due_to_suspended: 0, suspended_to_cancelled: 0 };
@@ -197,7 +241,7 @@ async function transitionStatuses() {
     await pool.query(`INSERT INTO subscription_history (agency_id, event_type, notes) VALUES ($1, 'status_changed', 'trial → past_due (auto via cron)')`, [row.agency_id]);
   }
 
-  // past_due → suspended (past_due > 7 days)
+  // past_due → suspended (past_due > 7 days) + email
   const r2 = await pool.query(`
     UPDATE agency_subscriptions
     SET status = 'suspended', updated_at = now()
@@ -210,9 +254,10 @@ async function transitionStatuses() {
   result.past_due_to_suspended = r2.rowCount;
   for (const row of r2.rows) {
     await pool.query(`INSERT INTO subscription_history (agency_id, event_type, notes) VALUES ($1, 'status_changed', 'past_due → suspended (>7 days overdue)')`, [row.agency_id]);
+    fireLifecycleEmail(row.agency_id, "suspended");   // fire-and-forget
   }
 
-  // suspended → cancelled (suspended > 7 more days = total 14 days overdue)
+  // suspended → cancelled (suspended > 7 more days = total 14 days overdue) + email
   const r3 = await pool.query(`
     UPDATE agency_subscriptions
     SET status = 'cancelled', updated_at = now()
@@ -225,8 +270,114 @@ async function transitionStatuses() {
   result.suspended_to_cancelled = r3.rowCount;
   for (const row of r3.rows) {
     await pool.query(`INSERT INTO subscription_history (agency_id, event_type, notes) VALUES ($1, 'status_changed', 'suspended → cancelled (>14 days overdue)')`, [row.agency_id]);
+    fireLifecycleEmail(row.agency_id, "cancelled");   // fire-and-forget
   }
 
+  return result;
+}
+
+// ── Job 3c: legacy-migration deadline reminders ──
+// Section 5.3: 9-month migration window. Send reminder when ≤60 days remain
+// then again at ≤30 days then ≤7 days (3 nudges total).
+async function sendMigrationReminders() {
+  const result = { sent: 0, errors: 0 };
+  const { sendEmail } = require("./email");
+
+  const { rows } = await pool.query(`
+    SELECT s.agency_id, s.legacy_migration_deadline, s.legacy_per_student_rate,
+           s.last_migration_reminder_at,
+           (s.legacy_migration_deadline - CURRENT_DATE) AS days_left,
+           a.name AS agency_name, a.email AS agency_email, a.billing_email, a.subdomain
+    FROM agency_subscriptions s
+    JOIN agencies a ON a.id = s.agency_id
+    WHERE s.legacy_pricing = true
+      AND s.legacy_migration_deadline IS NOT NULL
+      AND (s.legacy_migration_deadline - CURRENT_DATE) BETWEEN 0 AND 60
+      AND (s.last_migration_reminder_at IS NULL OR s.last_migration_reminder_at < (now() - interval '15 days'))
+  `);
+
+  for (const row of rows) {
+    const recipient = row.billing_email || row.agency_email;
+    if (!recipient) continue;
+    const daysLeft = Number(row.days_left);
+    const upgradeUrl = `https://${row.subdomain}.agencybook.net/subscription`;
+
+    try {
+      const subject = daysLeft <= 7
+        ? `🚨 Final ${daysLeft} days — Legacy pricing migration required`
+        : `Reminder: Migrate from Legacy pricing within ${daysLeft} days`;
+
+      const html = `<p>Hello <strong>${row.agency_name}</strong>,</p>
+<p>আপনি এখনো Legacy per-student pricing (৳${row.legacy_per_student_rate}/student) এ আছেন। নতুন tier system-এ migrate করতে হবে।</p>
+<p><strong>Deadline:</strong> ${new Date(row.legacy_migration_deadline).toLocaleDateString("en-GB")} — আর <strong>${daysLeft}</strong> দিন বাকি।</p>
+${daysLeft > 14 ? `<p>📍 <em>আগেভাগে migrate করলে incentive আছে: ১ মাস free + পরের ৬ মাস ৮০% rate-এ।</em></p>` : ""}
+<p style="margin-top:24px;"><a href="${upgradeUrl}" style="display:inline-block;background:#0891b2;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;">Migrate Now →</a></p>
+<p style="font-size:12px;color:#6b7280;margin-top:24px;">— AgencyBook Team</p>`;
+
+      const r = await sendEmail(null, { to: recipient, subject, html });
+      if (r.success) {
+        await pool.query(`UPDATE agency_subscriptions SET last_migration_reminder_at = now() WHERE agency_id = $1`, [row.agency_id]);
+        result.sent += 1;
+      } else {
+        result.errors += 1;
+      }
+    } catch (e) {
+      console.error(`[MigrationReminder] agency=${row.agency_id}:`, e.message);
+      result.errors += 1;
+    }
+  }
+  return result;
+}
+
+// ── Job 3a: trial reminders (Section 4.2 — Day -7, -3, -1) ──
+// Runs daily; finds trials ending in 7/3/1 days and sends matching reminder.
+async function sendTrialReminders() {
+  const result = { day7: 0, day3: 0, day1: 0, errors: 0 };
+  const { sendEmail } = require("./email");
+  const { buildTrialReminderEmail } = require("./emailTemplates/trialReminderEmail");
+
+  // For each target day, find trials whose trial_ends_at is exactly that-many days from now.
+  // last_trial_reminder_day stores the smallest bucket already reminded — cron only sends
+  // for buckets STRICTLY smaller than that (counts down 7→3→1). NULL = no reminder yet.
+  for (const targetDay of [7, 3, 1]) {
+    const { rows } = await pool.query(`
+      SELECT s.agency_id, s.trial_ends_at,
+             a.name AS agency_name, a.email AS agency_email, a.billing_email, a.subdomain
+      FROM agency_subscriptions s
+      JOIN agencies a ON a.id = s.agency_id
+      WHERE s.status = 'trial'
+        AND s.legacy_pricing = false
+        AND s.trial_ends_at IS NOT NULL
+        AND DATE(s.trial_ends_at) = (CURRENT_DATE + ($1 || ' days')::interval)::date
+        AND (s.last_trial_reminder_day IS NULL OR s.last_trial_reminder_day > $1)
+    `, [targetDay]);
+
+    for (const row of rows) {
+      const recipient = row.billing_email || row.agency_email;
+      if (!recipient) continue;
+      try {
+        const { subject, html, text } = buildTrialReminderEmail({
+          agency: { name: row.agency_name, subdomain: row.subdomain },
+          daysLeft: targetDay,
+          trialEndsAt: row.trial_ends_at,
+        });
+        const r = await sendEmail(null, { to: recipient, subject, html, text });
+        if (r.success) {
+          await pool.query(`
+            UPDATE agency_subscriptions
+            SET last_trial_reminder_day = $2, updated_at = now()
+            WHERE agency_id = $1
+          `, [row.agency_id, targetDay]);
+          result[`day${targetDay}`] += 1;
+        } else {
+          result.errors += 1;
+        }
+      } catch (e) {
+        console.error(`[TrialReminder] agency=${row.agency_id}:`, e.message);
+        result.errors += 1;
+      }
+    }
+  }
   return result;
 }
 
@@ -327,15 +478,17 @@ async function runAllJobs(forceManual = false) {
     const invoices = await generateUpcomingInvoices();
     const transitions = await transitionStatuses();
     const reminders = await sendPastDueReminders();
+    const trialReminders = await sendTrialReminders();
+    const migrationReminders = await sendMigrationReminders();
 
     // Save last-run marker — daily-once gate
     await pool.query(`
       INSERT INTO platform_settings (key, value, updated_at)
       VALUES ('billing_cron_last_run', $1::jsonb, now())
       ON CONFLICT (key) DO UPDATE SET value = $1::jsonb, updated_at = now()
-    `, [JSON.stringify({ at: startedAt, invoices, transitions, reminders, manual: forceManual })]);
+    `, [JSON.stringify({ at: startedAt, invoices, transitions, reminders, trialReminders, migrationReminders, manual: forceManual })]);
 
-    return { startedAt, invoices, transitions, reminders, manual: forceManual };
+    return { startedAt, invoices, transitions, reminders, trialReminders, migrationReminders, manual: forceManual };
   } finally {
     if (!forceManual) {
       await pool.query(`SELECT pg_advisory_unlock($1)`, [ADVISORY_LOCK_KEY]);
@@ -378,4 +531,4 @@ function stopScheduler() {
   if (intervalHandle) { clearInterval(intervalHandle); intervalHandle = null; }
 }
 
-module.exports = { runAllJobs, generateUpcomingInvoices, transitionStatuses, sendPastDueReminders, startScheduler, stopScheduler };
+module.exports = { runAllJobs, generateUpcomingInvoices, transitionStatuses, sendPastDueReminders, sendTrialReminders, sendMigrationReminders, fireLifecycleEmail, startScheduler, stopScheduler };

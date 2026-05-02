@@ -1,0 +1,28 @@
+# Phase 14 (skeleton): Backend image for Tier C on-premise.
+#
+# Minimal viable Dockerfile — production hardening to be added when
+# first enterprise contract triggers full Phase 14:
+#   - bytenode compilation step (.js → .jsc)
+#   - non-root user
+#   - distroless base
+#   - Cosign signing in CI
+
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
+
+FROM node:20-alpine
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY src ./src
+COPY deploy ./deploy
+COPY scripts ./scripts
+COPY package.json ./
+
+EXPOSE 5000
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+  CMD wget -q -O- http://localhost:5000/api/health || exit 1
+
+CMD ["node", "src/app.js"]

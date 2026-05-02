@@ -104,4 +104,34 @@ router.post("/agency/:slug/visitor", asyncHandler(async (req, res) => {
   res.json({ ok: true, display_id: data.display_id, name: data.name });
 }));
 
+// ── GET /pricing — public pricing data (no auth) for marketing/signup pages ──
+router.get("/pricing", asyncHandler(async (req, res) => {
+  const { data: plans, error } = await supabase.from("subscription_plans")
+    .select("*").eq("is_active", true).order("sort_order", { ascending: true });
+  if (error) return res.status(500).json({ error: "Plans লোড ব্যর্থ" });
+
+  const addons = [
+    { code: "extra_branch",       label_en: "Extra Branch",          label_bn: "অতিরিক্ত শাখা",        price: 1500, available_for: ["professional", "business"] },
+    { code: "extra_users_5",      label_en: "5 Extra Users",         label_bn: "৫ জন অতিরিক্ত ইউজার",  price: 800,  available_for: ["starter", "professional", "business"] },
+    { code: "extra_storage_10gb", label_en: "10 GB Extra Storage",   label_bn: "১০ GB অতিরিক্ত স্টোরেজ", price: 500,  available_for: ["starter", "professional", "business"] },
+    { code: "premium_support",    label_en: "Premium Support",       label_bn: "প্রিমিয়াম সাপোর্ট",     price: 3000, available_for: ["starter"] },
+    { code: "ai_translation",     label_en: "AI Translation Pack",   label_bn: "AI ট্রান্সলেশন প্যাক",   price: 2000, available_for: ["starter"] },
+    { code: "claude_vision_ocr",  label_en: "Claude Vision OCR",     label_bn: "Claude Vision OCR",   price: 1500, available_for: ["starter"] },
+  ];
+
+  const annualPerks = [
+    { en: "Price Lock Guarantee — rate stays for 12 months", bn: "প্রাইস লক — পরের ১২ মাস rate same" },
+    { en: "Free 4-hour onboarding session (worth ৳5,000)",   bn: "ফ্রি ৪ ঘণ্টার onboarding session" },
+    { en: "Priority feature requests",                        bn: "Roadmap-এ priority input" },
+    { en: "1 free add-on for first year",                     bn: "১ম বছরে ১টা ফ্রি add-on" },
+    { en: "Quarterly Business Review (Pro+ tier)",            bn: "ত্রৈমাসিক business review" },
+    { en: "Annual Client Badge",                              bn: "Annual Client ব্যাজ" },
+  ];
+
+  res.json({
+    plans: plans || [], addons, annual_perks: annualPerks,
+    trial_days: 14, currency: "BDT",
+  });
+}));
+
 module.exports = router;

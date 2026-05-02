@@ -222,6 +222,75 @@ async function recordHistory(agencyId, eventType, fromCode, toCode, userId, note
   });
 }
 
+// ── Helper: pro-rate billing on mid-cycle upgrade (Section 4.7) ──
+// Formula: prorated_charge = new_plan_full_price × (days_remaining / days_in_period)
+//        - already_paid_unused_credit
+// Returns: { full_charge, credit, net_charge, days_remaining, days_in_period }
+function calculateProRatedCharge({ oldPlan, oldCycle, newPlan, newCycle, currentPeriodStart, currentPeriodEnd }) {
+  const now = new Date();
+  const start = new Date(currentPeriodStart);
+  const end = new Date(currentPeriodEnd);
+  const totalMs = end - start;
+  const remainingMs = Math.max(0, end - now);
+  const daysRemaining = Math.ceil(remainingMs / (1000 * 60 * 60 * 24));
+  const daysInPeriod = Math.max(1, Math.ceil(totalMs / (1000 * 60 * 60 * 24)));
+
+  // Unused credit from current plan
+  const oldFullPrice = oldPlan ? Number(oldCycle === "annual" ? oldPlan.annual_price : oldPlan.monthly_price) : 0;
+  const credit = Math.round(oldFullPrice * (daysRemaining / daysInPeriod));
+
+  // Pro-rated charge for new plan over remaining period
+  const newFullPrice = Number(newCycle === "annual" ? newPlan.annual_price : newPlan.monthly_price);
+  const proratedNew = Math.round(newFullPrice * (daysRemaining / daysInPeriod));
+
+  const netCharge = Math.max(0, proratedNew - credit);
+  return {
+    full_charge: newFullPrice,
+    prorated_new: proratedNew,
+    credit,
+    net_charge: netCharge,
+    days_remaining: daysRemaining,
+    days_in_period: daysInPeriod,
+  };
+}
+
+// ── GET /upgrade-preview — show pro-rated charge before user confirms ──
+// query: ?plan_code=X&billing_cycle=monthly|annual
+router.get("/upgrade-preview", asyncHandler(async (req, res) => {
+  const { plan_code, billing_cycle = "monthly" } = req.query;
+  if (!plan_code) return res.status(400).json({ error: "plan_code দিন" });
+  const agencyId = req.user.agency_id;
+
+  const { data: targetPlan } = await supabase.from("subscription_plans").select("*").eq("code", plan_code).maybeSingle();
+  if (!targetPlan) return res.status(404).json({ error: "Plan নেই" });
+
+  const { data: cur } = await supabase.from("agency_subscriptions").select("*").eq("agency_id", agencyId).maybeSingle();
+  if (!cur) return res.status(404).json({ error: "Subscription নেই" });
+
+  let oldPlan = null;
+  if (cur.plan_id) {
+    const { data: p } = await supabase.from("subscription_plans").select("*").eq("id", cur.plan_id).maybeSingle();
+    oldPlan = p;
+  }
+
+  // Legacy → tier: full charge, no credit (per-student model isn't comparable)
+  if (cur.legacy_pricing) {
+    const fullCharge = Number(billing_cycle === "annual" ? targetPlan.annual_price : targetPlan.monthly_price);
+    return res.json({
+      legacy_migration: true,
+      full_charge: fullCharge, prorated_new: fullCharge, credit: 0, net_charge: fullCharge,
+      days_remaining: 0, days_in_period: billing_cycle === "annual" ? 365 : 30,
+      target_plan: targetPlan,
+    });
+  }
+
+  const calc = calculateProRatedCharge({
+    oldPlan, oldCycle: cur.billing_cycle, newPlan: targetPlan, newCycle: billing_cycle,
+    currentPeriodStart: cur.current_period_start, currentPeriodEnd: cur.current_period_end,
+  });
+  res.json({ legacy_migration: false, ...calc, target_plan: targetPlan });
+}));
+
 // ── POST /upgrade — change plan (also handles downgrade per Section 11.2) ──
 // body: { plan_code, billing_cycle: "monthly"|"annual" }
 router.post("/upgrade", asyncHandler(async (req, res) => {
@@ -299,6 +368,24 @@ router.post("/upgrade", asyncHandler(async (req, res) => {
     { billing_cycle, monthly_price: targetPlan.monthly_price, annual_price: targetPlan.annual_price });
 
   invalidateCache(agencyId);
+
+  // Welcome email — fire-and-forget for new paid subscriptions / legacy migrations
+  if (eventType === "upgraded") {
+    (async () => {
+      try {
+        const { sendEmail } = require("../lib/email");
+        const { buildWelcomeEmail } = require("../lib/emailTemplates/lifecycleEmails");
+        const { data: agency } = await supabase.from("agencies")
+          .select("id, name, email, billing_email, subdomain").eq("id", agencyId).maybeSingle();
+        const recipient = agency?.billing_email || agency?.email;
+        if (recipient) {
+          const payload = buildWelcomeEmail({ agency, plan: targetPlan, billingCycle: billing_cycle, periodEnd });
+          await sendEmail(null, { to: recipient, ...payload });
+        }
+      } catch (e) { console.error("[WelcomeEmail]", e.message); }
+    })();
+  }
+
   res.json({ success: true, plan: targetPlan, billing_cycle, current_period_end: periodEnd.toISOString(), event: eventType });
 }));
 
@@ -347,6 +434,13 @@ router.post("/reactivate", asyncHandler(async (req, res) => {
 
   await recordHistory(agencyId, "reactivated", cur.plan_code, cur.plan_code, req.user.id, "Cancellation undone");
   invalidateCache(agencyId);
+
+  // Reactivated email — fire and forget
+  (async () => {
+    try { const { fireLifecycleEmail } = require("../lib/billingCron"); await fireLifecycleEmail(agencyId, "reactivated"); }
+    catch (e) { console.error("[ReactEmail]", e.message); }
+  })();
+
   res.json({ success: true });
 }));
 
@@ -397,6 +491,173 @@ router.delete("/addons/:id", asyncHandler(async (req, res) => {
   await recordHistory(req.user.agency_id, "addon_removed", null, null, req.user.id, `Add-on cancelled: ${data.addon_code}`, { addon_code: data.addon_code });
   invalidateCache(req.user.agency_id);
   res.json({ success: true, ends_at: endsAt });
+}));
+
+// ═══════════════════════════════════════════════════════════════════════
+// Legacy migration wizard (Section 5)
+// ═══════════════════════════════════════════════════════════════════════
+
+// GET /migration/status — show legacy client their migration position + incentives
+router.get("/migration/status", asyncHandler(async (req, res) => {
+  const agencyId = req.user.agency_id;
+  const { data: sub } = await supabase.from("agency_subscriptions").select("*").eq("agency_id", agencyId).maybeSingle();
+  if (!sub) return res.status(404).json({ error: "Subscription নেই" });
+  if (!sub.legacy_pricing) {
+    return res.json({ is_legacy: false, migrated_already: true });
+  }
+
+  const today = new Date();
+  const deadline = sub.legacy_migration_deadline ? new Date(sub.legacy_migration_deadline) : null;
+  const daysLeft = deadline ? Math.ceil((deadline - today) / (1000 * 60 * 60 * 24)) : null;
+
+  // Section 5.5: tier-based migration incentive
+  let incentive = null;
+  if (daysLeft != null) {
+    if (daysLeft > 90) {
+      incentive = {
+        period: "early",
+        label_bn: "এখন migrate করলে — ১ মাস ফ্রি + পরের ৬ মাস ৮০% rate",
+        label_en: "Migrate now — 1 month free + 80% rate for next 6 months",
+        free_months: 1, discount_pct: 20, discount_months: 6,
+      };
+    } else if (daysLeft > 60) {
+      incentive = {
+        period: "voluntary",
+        label_bn: "এখন migrate করলে — ১ মাস ফ্রি",
+        label_en: "Migrate now — 1 month free",
+        free_months: 1, discount_pct: 0, discount_months: 0,
+      };
+    } else if (daysLeft > 0) {
+      incentive = {
+        period: "mandatory",
+        label_bn: `Standard pricing (deadline ${daysLeft} দিন বাকি)`,
+        label_en: `Standard pricing (${daysLeft} days until deadline)`,
+        free_months: 0, discount_pct: 0, discount_months: 0,
+      };
+    } else {
+      incentive = {
+        period: "expired",
+        label_bn: "Migration deadline পার হয়েছে — auto migration হবে",
+        label_en: "Migration deadline passed — auto-migration imminent",
+        free_months: 0, discount_pct: 0, discount_months: 0,
+      };
+    }
+  }
+
+  // Suggest plan based on student count
+  const { count: studentCount } = await supabase.from("students").select("*", { count: "exact", head: true }).eq("agency_id", agencyId);
+  const { count: branchCount } = await supabase.from("branches").select("*", { count: "exact", head: true }).eq("agency_id", agencyId);
+
+  const recommended = (studentCount > 400 || branchCount > 2)
+    ? "business"
+    : (studentCount > 100 || branchCount > 1)
+    ? "professional"
+    : "starter";
+
+  res.json({
+    is_legacy: true,
+    legacy_per_student_rate: Number(sub.legacy_per_student_rate || 0),
+    deadline: sub.legacy_migration_deadline,
+    days_left: daysLeft,
+    incentive,
+    current_usage: { students: studentCount, branches: branchCount },
+    recommended_plan: recommended,
+  });
+}));
+
+// ═══════════════════════════════════════════════════════════════════════
+// Annual plan perks (Section 2.2)
+// ═══════════════════════════════════════════════════════════════════════
+
+// POST /annual-perks/claim-onboarding — mark free onboarding session as scheduled
+// body: { preferred_date, preferred_time, notes }
+router.post("/annual-perks/claim-onboarding", asyncHandler(async (req, res) => {
+  if (!isOwnerOrSuperAdmin(req.user)) return res.status(403).json({ error: "শুধুমাত্র owner/admin" });
+  const { preferred_date, preferred_time, notes } = req.body || {};
+  const agencyId = req.user.agency_id;
+
+  const { data: sub } = await supabase.from("agency_subscriptions").select("*").eq("agency_id", agencyId).maybeSingle();
+  if (!sub) return res.status(404).json({ error: "Subscription নেই" });
+  if (sub.billing_cycle !== "annual") return res.status(403).json({ error: "Onboarding session শুধু Annual plan-এ available" });
+  if (sub.annual_onboarding_done) return res.status(400).json({ error: "Onboarding ইতিমধ্যে claim করা হয়েছে" });
+
+  await supabase.from("agency_subscriptions").update({
+    annual_onboarding_done: true,
+    metadata: {
+      ...(sub.metadata || {}),
+      onboarding_request: {
+        preferred_date, preferred_time, notes,
+        requested_at: new Date().toISOString(),
+        requested_by: req.user.id,
+      },
+    },
+    updated_at: new Date().toISOString(),
+  }).eq("agency_id", agencyId);
+
+  await recordHistory(agencyId, "onboarding_claimed", null, null, req.user.id,
+    `Onboarding session requested for ${preferred_date || "TBD"}`,
+    { preferred_date, preferred_time, notes });
+
+  // Notify ops team via email
+  (async () => {
+    try {
+      const { sendEmail } = require("../lib/email");
+      const { data: agency } = await supabase.from("agencies").select("name, email, phone").eq("id", agencyId).maybeSingle();
+      await sendEmail(null, {
+        to: process.env.OPS_EMAIL || "billing@agencybook.net",
+        subject: `[Onboarding Request] ${agency?.name || ""} — ${preferred_date || "TBD"}`,
+        html: `<p><strong>${agency?.name}</strong> requested onboarding session.</p>
+<p>Preferred: ${preferred_date || "—"} ${preferred_time || ""}</p>
+<p>Notes: ${notes || "—"}</p>
+<p>Contact: ${agency?.email || "—"} · ${agency?.phone || "—"}</p>`,
+      });
+    } catch (e) { /* ignore */ }
+  })();
+
+  invalidateCache(agencyId);
+  res.json({ success: true });
+}));
+
+// POST /annual-perks/claim-free-addon — pick the free first-year add-on
+// body: { addon_code }
+router.post("/annual-perks/claim-free-addon", asyncHandler(async (req, res) => {
+  if (!isOwnerOrSuperAdmin(req.user)) return res.status(403).json({ error: "শুধুমাত্র owner/admin" });
+  const { addon_code } = req.body || {};
+  if (!addon_code) return res.status(400).json({ error: "addon_code দিন" });
+
+  const ADDON_PRICES = {
+    extra_branch: 1500, extra_users_5: 800, extra_storage_10gb: 500,
+    premium_support: 3000, ai_translation: 2000, claude_vision_ocr: 1500,
+  };
+  const price = ADDON_PRICES[addon_code];
+  if (!price) return res.status(400).json({ error: "অজানা add-on" });
+
+  const agencyId = req.user.agency_id;
+  const { data: sub } = await supabase.from("agency_subscriptions").select("*").eq("agency_id", agencyId).maybeSingle();
+  if (!sub) return res.status(404).json({ error: "Subscription নেই" });
+  if (sub.billing_cycle !== "annual") return res.status(403).json({ error: "Free add-on শুধু Annual plan-এ" });
+  if (sub.annual_free_addon_code) return res.status(400).json({ error: `ইতিমধ্যে claim করা হয়েছে: ${sub.annual_free_addon_code}` });
+
+  // Insert as a free perk (is_free_annual_perk = true means no billing)
+  const yearLater = new Date(); yearLater.setFullYear(yearLater.getFullYear() + 1);
+  const { data: addon, error } = await supabase.from("subscription_addons").insert({
+    agency_id: agencyId, addon_code, monthly_price: price, quantity: 1,
+    status: "active", is_free_annual_perk: true,
+    ends_at: yearLater.toISOString(),
+  }).select().single();
+  if (error) return res.status(500).json({ error: "Add-on activate ব্যর্থ" });
+
+  await supabase.from("agency_subscriptions").update({
+    annual_free_addon_code: addon_code,
+    updated_at: new Date().toISOString(),
+  }).eq("agency_id", agencyId);
+
+  await recordHistory(agencyId, "addon_added", null, null, req.user.id,
+    `Free annual add-on claimed: ${addon_code} (worth ৳${price}/mo, expires ${yearLater.toISOString().slice(0,10)})`,
+    { addon_code, free: true, expires_at: yearLater.toISOString() });
+
+  invalidateCache(agencyId);
+  res.json({ success: true, addon });
 }));
 
 module.exports = router;

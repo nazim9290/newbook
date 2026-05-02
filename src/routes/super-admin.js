@@ -951,6 +951,67 @@ router.post("/billing/payments/manual", asyncHandler(async (req, res) => {
   res.json(payment);
 }));
 
+// POST /billing/payments/:id/refund — refund a payment (Section 11.1)
+// body: { amount?, reason? } — full refund if amount omitted
+router.post("/billing/payments/:id/refund", asyncHandler(async (req, res) => {
+  const { amount, reason } = req.body || {};
+  const { data: payment } = await supabase.from("subscription_payments").select("*").eq("id", req.params.id).maybeSingle();
+  if (!payment) return res.status(404).json({ error: "Payment পাওয়া যায়নি" });
+  if (payment.status === "refunded") return res.status(400).json({ error: "ইতিমধ্যে refund হয়েছে" });
+
+  const refundAmount = Number(amount || payment.amount);
+  if (refundAmount <= 0 || refundAmount > Number(payment.amount)) {
+    return res.status(400).json({ error: "Invalid refund amount" });
+  }
+  const isFullRefund = refundAmount >= Number(payment.amount);
+
+  // Create refund record (negative amount in subscription_payments)
+  const { data: refund, error } = await supabase.from("subscription_payments").insert({
+    agency_id: payment.agency_id,
+    invoice_id: payment.invoice_id,
+    amount: -refundAmount,                       // negative = refund
+    currency: payment.currency,
+    payment_method: payment.payment_method,
+    transaction_id: `refund:${payment.transaction_id || payment.id}`,
+    status: "completed",
+    paid_at: new Date().toISOString(),
+    recorded_by: req.user.id,
+    notes: `Refund of ${refundAmount} from payment ${payment.id}. Reason: ${reason || "—"}`,
+  }).select().single();
+  if (error) { console.error("[Refund]", error.message); return res.status(500).json({ error: "Refund ব্যর্থ" }); }
+
+  // Mark original payment as refunded (if full) or partial-refund
+  await supabase.from("subscription_payments").update({
+    status: isFullRefund ? "refunded" : "completed",
+    notes: (payment.notes ? payment.notes + " | " : "") + `Refunded ${refundAmount} on ${new Date().toISOString().slice(0, 10)}`,
+    updated_at: new Date().toISOString(),
+  }).eq("id", req.params.id);
+
+  // Update linked invoice paid_amount
+  if (payment.invoice_id) {
+    const { data: inv } = await supabase.from("invoices").select("total_amount, paid_amount").eq("id", payment.invoice_id).maybeSingle();
+    if (inv) {
+      const newPaid = Math.max(0, Number(inv.paid_amount || 0) - refundAmount);
+      const status = newPaid >= Number(inv.total_amount) ? "paid" : newPaid > 0 ? "sent" : "refunded";
+      await supabase.from("invoices").update({
+        paid_amount: newPaid, status,
+        paid_at: status === "paid" ? new Date().toISOString() : null,
+        updated_at: new Date().toISOString(),
+      }).eq("id", payment.invoice_id);
+    }
+  }
+
+  // History
+  await supabase.from("subscription_history").insert({
+    agency_id: payment.agency_id, event_type: "refund_issued",
+    triggered_by: req.user.id,
+    notes: `Refunded ${refundAmount} BDT (${isFullRefund ? "full" : "partial"})${reason ? `: ${reason}` : ""}`,
+    metadata: { original_payment_id: payment.id, amount: refundAmount, reason },
+  });
+
+  res.json({ success: true, refund, original_payment_id: payment.id });
+}));
+
 // GET /billing/payments — all payments
 router.get("/billing/payments", asyncHandler(async (req, res) => {
   const { agency_id, limit = 100 } = req.query;
@@ -979,6 +1040,128 @@ router.post("/billing/cron/run", asyncHandler(async (req, res) => {
 router.get("/billing/cron/status", asyncHandler(async (req, res) => {
   const { data } = await supabase.from("platform_settings").select("value, updated_at").eq("key", "billing_cron_last_run").single();
   res.json(data || { value: null });
+}));
+
+// GET /metrics/mrr-sparkline?days=90 — daily MRR for sparkline chart
+router.get("/metrics/mrr-sparkline", asyncHandler(async (req, res) => {
+  const days = Math.min(Number(req.query.days || 90), 365);
+  // Use subscription_history + agency_subscriptions snapshot to reconstruct daily MRR
+  // Simpler approach: payments-based daily revenue trail
+  const { rows } = await supabase.pool.query(`
+    SELECT DATE(paid_at) AS day, COALESCE(SUM(amount), 0)::numeric AS revenue
+    FROM subscription_payments
+    WHERE status = 'completed'
+      AND amount > 0
+      AND paid_at >= (CURRENT_DATE - ($1 || ' days')::interval)
+    GROUP BY DATE(paid_at)
+    ORDER BY day ASC
+  `, [days]);
+
+  // Fill missing days with 0
+  const map = {};
+  rows.forEach(r => { map[String(r.day).slice(0, 10)] = Number(r.revenue || 0); });
+  const series = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    series.push({ day: key, revenue: map[key] || 0 });
+  }
+  res.json({ days, series });
+}));
+
+// GET /metrics/churn — monthly churn calculation
+router.get("/metrics/churn", asyncHandler(async (req, res) => {
+  const { rows } = await supabase.pool.query(`
+    WITH months AS (
+      SELECT generate_series(
+        date_trunc('month', CURRENT_DATE - interval '11 months'),
+        date_trunc('month', CURRENT_DATE),
+        '1 month'::interval
+      ) AS m
+    ),
+    cancellations AS (
+      SELECT date_trunc('month', created_at) AS m, COUNT(*)::int AS cancelled
+      FROM subscription_history
+      WHERE event_type IN ('cancelled', 'status_changed')
+        AND notes ILIKE '%cancelled%'
+        AND created_at >= CURRENT_DATE - interval '12 months'
+      GROUP BY date_trunc('month', created_at)
+    ),
+    starts AS (
+      SELECT date_trunc('month', created_at) AS m, COUNT(*)::int AS started
+      FROM agency_subscriptions
+      WHERE created_at >= CURRENT_DATE - interval '12 months'
+      GROUP BY date_trunc('month', created_at)
+    )
+    SELECT
+      to_char(months.m, 'YYYY-MM') AS month,
+      COALESCE(c.cancelled, 0) AS cancelled,
+      COALESCE(s.started, 0) AS started
+    FROM months
+    LEFT JOIN cancellations c ON c.m = months.m
+    LEFT JOIN starts s ON s.m = months.m
+    ORDER BY months.m ASC
+  `);
+
+  const total = await supabase.pool.query(`SELECT COUNT(*)::int AS total FROM agency_subscriptions WHERE legacy_pricing = false`);
+  const totalSubs = total.rows[0]?.total || 0;
+  const lastMonth = rows[rows.length - 1] || { cancelled: 0 };
+  const churnPct = totalSubs > 0 ? (Number(lastMonth.cancelled) / totalSubs) * 100 : 0;
+
+  res.json({
+    monthly: rows,
+    last_month_churn_pct: Math.round(churnPct * 10) / 10,
+    total_active_tier: totalSubs,
+  });
+}));
+
+// GET /metrics/conversion — trial → paid conversion rate
+router.get("/metrics/conversion", asyncHandler(async (req, res) => {
+  const { rows } = await supabase.pool.query(`
+    SELECT
+      COUNT(*) FILTER (WHERE status = 'trial') AS trialing,
+      COUNT(*) FILTER (WHERE status = 'active' AND legacy_pricing = false) AS active,
+      COUNT(*) FILTER (WHERE plan_id IS NOT NULL AND legacy_pricing = false) AS converted
+    FROM agency_subscriptions
+  `);
+  const r = rows[0] || {};
+  const total = Number(r.trialing || 0) + Number(r.converted || 0);
+  const conversionPct = total > 0 ? (Number(r.converted || 0) / total) * 100 : 0;
+  res.json({
+    currently_trialing: Number(r.trialing || 0),
+    currently_active: Number(r.active || 0),
+    total_converted: Number(r.converted || 0),
+    conversion_pct: Math.round(conversionPct * 10) / 10,
+  });
+}));
+
+// GET /metrics/revenue-export.csv — full revenue CSV (BOM-prefixed)
+router.get("/metrics/revenue-export.csv", asyncHandler(async (req, res) => {
+  const { rows } = await supabase.pool.query(`
+    SELECT
+      p.paid_at, p.amount, p.currency, p.payment_method, p.status, p.transaction_id,
+      a.name AS agency_name, a.subdomain,
+      i.invoice_number
+    FROM subscription_payments p
+    JOIN agencies a ON a.id = p.agency_id
+    LEFT JOIN invoices i ON i.id = p.invoice_id
+    ORDER BY p.paid_at DESC
+    LIMIT 10000
+  `);
+  const header = "Date,Agency,Subdomain,Invoice #,Amount,Currency,Method,Status,Transaction ID";
+  const csvRows = rows.map(r => [
+    r.paid_at ? new Date(r.paid_at).toISOString().slice(0, 10) : "",
+    `"${(r.agency_name || "").replace(/"/g, '""')}"`,
+    r.subdomain || "",
+    r.invoice_number || "",
+    r.amount, r.currency,
+    r.payment_method, r.status,
+    r.transaction_id || "",
+  ].join(","));
+  const csv = "﻿" + header + "\n" + csvRows.join("\n");
+  res.setHeader("Content-Type", "text/csv;charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="revenue_${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.send(csv);
 }));
 
 // GET /metrics/revenue — basic MRR/revenue calc
