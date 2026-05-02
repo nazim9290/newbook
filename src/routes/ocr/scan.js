@@ -133,14 +133,14 @@ router.post("/scan", upload.single("file"), async (req, res) => {
     const docTypeName = req.body?.doc_type_name || "";
     try { expectedFields = JSON.parse(req.body?.expected_fields || "[]"); } catch {}
 
-    if (process.env.ANTHROPIC_API_KEY) {
-      result = await extractWithHaiku(fullText, DOC_CONFIGS, expectedFields, docTypeName);
-      if (result && Object.keys(result.fields).length >= 3) {
-        engine = "haiku";
-        console.log(`[OCR] Haiku extracted ${Object.keys(result.fields).length} fields (${result.confidence})`);
-      } else {
-        result = null; // Haiku fail — fallback এ যাও
-      }
+    // Try Haiku via BYOK resolver (will return null if no key available, which
+    // includes both "agency not configured" and "platform fallback unavailable")
+    result = await extractWithHaiku(req.user.agency_id, fullText, DOC_CONFIGS, expectedFields, docTypeName);
+    if (result && Object.keys(result.fields).length >= 3) {
+      engine = "haiku";
+      console.log(`[OCR] Haiku extracted ${Object.keys(result.fields).length} fields (${result.confidence})`);
+    } else {
+      result = null; // Haiku fail — fallback এ যাও
     }
 
     // ── Step 3: Regex fallback — Haiku fail হলে বা API key না থাকলে ──

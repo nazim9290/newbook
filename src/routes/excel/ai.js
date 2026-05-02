@@ -68,7 +68,7 @@ router.post("/ai-analyze", upload.single("file"), asyncHandler(async (req, res) 
   }
 
   // Stage 3: Claude AI analysis
-  const aiResult = await analyzeWithClaude(sheetData);
+  const aiResult = await analyzeWithClaude(req.user.agency_id, sheetData);
 
   if (!aiResult) {
     // Fallback: rule-based detection

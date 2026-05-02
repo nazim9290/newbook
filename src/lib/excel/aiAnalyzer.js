@@ -252,13 +252,22 @@ Return ONLY a valid JSON array:
 }
 
 /**
- * analyzeWithClaude — Claude Haiku API call
- * OCR route-এর extractWithHaiku() pattern follow করে
+ * analyzeWithClaude(agencyId, sheetData) — Claude Haiku API call.
+ * Uses BYOK resolver — agency's own key first, platform fallback in shared
+ * mode. Returns null if no key available (caller falls back to rule-based).
  */
-async function analyzeWithClaude(sheetData) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    console.error("[AI Excel] ANTHROPIC_API_KEY not set");
+async function analyzeWithClaude(agencyId, sheetData) {
+  if (!agencyId) {
+    console.error("[AI Excel] analyzeWithClaude called without agencyId");
+    return null;
+  }
+
+  const { getCredential } = require("../integrations");
+  let creds;
+  try {
+    creds = await getCredential(agencyId, "anthropic");
+  } catch (e) {
+    console.warn(`[AI Excel] anthropic unavailable for ${agencyId}: ${e.code || e.message}`);
     return null;
   }
 
@@ -269,7 +278,7 @@ async function analyzeWithClaude(sheetData) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": apiKey,
+        "x-api-key": creds.api_key,
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({

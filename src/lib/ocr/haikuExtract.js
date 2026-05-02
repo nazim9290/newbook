@@ -5,9 +5,20 @@
  * Regex fallback-এর চেয়ে অনেক বেশি accurate — primary engine
  */
 
-async function extractWithHaiku(rawText, docConfigs, expectedFields, docTypeName) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
+async function extractWithHaiku(agencyId, rawText, docConfigs, expectedFields, docTypeName) {
+  if (!agencyId) {
+    console.error("[Haiku] extractWithHaiku called without agencyId");
+    return null;
+  }
+  const { getCredential } = require("../integrations");
+  let creds;
+  try {
+    creds = await getCredential(agencyId, "anthropic");
+  } catch (e) {
+    console.warn(`[Haiku] anthropic unavailable for ${agencyId}: ${e.code || e.message}`);
+    return null;
+  }
+  const apiKey = creds.api_key;
 
   // DOC_CONFIGS থেকে সব possible field names + doc types বের করো
   const docTypes = docConfigs.map(c => `${c.id}: ${c.fields.map(f => f.key).join(", ")}`).join("\n");

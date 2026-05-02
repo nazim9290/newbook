@@ -1,28 +1,43 @@
 /**
  * aiHelpers.js — AI translation + HTML fallback
  *
- * translateToJapanese: Claude Haiku দিয়ে long English text → Japanese (formal です/ます)
- *   Result cache হয় student record-এ — পরবর্তী call বাঁচে
+ * translateToJapanese(agencyId, text): Claude Haiku দিয়ে long English text →
+ *   Japanese (formal です/ます). Resolver-aware: agency BYOK first, platform
+ *   fallback in shared mode. INTEGRATION_REQUIRED/QUOTA_EXCEEDED পেলে
+ *   gracefully original text return — feature degrades, request fails না।
  *
  * generateHTMLFromFlat: PDF generate fail হলে simple HTML fallback
  */
 
 const { resolveValue } = require("./valueResolver");
+const { getCredential } = require("../integrations");
 
 // ═══════════════════════════════════════════════════════
 // AI Japanese Translation — long text (Purpose of Study etc.)
 // ═══════════════════════════════════════════════════════
-async function translateToJapanese(text) {
+async function translateToJapanese(agencyId, text) {
   if (!text || text.length < 20) return text;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return text;
+  if (!agencyId) {
+    console.warn("[aiHelpers] translateToJapanese called without agencyId — falling back to original text");
+    return text;
+  }
+
+  let creds;
+  try {
+    creds = await getCredential(agencyId, "anthropic");
+  } catch (e) {
+    // INTEGRATION_REQUIRED / QUOTA_EXCEEDED — feature unavailable, but caller
+    // shouldn't crash. Return original (untranslated) text and log the reason.
+    console.warn(`[aiHelpers] anthropic unavailable for ${agencyId}: ${e.code || e.message}`);
+    return text;
+  }
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": apiKey,
+        "x-api-key": creds.api_key,
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({

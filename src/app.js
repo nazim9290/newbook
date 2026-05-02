@@ -225,6 +225,7 @@ app.get("/api/default-templates", agencyAuth, agencyAsync(async (req, res) => {
 app.use("/api/public", require("./routes/public"));              // Unauthenticated visitor form (kiosk URL)
 app.use("/api/dashboard", require("./routes/dashboard"));       // Dashboard stats
 app.use("/api/super-admin", require("./routes/super-admin"));   // Super Admin — agency management
+app.use("/api/integrations", require("./routes/integrations")); // BYOK API key management per agency (Pro+)
 app.use("/api/auth", require("./routes/auth"));                 // লগইন ও রেজিস্ট্রেশন
 app.use("/api/auth/2fa/admin", require("./routes/auth-2fa-admin")); // ২FA admin management (mount BEFORE /2fa)
 app.use("/api/auth/2fa", require("./routes/auth-2fa"));         // ২FA self-service (TOTP)

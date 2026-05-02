@@ -133,7 +133,7 @@ router.post("/generate", asyncHandler(async (req, res) => {
             jpTranslateCache[base] = cachedJp;
           } else {
             console.log(`[DocGen] AI translating ${base} (${val.length} chars)...`);
-            const translated = await translateToJapanese(val);
+            const translated = await translateToJapanese(req.user.agency_id, val);
             jpTranslateCache[base] = translated;
             // ── Student record-এ cache save — পরেরবার AI call লাগবে না ──
             try {
