@@ -1,14 +1,33 @@
 /**
- * invoicePdf.js — Generate bilingual invoice PDF using pdf-lib
+ * invoicePdf.js — Generate bilingual invoice PDF using pdf-lib + fontkit.
  *
- * Layout: simple English-primary with Bengali tags where pdf-lib's standard
- * fonts support। Full Bengali font embedding-এর জন্য Noto Sans Bengali ttf
- * load করতে হবে — সেটা Phase 4-এ যাবে।
+ * Bengali rendering: Noto Sans Bengali Regular embedded via @pdf-lib/fontkit।
+ * Latin text-এর জন্য Helvetica (smaller PDF size)। Auto fallback — ASCII text
+ * Helvetica use করে, Bengali/Unicode text Noto Bengali।
  *
  * Returns: Uint8Array (PDF buffer)
  */
 
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
+const fontkit = require("@pdf-lib/fontkit");
+const fs = require("fs");
+const path = require("path");
+
+// Bengali font load once at module init — avoid repeated disk reads on cron batch
+const BENGALI_FONT_PATH = path.join(__dirname, "../../assets/fonts/NotoSansBengali-Regular.ttf");
+let _bengaliFontBytes = null;
+try {
+  if (fs.existsSync(BENGALI_FONT_PATH)) {
+    _bengaliFontBytes = fs.readFileSync(BENGALI_FONT_PATH);
+  } else {
+    console.warn(`[InvoicePDF] Bengali font missing at ${BENGALI_FONT_PATH} — Bengali text will fall back to '?'`);
+  }
+} catch (e) {
+  console.error("[InvoicePDF] Bengali font load error:", e.message);
+}
+
+// Detect non-Latin characters → use Bengali font when present
+const NON_LATIN_RE = /[^\x00-\x7F]/;
 
 // ── format helpers ──
 const fmtBDT = (n) => `BDT ${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -16,20 +35,40 @@ const fmtDate = (d) => d ? new Date(d).toISOString().slice(0, 10) : "—";
 
 async function generateInvoicePdf({ invoice, agency }) {
   const pdf = await PDFDocument.create();
+  pdf.registerFontkit(fontkit);
   const page = pdf.addPage([595, 842]);   // A4 portrait (pt)
   const { width, height } = page.getSize();
   const helv = await pdf.embedFont(StandardFonts.Helvetica);
   const helvBold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  // Embed Bengali font if available (subset for size)
+  let bengaliFont = null;
+  if (_bengaliFontBytes) {
+    try {
+      bengaliFont = await pdf.embedFont(_bengaliFontBytes, { subset: true });
+    } catch (e) {
+      console.error("[InvoicePDF] embedFont(Bengali) failed:", e.message);
+    }
+  }
 
   const margin = 40;
   let y = height - margin;
 
   const drawText = (text, opts = {}) => {
     const { x = margin, size = 10, bold = false, color = rgb(0, 0, 0), font, maxWidth } = opts;
-    const useFont = font || (bold ? helvBold : helv);
     let str = String(text ?? "");
-    // pdf-lib's standard fonts can't render Bengali — strip non-Latin characters as fallback
-    str = str.replace(/[^\x20-\x7E\n]/g, "?");
+    // Auto-pick font: non-Latin text → Bengali font (if available); else Helvetica
+    let useFont;
+    if (font) {
+      useFont = font;
+    } else if (NON_LATIN_RE.test(str) && bengaliFont) {
+      useFont = bengaliFont;
+    } else if (NON_LATIN_RE.test(str) && !bengaliFont) {
+      // Fallback — strip non-ASCII when no Bengali font available
+      str = str.replace(/[^\x20-\x7E\n]/g, "?");
+      useFont = bold ? helvBold : helv;
+    } else {
+      useFont = bold ? helvBold : helv;
+    }
     if (maxWidth && useFont.widthOfTextAtSize(str, size) > maxWidth) {
       // crude truncate
       while (str.length > 5 && useFont.widthOfTextAtSize(str + "...", size) > maxWidth) str = str.slice(0, -1);
@@ -152,11 +191,7 @@ async function generateInvoicePdf({ invoice, agency }) {
   drawText("- Online: https://agencybook.net/pay/" + invoice.invoice_number, { y, size: 9, color: rgb(0.3, 0.3, 0.3) }); y -= 12;
 
   y -= 12;
-  drawText("Note: Bengali (Bangla) text rendering will be enabled in Phase 4 with embedded Noto Sans Bengali font.", {
-    y, size: 8, color: rgb(0.5, 0.5, 0.5),
-  });
-  y -= 12;
-  drawText("Questions? Email: billing@agencybook.net", { y, size: 9, color: rgb(0.3, 0.3, 0.3) });
+  drawText("কোনো প্রশ্ন? Email: billing@agencybook.net", { y, size: 9, color: rgb(0.3, 0.3, 0.3) });
 
   // Footer
   drawText("Generated " + new Date().toISOString(), { y: 30, x: margin, size: 7, color: rgb(0.6, 0.6, 0.6) });

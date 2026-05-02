@@ -125,20 +125,56 @@ async function generateUpcomingInvoices() {
       const dueDate = new Date(sub.current_period_end); dueDate.setDate(dueDate.getDate() + 7);
 
       const invoiceNumber = await generateInvoiceNumber();
-      await pool.query(`
+      const { rows: insertedRows } = await pool.query(`
         INSERT INTO invoices (
           invoice_number, agency_id, subscription_id,
           period_start, period_end, issue_date, due_date,
           subtotal, total_amount, currency, line_items, status, sent_at
         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'BDT',$10,'sent',now())
+        RETURNING id
       `, [invoiceNumber, sub.agency_id, sub.id, periodStart, periodEnd, today, dueDate.toISOString().slice(0,10), subtotal, total, JSON.stringify(lineItems)]);
 
       result.created++;
+
+      // ── Auto-email — fire-and-forget, never block cron ──
+      const newId = insertedRows?.[0]?.id;
+      if (newId) {
+        const { sendInvoiceEmail } = require("./sendInvoiceEmail");
+        sendInvoiceEmail(newId).then(r => {
+          if (r.success) result.emailed = (result.emailed || 0) + 1;
+          else result.email_failed = (result.email_failed || 0) + 1;
+        }).catch(e => {
+          console.error(`[CronEmail] ${invoiceNumber}:`, e.message);
+        });
+      }
     } catch (e) {
       console.error(`[InvoiceGen] agency=${sub.agency_id} err:`, e.message);
       result.errors++;
     }
   }
+
+  // ── Retry pending/failed emails (max 3 attempts) ──
+  // আগের cron run-এ যেসব invoice-এ email send করতে fail হয়েছিল সেগুলো retry
+  try {
+    const { rows: pending } = await pool.query(`
+      SELECT id, invoice_number FROM invoices
+      WHERE email_status IN ('pending', 'failed')
+        AND COALESCE(email_attempts, 0) < 3
+        AND created_at > now() - interval '7 days'
+      ORDER BY created_at DESC
+      LIMIT 50
+    `);
+    if (pending.length) {
+      const { sendInvoiceEmail } = require("./sendInvoiceEmail");
+      result.retried = pending.length;
+      for (const inv of pending) {
+        try { await sendInvoiceEmail(inv.id); } catch (e) { /* per-invoice handled */ }
+      }
+    }
+  } catch (e) {
+    console.error("[CronEmailRetry]", e.message);
+  }
+
   return result;
 }
 

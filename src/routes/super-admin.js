@@ -9,6 +9,7 @@ const express = require("express");
 const supabase = require("../lib/db");
 const asyncHandler = require("../lib/asyncHandler");
 const auth = require("../middleware/auth");
+const { multiTenantGuard } = require("../middleware/licenseGate");
 const bcrypt = require("bcryptjs");
 const { generatePrefix, ensureUniquePrefix } = require("../lib/idGenerator");
 const multer = require("multer");
@@ -104,8 +105,9 @@ router.patch("/agencies/:id/reset-password", asyncHandler(async (req, res) => {
 
 // ═══════════════════════════════════════════════════
 // POST /agencies — নতুন agency তৈরি + admin user
+// License gate: blocks if max_agencies reached or license inactive (Phase 0)
 // ═══════════════════════════════════════════════════
-router.post("/agencies", asyncHandler(async (req, res) => {
+router.post("/agencies", multiTenantGuard(), asyncHandler(async (req, res) => {
   const { name, name_bn, subdomain, phone, email, address, plan, admin_name, admin_email, admin_password, dedicated, prefix: customPrefix } = req.body;
 
   // Required fields validation
@@ -897,7 +899,26 @@ router.post("/billing/invoices/generate", asyncHandler(async (req, res) => {
     line_items, status: "sent", sent_at: new Date().toISOString(), notes,
   }).select().single();
   if (error) return res.status(500).json({ error: "Invoice তৈরি ব্যর্থ: " + error.message });
+
+  // Auto-email — fire-and-forget (don't block API response)
+  const { sendInvoiceEmail } = require("../lib/sendInvoiceEmail");
+  sendInvoiceEmail(data.id).catch(e => console.error("[ManualInvoiceEmail]", e.message));
+
   res.json(data);
+}));
+
+// POST /billing/invoices/:id/resend — resend invoice email (super-admin)
+router.post("/billing/invoices/:id/resend", asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  // Reset email_status so the send marks 'sent' fresh; don't reset attempts
+  await supabase.pool.query(
+    `UPDATE invoices SET email_status = 'pending', email_error = NULL WHERE id = $1`,
+    [id]
+  );
+  const { sendInvoiceEmail } = require("../lib/sendInvoiceEmail");
+  const result = await sendInvoiceEmail(id);
+  if (result.success) return res.json({ success: true, recipient: result.recipient });
+  return res.status(500).json({ error: result.error || "Resend ব্যর্থ" });
 }));
 
 // POST /billing/payments/manual — record a manual payment
