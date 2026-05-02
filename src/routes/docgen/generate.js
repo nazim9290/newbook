@@ -102,7 +102,7 @@ router.post("/generate", asyncHandler(async (req, res) => {
     // R2-তে object key দিয়ে fetch।
     const tmplPath = tmpl.template_url || tmpl.file_path;
     let templateBuffer = null;
-    try { templateBuffer = await storage.get(tmplPath); }
+    try { templateBuffer = await storage.get(tmplPath, req.user.agency_id); }
     catch (e) { console.error("[DocGen] storage.get error:", e.message); }
     if (!templateBuffer) {
       console.error("[DocGen] template missing — DB path:", tmplPath, "backend:", storage.kind);

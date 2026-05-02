@@ -19,11 +19,12 @@ const { flattenStudent, resolveFieldValue } = require("./studentData");
 
 // Template file আনো — storage backend (local FS or R2) থেকে।
 // local backend-এ legacy absolute path / basename fallback already built in.
-async function getTemplateBuffer(templateUrl) {
+// agencyId optional — provided in mirror/r2 mode for BYOK bucket routing.
+async function getTemplateBuffer(templateUrl, agencyId) {
   if (!templateUrl) return null;
   try {
-    const buf = await storage.get(templateUrl);
-    if (!buf) console.error("[Excel] template not found in storage:", templateUrl, "backend:", storage.kind);
+    const buf = await storage.get(templateUrl, agencyId);
+    if (!buf) console.error("[Excel] template not found in storage:", templateUrl, "backend:", storage.kind, "agency:", agencyId);
     return buf;
   } catch (e) {
     console.error("[Excel] storage.get error:", e.message);

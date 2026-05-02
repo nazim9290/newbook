@@ -1,74 +1,62 @@
 /**
  * lib/storage/mirror.js — dual-write storage backend (VPS local + R2)
  *
- * Activation: STORAGE_BACKEND=mirror in .env (R2 credentials must also be set).
+ * Activation: STORAGE_BACKEND=mirror in .env.
+ *
+ * Agency-aware (Phase 3 — BYOK R2 buckets):
+ *   - Local FS is always the platform's VPS (never BYOK — that disk is yours,
+ *     not the agency's)
+ *   - R2 is BYOK-aware via lib/integrations resolver:
+ *       - Agency has BYOK R2 creds → mirror to THEIR bucket
+ *       - Shared instance, no BYOK   → mirror to platform R2 (with quota)
+ *       - Enterprise instance, no BYOK → R2 mirror skipped silently
+ *         (local-only, owner can configure later)
  *
  * Semantics:
- *   put(key, buffer)
- *     1. Write to LOCAL — must succeed (this is the source of truth for reads)
- *     2. Write to R2    — best-effort. If R2 fails, log + continue.
- *        Failed mirror is logged with [mirror:drift] tag so reconciliation
- *        can pick it up later.
+ *   put(key, buffer, agencyId)
+ *     1. Write LOCAL — must succeed
+ *     2. Write R2 (agency or platform) — best-effort
  *
- *   get(key)
- *     1. Try LOCAL — fastest, free, no egress cost
- *     2. If local miss → try R2 → if hit, write back to local (self-heal)
- *     This means a wiped local disk is automatically rebuilt on first
- *     access of each file.
+ *   get(key, agencyId)
+ *     1. LOCAL first
+ *     2. LOCAL miss → try R2 (agency-aware) → on hit, write back to local
  *
- *   del(key)
- *     Best-effort delete from BOTH backends. Either failing does NOT
- *     abort the other — we'd rather over-delete than leak.
+ *   del(key, agencyId)
+ *     Best-effort delete from both stores.
  *
- *   exists(key)
- *     Checks local OR r2 (any hit returns true).
- *
- * Why this shape:
- *   - Reads stay fast and free (local disk)
- *   - Writes are doubled, but xlsx/docx are small (avg <500 KB) — R2
- *     upload completes in ~100-300ms, well within an HTTP request budget
- *   - Local disk crash → R2 still has everything; first request rebuilds
- *     the local copy
- *   - R2 outage → local writes keep working; pending mirror operations
- *     surface in logs, replayed via scripts/storage-reconcile.js
- *
- * For Enterprise:
- *   - Same code path supports "shift to R2-primary": simply set
- *     STORAGE_BACKEND=r2 (skips local entirely) — no schema/data change
- *   - Add a CDN in front of R2 (Cloudflare native) for global read speed
- *   - Run scripts/storage-reconcile.js as a nightly cron to catch drift
+ *   exists(key, agencyId)
+ *     LOCAL OR R2 (any-hit returns true).
  */
 
 const local = require("./local");
 const r2 = require("./r2");
 
-async function put(key, buffer) {
-  // Step 1: LOCAL — primary, must succeed
+async function put(key, buffer, agencyId) {
+  // 1. LOCAL — primary, must succeed
   await local.put(key, buffer);
 
-  // Step 2: R2 — secondary, best-effort
+  // 2. R2 — secondary, best-effort. If agency lacks R2 creds and platform
+  //    is unavailable, r2.put will throw — we catch and log.
   try {
-    await r2.put(key, buffer);
+    await r2.put(key, buffer, agencyId);
   } catch (e) {
-    console.error(`[mirror:drift] R2 put failed for "${key}": ${e.message} — local saved OK, R2 will be reconciled later`);
+    console.error(`[mirror:drift] R2 put failed for "${key}" (agency=${agencyId || "platform"}): ${e.message} — local saved OK`);
   }
 
   return key;
 }
 
-async function get(key) {
+async function get(key, agencyId) {
   if (!key) return null;
 
-  // Try LOCAL first (fast path)
   let buf;
   try { buf = await local.get(key); } catch (e) { console.warn("[mirror] local.get error:", e.message); }
   if (buf) return buf;
 
-  // LOCAL miss → try R2 fallback (self-heal: cache back to local)
   try {
-    const r2Buf = await r2.get(key);
+    const r2Buf = await r2.get(key, agencyId);
     if (r2Buf) {
-      console.warn(`[mirror:rebuild] "${key}" missing locally, restored from R2 (${r2Buf.length} bytes)`);
+      console.warn(`[mirror:rebuild] "${key}" missing locally, restored from R2 (agency=${agencyId || "platform"}, ${r2Buf.length} bytes)`);
       try { await local.put(key, r2Buf); } catch (e) { console.warn("[mirror] self-heal put failed:", e.message); }
       return r2Buf;
     }
@@ -79,38 +67,33 @@ async function get(key) {
   return null;
 }
 
-async function del(key) {
+async function del(key, agencyId) {
   if (!key) return;
-  // Both deletes attempted — partial failure is logged but doesn't propagate.
-  // Rationale: leaving a stale file on either side is worse than a transient error.
   let localErr, r2Err;
   try { await local.del(key); } catch (e) { localErr = e.message; }
-  try { await r2.del(key); } catch (e) { r2Err = e.message; }
+  try { await r2.del(key, agencyId); } catch (e) { r2Err = e.message; }
   if (localErr) console.warn(`[mirror] local.del("${key}") failed: ${localErr}`);
-  if (r2Err) console.warn(`[mirror:drift] r2.del("${key}") failed: ${r2Err}`);
+  if (r2Err) console.warn(`[mirror:drift] r2.del("${key}", agency=${agencyId || "platform"}) failed: ${r2Err}`);
 }
 
-async function exists(key) {
+async function exists(key, agencyId) {
   if (!key) return false;
   if (await local.exists(key)) return true;
-  try { return await r2.exists(key); } catch { return false; }
+  try { return await r2.exists(key, agencyId); } catch { return false; }
 }
 
 function resolve(key) {
-  // Mirror falls back to local resolution — used by routes that need a
-  // direct filesystem path (e.g. for child_process spawns reading the file).
   return local.resolve(key);
 }
 
 function ensureDirs() {
   local.ensureDirs();
-  // R2 has no directories — no-op
 }
 
 module.exports = {
   put, get, del, exists, resolve, ensureDirs,
   kind: "mirror",
-  local, r2, // expose for diagnostics / reconciliation
+  local, r2,
   UPLOADS_DIR: local.UPLOADS_DIR,
   BUCKET: r2.BUCKET,
 };

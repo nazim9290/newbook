@@ -196,7 +196,7 @@ router.post("/upload", upload.single("file"), asyncHandler(async (req, res) => {
     const safeName = `${agencyId}_${Date.now()}_${req.file.originalname.replace(/[^a-zA-Z0-9._\-]/g, "_")}`;
     const storageKey = `doc-templates/${safeName}`;
     const fileBuffer = fs.readFileSync(req.file.path);
-    await storage.put(storageKey, fileBuffer);
+    await storage.put(storageKey, fileBuffer, agencyId);
     try { fs.unlinkSync(req.file.path); } catch {} // multer temp file
 
     // Parse .docx (ZIP of XML files) to find {{placeholders}}
@@ -289,7 +289,7 @@ router.post("/create-from-default", asyncHandler(async (req, res) => {
 
   const destName = `${req.user.agency_id}_${Date.now()}_${(dt.file_name || "template.docx").replace(/[^a-zA-Z0-9._-]/g, "_")}`;
   const storageKey = `doc-templates/${destName}`;
-  await storage.put(storageKey, srcBuffer);
+  await storage.put(storageKey, srcBuffer, req.user.agency_id);
 
   // Detect placeholders from buffer (zip parse uniformly)
   let placeholders = [];
@@ -387,7 +387,7 @@ router.post("/templates/:id/mapping", asyncHandler(async (req, res) => {
 router.delete("/templates/:id", asyncHandler(async (req, res) => {
   const { data: tmpl } = await supabase.from("doc_templates").select("template_url").eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
   if (tmpl?.template_url) {
-    try { await storage.del(tmpl.template_url); } catch (e) { console.warn("[DocGen] storage delete:", e.message); }
+    try { await storage.del(tmpl.template_url, req.user.agency_id); } catch (e) { console.warn("[DocGen] storage delete:", e.message); }
   }
   const { error } = await supabase.from("doc_templates").delete().eq("id", req.params.id).eq("agency_id", req.user.agency_id);
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });

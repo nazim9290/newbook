@@ -59,7 +59,7 @@ function maskCredentials(service, creds) {
 // ── Routes ──────────────────────────────────────────────────────────────
 
 // GET /api/integrations/_meta — service catalog + agency's tier eligibility
-// Returns SERVICES config so frontend can render Cards correctly.
+// + onboarding status for first-login banner on enterprise installs
 router.get("/_meta", asyncHandler(async (req, res) => {
   const tier = await integrations.getAgencyTier(req.user.agency_id);
   const meta = {};
@@ -72,10 +72,26 @@ router.get("/_meta", asyncHandler(async (req, res) => {
       tier_eligible: integrations.tierAllowsService(tier, service),
     };
   }
+
+  // Onboarding: in enterprise mode, certain core services have no platform
+  // fallback — agency must configure them or the feature is broken. In
+  // shared mode, platform fallback always exists, so never show banner.
+  let onboarding_required = false;
+  let missing_required = [];
+  if (integrations.INSTANCE_MODE === "enterprise") {
+    const REQUIRED_FOR_ENTERPRISE = ["anthropic", "smtp"];
+    const saved = await integrations.listIntegrations(req.user.agency_id);
+    const savedServices = new Set(saved.filter(s => s.enabled).map(s => s.service));
+    missing_required = REQUIRED_FOR_ENTERPRISE.filter(s => !savedServices.has(s));
+    onboarding_required = missing_required.length > 0;
+  }
+
   res.json({
     instance_mode: integrations.INSTANCE_MODE,
     agency_tier: tier,
     services: meta,
+    onboarding_required,
+    missing_required,
   });
 }));
 

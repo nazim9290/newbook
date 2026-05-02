@@ -336,6 +336,16 @@ app.listen(PORT, async () => {
       dailyOnce: false,
     });
 
+    // BYOK quota alerts — daily 09:00 Asia/Dhaka. No-op in enterprise mode.
+    const quotaAlerts = require("./lib/quotaAlerts");
+    scheduler.register({
+      name: "byok_quota_alerts",
+      runAt: scheduler.dailyAt(9, 0),
+      handler: () => quotaAlerts.runScan(),
+      lockKey: 9876500004,
+      dailyOnce: true,
+    });
+
     scheduler.startAll();
   } catch (e) {
     console.error("[OwnerPack Cron Init]", e.message);

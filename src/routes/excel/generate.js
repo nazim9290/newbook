@@ -64,8 +64,8 @@ router.post("/generate", asyncHandler(async (req, res) => {
       }));
     }
 
-    // Template file: VPS local-এ resolve করি (basename fallback সহ)
-    const templateBuffer = await getTemplateBuffer(tmpl.template_url);
+    // Template file: VPS local-এ resolve করি (basename fallback সহ); agency-aware R2 routing in mirror mode
+    const templateBuffer = await getTemplateBuffer(tmpl.template_url, req.user.agency_id);
     if (!templateBuffer) {
       console.error("[Excel Generate] Template file not found:", tmpl.template_url);
       return res.status(400).json({ error: "Template file পাওয়া যায়নি — admin-কে template আবার upload করতে বলুন" });
@@ -138,9 +138,9 @@ router.post("/generate-single", asyncHandler(async (req, res) => {
     ]);
     const sysContext = buildSystemContext(agencyRes.data, batchRes.data, branchRes.data, schoolRes.data);
 
-    // Template file: storage থেকে download, অথবা local path
+    // Template file: storage থেকে download (agency-aware R2 routing in mirror mode)
     console.log("[Excel Generate] template_url:", tmpl.template_url, "| file_name:", tmpl.file_name);
-    const templateBuffer = await getTemplateBuffer(tmpl.template_url);
+    const templateBuffer = await getTemplateBuffer(tmpl.template_url, req.user.agency_id);
     if (!templateBuffer) {
       console.error("[Excel Generate] Template file not found:", tmpl.template_url);
       return res.status(400).json({ error: "Template file পাওয়া যায়নি — admin-কে template আবার upload করতে বলুন" });
@@ -172,7 +172,7 @@ router.post("/re-parse/:id", asyncHandler(async (req, res) => {
       .eq("id", req.params.id)
       .single();
     if (error) return res.status(404).json({ error: "Template পাওয়া যায়নি" });
-    const templateBuffer = await getTemplateBuffer(tmpl.template_url);
+    const templateBuffer = await getTemplateBuffer(tmpl.template_url, req.user.agency_id);
     if (!templateBuffer) {
       return res.status(400).json({ error: "Template ফাইল পাওয়া যায়নি" });
     }
