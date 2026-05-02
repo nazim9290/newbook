@@ -125,6 +125,10 @@ const apiLimiter = rateLimit({
 });
 app.use("/api/", apiLimiter);
 
+// ── টেন্যান্ট-লেভেল রেট লিমিট — agency_id-ভিত্তিক (per-user limit এর উপরে layer) ──
+const { tenantApiLimiter } = require("./middleware/tenantRateLimit");
+app.use("/api/", tenantApiLimiter);
+
 // ── Heavy endpoint রেট লিমিট — OCR ও DocGen (CPU-intensive, বেশি সময় নেয়) ──
 const heavyLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -267,6 +271,7 @@ app.use("/api/ops", require("./routes/ops"));                     // Operator co
 app.use("/api/onboarding", require("./routes/onboarding"));       // Excel/CSV import wizard (Phase 4)
 app.use("/api/exit", require("./routes/exit"));                   // Customer data export (Phase 5)
 app.use("/api/api-keys", require("./routes/api-keys"));           // Public API key management (Phase 13)
+app.use("/api/outbound-webhooks", require("./routes/outbound-webhooks")); // Customer webhook subscribers (Phase 13)
 // ── Owner Power-Up Pack (Phase 1) ──
 app.use("/api/agency-settings", require("./routes/agency-settings")); // owner-tunable thresholds + provider creds
 app.use("/api/backup", require("./routes/backup"));               // offsite backup admin (super_admin)
@@ -302,8 +307,12 @@ app.use((err, req, res, next) => {
 });
 
 // ── Server Start ──
+// Only call app.listen() + boot crons when this file is run directly (`node src/app.js`
+// or `nodemon src/app.js`). When required from a test (`require("../src/app")`), we
+// return the configured Express instance without binding a port or starting schedulers.
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, async () => {
+if (require.main === module) {
+  app.listen(PORT, async () => {
   console.log(`AgencyBook API running on http://localhost:${PORT}`);
   // HQ branch cache load — branch-based access control
   try { const { loadHqBranches } = require("./lib/branchFilter"); const supabase = require("./lib/db"); await loadHqBranches(supabase); } catch (e) { console.error("[HQ Cache]", e.message); }
@@ -422,4 +431,7 @@ app.listen(PORT, async () => {
   try {
     require("./lib/heartbeatSender").start();
   } catch (e) { console.error("[Heartbeat Init]", e.message); }
-});
+  });
+}
+
+module.exports = app;

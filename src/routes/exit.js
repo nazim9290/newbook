@@ -26,6 +26,7 @@
  */
 
 const express = require('express');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const archiver = require('archiver');
@@ -38,6 +39,16 @@ const { decryptMany } = require('../lib/crypto');
 const { logActivity } = require('../lib/activityLog');
 
 const router = express.Router();
+
+// ── Download endpoint is BEFORE auth middleware — uses one-time download_token
+// instead of JWT, because <a download> can't send Authorization header.
+// The download_token is generated in runExport (server-only), never logged,
+// single-use (consumed on download), expires with job TTL (24h).
+// Mounted FIRST so the auth middleware below doesn't intercept it.
+const downloadRouter = express.Router();
+router.use('/download', downloadRouter);
+
+// Auth gate for the rest
 router.use(auth);
 router.use(tenancy);
 
@@ -140,6 +151,8 @@ async function runExport(jobId, agencyId, slug) {
     job.size_bytes = stat.size;
     job.completed_at = new Date().toISOString();
     job.expires_at = new Date(Date.now() + EXPORT_TTL_MS).toISOString();
+    // Single-use download token (not JWT — query-param-safe)
+    job.download_token = crypto.randomBytes(24).toString('base64url');
   } catch (err) {
     console.error('[exit] runExport failed:', err.message);
     job.state = 'error';
@@ -193,6 +206,8 @@ router.post('/request', asyncHandler(async (req, res) => {
 }));
 
 // ── GET /api/exit/status/:id ───────────────────────────────────────────
+// Returns download_token along with state=done so client can build the
+// download URL: /api/exit/download/:id?dt=<download_token>
 router.get('/status/:id', asyncHandler(async (req, res) => {
   const job = jobs.get(req.params.id);
   if (!job) return res.status(404).json({ error: 'Export job পাওয়া যায়নি' });
@@ -208,18 +223,23 @@ router.get('/status/:id', asyncHandler(async (req, res) => {
     size_bytes: job.size_bytes || null,
     error: job.error || null,
     expires_at: job.expires_at || null,
+    // Only present when ready
+    download_token: job.state === 'done' ? job.download_token : null,
   });
 }));
 
-// ── GET /api/exit/download/:id ─────────────────────────────────────────
-router.get('/download/:id', asyncHandler(async (req, res) => {
+// ── GET /api/exit/download/:id?dt=<token> ─────────────────────────────
+// NO auth middleware — uses one-time download_token. Mounted on the
+// downloadRouter declared at top of file, BEFORE the auth gate.
+downloadRouter.get('/:id', asyncHandler(async (req, res) => {
+  const dt = req.query.dt;
   const job = jobs.get(req.params.id);
   if (!job) return res.status(404).json({ error: 'Export job পাওয়া যায়নি' });
-  if (job.agency_id !== req.user.agency_id) {
-    return res.status(403).json({ error: 'অন্য agency-র export download করা যাবে না' });
-  }
   if (job.state !== 'done') {
     return res.status(425).json({ error: 'Export এখনো প্রস্তুত না — state: ' + job.state });
+  }
+  if (!dt || dt !== job.download_token) {
+    return res.status(401).json({ error: 'Invalid download token' });
   }
   if (!fs.existsSync(job.filepath)) {
     return res.status(410).json({ error: 'Export expire করেছে — নতুন একটা request করুন' });
