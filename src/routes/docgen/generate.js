@@ -96,13 +96,30 @@ router.post("/generate", asyncHandler(async (req, res) => {
       flat.issuing_line2 = flat.union_name ? [flat.upazila_name, flat.district_name].filter(Boolean).join(", ") : flat.zone ? `Zone-${flat.zone}` : "";
     }
 
-    // Get template file buffer — VPS local
+    // Get template file buffer — try multiple known locations so a stale
+    // absolute path or wiped subfolder doesn't silently break generation.
     let templateBuffer;
     const tmplPath = tmpl.template_url || tmpl.file_path;
-    if (tmplPath && fs.existsSync(tmplPath)) {
-      templateBuffer = fs.readFileSync(tmplPath);
-    } else {
-      return res.status(400).json({ error: "Template file পাওয়া যায়নি: " + tmplPath });
+    if (tmplPath) {
+      const base = path.basename(tmplPath);
+      const candidates = [
+        tmplPath, // absolute as stored
+        path.join(__dirname, "../../../uploads/doc-templates", base), // standard subfolder
+        path.join(__dirname, "../../../uploads", base), // legacy root uploads
+      ];
+      for (const p of candidates) {
+        try {
+          if (fs.existsSync(p)) {
+            if (p !== tmplPath) console.warn("[DocGen] template fallback hit:", p);
+            templateBuffer = fs.readFileSync(p);
+            break;
+          }
+        } catch {}
+      }
+    }
+    if (!templateBuffer) {
+      console.error("[DocGen] template missing — DB path:", tmplPath);
+      return res.status(400).json({ error: "Template file পাওয়া যায়নি — admin-কে template আবার upload করতে বলুন" });
     }
 
     // ── Pre-process: :jp modifier-এ long text AI translate (async) ──

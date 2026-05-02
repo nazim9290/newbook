@@ -65,10 +65,11 @@ router.post("/generate", asyncHandler(async (req, res) => {
       }));
     }
 
-    // Template file: Supabase storage থেকে download
+    // Template file: VPS local-এ resolve করি (basename fallback সহ)
     const templateBuffer = await getTemplateBuffer(tmpl.template_url);
     if (!templateBuffer) {
-      return generateCSV(res, tmpl, students);
+      console.error("[Excel Generate] Template file not found:", tmpl.template_url);
+      return res.status(400).json({ error: "Template file পাওয়া যায়নি — admin-কে template আবার upload করতে বলুন" });
     }
 
     if (students.length === 1) {
@@ -142,14 +143,15 @@ router.post("/generate-single", asyncHandler(async (req, res) => {
     console.log("[Excel Generate] template_url:", tmpl.template_url, "| file_name:", tmpl.file_name);
     const templateBuffer = await getTemplateBuffer(tmpl.template_url);
     if (!templateBuffer) {
-      console.error("[Excel Generate] Template file not found, falling back to CSV");
-      return generateCSV(res, tmpl, [student]);
+      console.error("[Excel Generate] Template file not found:", tmpl.template_url);
+      return res.status(400).json({ error: "Template file পাওয়া যায়নি — admin-কে template আবার upload করতে বলুন" });
     }
 
     const buffer = await fillSingleStudentFromBuffer(templateBuffer, tmpl.mappings, student, sysContext);
     if (!buffer) {
-      // .xls format বা corrupted — CSV fallback
-      return generateCSV(res, tmpl, [student]);
+      // .xls format বা corrupted — clear error (silent CSV fallback is misleading)
+      console.error("[Excel Generate] Workbook parse failed for:", tmpl.file_name);
+      return res.status(400).json({ error: "Template ফাইল .xlsx নয় বা corrupted — .xlsx ফরম্যাটে আবার upload করুন" });
     }
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="${encName(tmpl.school_name)}_${encName(student.name_en || student.id)}.xlsx"`);

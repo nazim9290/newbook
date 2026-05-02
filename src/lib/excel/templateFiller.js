@@ -16,28 +16,30 @@ const { decrypt } = require("../crypto");
 const { getCellText, encName, looksEncrypted } = require("./cellUtils");
 const { flattenStudent, resolveFieldValue } = require("./studentData");
 
-// Template file আনো — Supabase storage থেকে download অথবা local path থেকে read
+// Template file আনো — local path / fallback locations চেক
+// VPS-এ deploy/restart-এ subfolder wipe হলেও পুরনো ফাইল root-level uploads-এ
+// থাকতে পারে — সেটাও cover করি যাতে DB-র stale absolute path silently break না করে।
 async function getTemplateBuffer(templateUrl) {
   if (!templateUrl) return null;
+  const base = path.basename(templateUrl);
 
-  // 1. Absolute path (VPS local) — সরাসরি read
-  if (fs.existsSync(templateUrl)) {
-    return fs.readFileSync(templateUrl);
+  const candidates = [
+    templateUrl, // 1. Absolute path stored at upload-time
+    path.join(__dirname, "../../../uploads/excel-templates", base), // 2. Standard subfolder
+    path.join(__dirname, "../../../uploads", base), // 3. Legacy: pre-refactor root uploads
+    path.join(__dirname, "../../..", templateUrl), // 4. Backend-root relative path
+  ];
+
+  for (const p of candidates) {
+    try {
+      if (p && fs.existsSync(p)) {
+        if (p !== templateUrl) console.warn("[Excel] template fallback hit:", p);
+        return fs.readFileSync(p);
+      }
+    } catch { /* path resolution issue, try next */ }
   }
 
-  // 2. uploads/excel-templates/ folder-এ filename দিয়ে চেক
-  const uploadsPath = path.join(__dirname, "../../../uploads/excel-templates", path.basename(templateUrl));
-  if (fs.existsSync(uploadsPath)) {
-    return fs.readFileSync(uploadsPath);
-  }
-
-  // 3. Backend root-এর relative path
-  const relPath = path.join(__dirname, "../../..", templateUrl);
-  if (fs.existsSync(relPath)) {
-    return fs.readFileSync(relPath);
-  }
-
-  console.error("Template file not found:", templateUrl);
+  console.error("Template file not found anywhere:", templateUrl, "tried:", candidates);
   return null;
 }
 
