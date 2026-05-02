@@ -7,6 +7,7 @@ const { checkPermission } = require("../middleware/checkPermission");
 const { logActivity } = require("../lib/activityLog");
 const { generateId } = require("../lib/idGenerator");
 const cache = require("../lib/cache");
+const { applyActiveFilter, softDeleteRow, restoreRow } = require("../lib/softDelete");
 
 const router = express.Router();
 router.use(auth);
@@ -17,6 +18,9 @@ router.get("/", checkPermission("visitors", "read"), asyncHandler(async (req, re
   const { applyCursor, buildResponse } = require("../lib/cursorPagination");
 
   let query = supabase.from("visitors").select("*", { count: "exact" }).eq("agency_id", req.user.agency_id);
+
+  // Soft delete — trash bin lookup এ আলাদা endpoint, default list এ active শুধু
+  query = applyActiveFilter(query);
 
   // Branch-based access
   const { getBranchFilter } = require("../lib/branchFilter");
@@ -197,6 +201,7 @@ router.post("/:id/convert", checkPermission("visitors", "write"), asyncHandler(a
     .select("*")
     .eq("id", req.params.id)
     .eq("agency_id", req.user.agency_id)
+    .is("deleted_at", null)
     .single();
 
   if (vErr) return res.status(404).json({ error: "Visitor পাওয়া যায়নি" });
@@ -292,22 +297,99 @@ router.post("/:id/convert", checkPermission("visitors", "write"), asyncHandler(a
   res.status(201).json(student);
 }));
 
-// DELETE /api/visitors/:id
+// DELETE /api/visitors/:id — soft delete (deleted_at = now)
+// Audit trail preserve হয়; retention window পার হলে purgeExpired() physical মুছবে।
 router.delete("/:id", checkPermission("visitors", "delete"), asyncHandler(async (req, res) => {
-  const { error } = await supabase.from("visitors")
-    .delete()
-    .eq("id", req.params.id)
-    .eq("agency_id", req.user.agency_id);
+  const { data, error } = await softDeleteRow({
+    table: "visitors",
+    id: req.params.id,
+    agencyId: req.user.agency_id,
+    userId: req.user.id,
+    supabase,
+  });
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+  if (!data) return res.status(404).json({ error: "ভিজিটর পাওয়া যায়নি" });
 
-  // Activity log — visitor মুছে ফেলা
+  // Activity log — visitor soft delete
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "delete", module: "visitors",
-    recordId: req.params.id, description: `ভিজিটর মুছে ফেলা: ${req.params.id}`, ip: req.ip }).catch(() => {});
+    recordId: req.params.id, description: `ভিজিটর মুছে ফেলা (soft): ${req.params.id}`, ip: req.ip }).catch(() => {});
 
   // ক্যাশ invalidate — visitor delete এ count বদলায়
   cache.invalidate(req.user.agency_id);
 
   res.json({ success: true });
+}));
+
+// POST /api/visitors/:id/restore — soft-deleted visitor পুনরায় active করা
+// delete permission লাগে — যারা মুছতে পারে তারাই restore করতে পারবে
+router.post("/:id/restore", checkPermission("visitors", "delete"), asyncHandler(async (req, res) => {
+  const { data, error } = await restoreRow({
+    table: "visitors",
+    id: req.params.id,
+    agencyId: req.user.agency_id,
+    supabase,
+  });
+  if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
+  if (!data) return res.status(404).json({ error: "ভিজিটর পাওয়া যায়নি" });
+
+  // Activity log — visitor restore
+  logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "visitors",
+    recordId: req.params.id, description: `ভিজিটর পুনরুদ্ধার: ${data.name || req.params.id}`, ip: req.ip }).catch(() => {});
+
+  // ক্যাশ invalidate — restore-এ active list বদলায়
+  cache.invalidate(req.user.agency_id);
+
+  // Frontend format-এ map (list/POST-এর মত)
+  const mapped = { ...data, name_en: data.name, date: data.visit_date, lastFollowUp: data.last_follow_up };
+  res.json(mapped);
+}));
+
+// GET /api/visitors/trash — soft-deleted visitor list
+// delete permission লাগে — সাধারণ user trash দেখতে পাবে না
+// Note: lib/db.js builder-এ `IS NOT NULL` direct নেই, তাই raw pool.query।
+// agency_id + branch filter prepared statement দিয়ে — SQL injection নেই।
+router.get("/trash", checkPermission("visitors", "delete"), asyncHandler(async (req, res) => {
+  const { getBranchFilter } = require("../lib/branchFilter");
+  const userBranch = getBranchFilter(req.user);
+
+  const params = [req.user.agency_id];
+  let where = "agency_id = $1 AND deleted_at IS NOT NULL";
+  if (userBranch) {
+    params.push(userBranch);
+    where += ` AND branch = $${params.length}`;
+  }
+
+  // pagination — simple limit/offset (cursor pagination optional এ trash এ অপ্রয়োজনীয়)
+  const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+  const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+
+  try {
+    const countSql = `SELECT COUNT(*)::int AS c FROM visitors WHERE ${where}`;
+    const listSql =
+      `SELECT * FROM visitors WHERE ${where} ` +
+      `ORDER BY deleted_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    const countRes = await supabase.pool.query(countSql, params);
+    const listRes = await supabase.pool.query(listSql, [...params, limit, offset]);
+
+    const mapped = (listRes.rows || []).map(v => ({
+      ...v,
+      name_en: v.name_en || v.name,
+      date: v.visit_date || v.date,
+      lastFollowUp: v.last_follow_up,
+      interested_countries: v.interested_countries || [],
+      interested_intake: v.interested_intake || "",
+    }));
+
+    res.json({
+      data: decryptMany(mapped),
+      total: countRes.rows[0].c,
+      limit,
+      offset,
+    });
+  } catch (err) {
+    console.error("[DB]", err.message);
+    return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" });
+  }
 }));
 
 module.exports = router;

@@ -12,6 +12,7 @@ const express = require("express");
 const supabase = require("../lib/db");
 const asyncHandler = require("../lib/asyncHandler");
 const auth = require("../middleware/auth");
+const { decryptMany, decryptSensitiveFields } = require("../lib/crypto");
 
 const router = express.Router();
 router.use(auth);
@@ -42,16 +43,18 @@ router.get("/student/:id", requireOwner, asyncHandler(async (req, res) => {
     } catch { return []; }
   };
 
+  // PII-bearing tables are decrypted before export — recipients (owner/admin)
+  // need plaintext for backup/portability, never encrypted ciphertext.
   const dump = {
     exported_at: new Date().toISOString(),
     exported_by: { user_id: req.user.id, email: req.user.email },
-    student: stu[0],
+    student: decryptSensitiveFields(stu[0]),
     education: await collect("student_education"),
-    family: await collect("student_family"),
+    family: decryptMany(await collect("student_family")),
     jp_exams: await collect("student_jp_exams"),
-    jp_study: await collect("student_jp_study"),
-    work_experience: await collect("student_work_experience"),
-    sponsors: await collect("sponsors"),
+    jp_study: decryptMany(await collect("student_jp_study")),
+    work_experience: decryptMany(await collect("student_work_experience")),
+    sponsors: decryptMany(await collect("sponsors")),
     payments: await collect("payments"),
     fee_items: await collect("fee_items"),
     documents: await collect("documents"),
@@ -105,7 +108,9 @@ router.get("/agency", requireOwner, asyncHandler(async (req, res) => {
         q = `SELECT * FROM "${tbl}" WHERE agency_id = $1 LIMIT 50000`;
       }
       const { rows } = await supabase.pool.query(q, [aid]);
-      dump.tables[tbl] = rows;
+      // Decrypt PII-bearing tables. decryptMany is a no-op for tables without
+      // SENSITIVE_FIELDS columns, so blanket-applying is safe + future-proof.
+      dump.tables[tbl] = decryptMany(rows);
     } catch (err) {
       dump.tables[tbl] = { error: err.message };
     }

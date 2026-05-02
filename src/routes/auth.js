@@ -7,6 +7,8 @@ const rateLimit = require("express-rate-limit");
 const auth = require("../middleware/auth");
 const { getPermissionsForRole } = require("../middleware/checkPermission");
 const { logActivity } = require("../lib/activityLog");
+const { validate } = require("../middleware/validate");
+const { loginSchema } = require("../schemas/auth.schema");
 
 const router = express.Router();
 
@@ -37,7 +39,9 @@ function setTokenCookie(res, token) {
 }
 
 // POST /api/auth/login
-router.post("/login", loginLimiter, asyncHandler(async (req, res) => {
+// validate(loginSchema) runs FIRST — guarantees req.body is { email, password } typed + trimmed.
+// Legacy isValidEmail() / empty checks below kept as belt-and-braces; harmless since schema enforces.
+router.post("/login", loginLimiter, validate(loginSchema), asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: "Email ও password দিন" });
   if (!isValidEmail(email)) return res.status(400).json({ error: "সঠিক email দিন" });

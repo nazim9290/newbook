@@ -25,6 +25,7 @@ const express = require("express");
 const supabase = require("../lib/db");
 const asyncHandler = require("../lib/asyncHandler");
 const auth = require("../middleware/auth");
+const { decryptMany, decryptSensitiveFields } = require("../lib/crypto");
 
 const router = express.Router();
 router.use(auth);
@@ -97,7 +98,9 @@ router.get("/visitors", asyncHandler(async (req, res) => {
     LIMIT 1000
   `, [req.user.agency_id]);
 
-  const scored = rows.map((v) => {
+  // Decrypt PII (address) before scoring + responding so frontend never sees ciphertext
+  const decryptedRows = decryptMany(rows);
+  const scored = decryptedRows.map((v) => {
     const { score, tier, breakdown } = scoreVisitor(v);
     return { ...v, score, tier, score_breakdown: breakdown };
   });
@@ -112,7 +115,7 @@ router.get("/visitors/:id", asyncHandler(async (req, res) => {
     [req.params.id, req.user.agency_id]
   );
   if (!rows.length) return res.status(404).json({ error: "Visitor পাওয়া যায়নি" });
-  const v = rows[0];
+  const v = decryptSensitiveFields(rows[0]);
   const { score, tier, breakdown } = scoreVisitor(v);
   res.json({ visitor: v, score, tier, breakdown });
 }));
@@ -126,8 +129,10 @@ router.get("/summary", asyncHandler(async (req, res) => {
     WHERE agency_id = $1
   `, [req.user.agency_id]);
 
+  // address is encrypted on writes (visitors.js encryptSensitiveFields) — decrypt before scoring
+  const decryptedRows = decryptMany(rows);
   let hot = 0, warm = 0, cold = 0;
-  for (const v of rows) {
+  for (const v of decryptedRows) {
     const { tier } = scoreVisitor(v);
     if (tier === "hot") hot++;
     else if (tier === "warm") warm++;

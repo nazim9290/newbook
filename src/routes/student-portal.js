@@ -23,6 +23,7 @@ const supabase = require("../lib/db");
 const asyncHandler = require("../lib/asyncHandler");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const { encryptSensitiveFields, decryptSensitiveFields } = require("../lib/crypto");
 const router = express.Router();
 
 // ── Multer config — student portal document upload ──
@@ -68,7 +69,7 @@ router.get("/me", asyncHandler(async (req, res) => {
     .select("id, name_en, name_bn, phone, whatsapp, email, dob, gender, marital_status, nationality, blood_group, nid, passport_number, passport_issue, passport_expiry, permanent_address, current_address, father_name, father_name_en, mother_name, mother_name_en, status, country, school, batch, branch, intake, visa_type, photo_url, portal_sections, created_at")
     .eq("id", req.student.student_id).single();
   if (error) return res.status(500).json({ error: "ডাটা লোড ব্যর্থ" });
-  res.json(data);
+  res.json(decryptSensitiveFields(data));
 }));
 
 // ── PATCH /me — student নিজের তথ্য আপডেট করতে পারে (সীমিত fields) ──
@@ -88,9 +89,9 @@ router.patch("/me", asyncHandler(async (req, res) => {
   }
   if (Object.keys(updates).length === 0) return res.status(400).json({ error: "কোনো ডাটা দেওয়া হয়নি" });
 
-  const { data, error } = await supabase.from("students").update(updates).eq("id", req.student.student_id).select().single();
+  const { data, error } = await supabase.from("students").update(encryptSensitiveFields(updates)).eq("id", req.student.student_id).select().single();
   if (error) return res.status(500).json({ error: "আপডেট ব্যর্থ" });
-  res.json(data);
+  res.json(decryptSensitiveFields(data));
 }));
 
 // ── GET /form-config — agency কোন sections/forms student-কে দেখাতে চায় ──

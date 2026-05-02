@@ -13,6 +13,7 @@ const fs = require("fs");
 const supabase = require("../../lib/db");
 const auth = require("../../middleware/auth");
 const asyncHandler = require("../../lib/asyncHandler");
+const { decryptMany, decryptSensitiveFields } = require("../../lib/crypto");
 const { colLetter, getCellText, encName } = require("../../lib/excel/cellUtils");
 const { buildSystemContext } = require("../../lib/excel/systemContext");
 const {
@@ -51,7 +52,10 @@ router.post("/generate", asyncHandler(async (req, res) => {
     {
       const { data: sts } = await supabase.from("students").select("*").in("id", student_ids).eq("agency_id", req.user.agency_id);
       if (!sts) return res.status(500).json({ error: "সার্ভার ত্রুটি" });
-      students = await Promise.all(sts.map(async (st) => {
+      // Decrypt PII fields before they enter the Excel template filler — otherwise
+      // ciphertext (iv:authTag:hex) ends up rendered into generated .xlsx cells.
+      students = await Promise.all(sts.map(async (rawSt) => {
+        const st = decryptSensitiveFields(rawSt);
         const [eduRes, jpRes, famRes, spRes, workRes, jpStudyRes] = await Promise.all([
           supabase.from("student_education").select("*").eq("student_id", st.id),
           supabase.from("student_jp_exams").select("*").eq("student_id", st.id),
@@ -60,7 +64,15 @@ router.post("/generate", asyncHandler(async (req, res) => {
           supabase.from("student_work_experience").select("*").eq("student_id", st.id),
           supabase.from("student_jp_study").select("*").eq("student_id", st.id),
         ]);
-        return { ...st, student_education: eduRes.data || [], student_jp_exams: jpRes.data || [], student_family: famRes.data || [], sponsors: spRes.data || [], work_experience: workRes.data || [], jp_study: jpStudyRes.data || [] };
+        return {
+          ...st,
+          student_education: eduRes.data || [],
+          student_jp_exams: jpRes.data || [],
+          student_family: decryptMany(famRes.data || []),
+          sponsors: decryptMany(spRes.data || []),
+          work_experience: decryptMany(workRes.data || []),
+          jp_study: decryptMany(jpStudyRes.data || []),
+        };
       }));
     }
 
@@ -111,8 +123,10 @@ router.post("/generate-single", asyncHandler(async (req, res) => {
     if (!tmpl) return res.status(404).json({ error: "Template পাওয়া যায়নি" });
 
     // Student + related data load — custom pg wrapper !fk hint সাপোর্ট করে না, তাই separate queries
-    const { data: st } = await supabase.from("students").select("*").eq("id", student_id).eq("agency_id", req.user.agency_id).single();
-    if (!st) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
+    const { data: rawSt } = await supabase.from("students").select("*").eq("id", student_id).eq("agency_id", req.user.agency_id).single();
+    if (!rawSt) return res.status(404).json({ error: "Student পাওয়া যায়নি" });
+    // Decrypt before feeding into template filler so plaintext lands in generated .xlsx
+    const st = decryptSensitiveFields(rawSt);
     const [eduRes, jpRes, famRes, spRes, workRes, jpStudyRes] = await Promise.all([
       supabase.from("student_education").select("*").eq("student_id", student_id),
       supabase.from("student_jp_exams").select("*").eq("student_id", student_id),
@@ -121,7 +135,15 @@ router.post("/generate-single", asyncHandler(async (req, res) => {
       supabase.from("student_work_experience").select("*").eq("student_id", student_id),
       supabase.from("student_jp_study").select("*").eq("student_id", student_id),
     ]);
-    const student = { ...st, student_education: eduRes.data || [], student_jp_exams: jpRes.data || [], student_family: famRes.data || [], sponsors: spRes.data || [], work_experience: workRes.data || [], jp_study: jpStudyRes.data || [] };
+    const student = {
+      ...st,
+      student_education: eduRes.data || [],
+      student_jp_exams: jpRes.data || [],
+      student_family: decryptMany(famRes.data || []),
+      sponsors: decryptMany(spRes.data || []),
+      work_experience: decryptMany(workRes.data || []),
+      jp_study: decryptMany(jpStudyRes.data || []),
+    };
 
     // ── সিস্টেম ভ্যারিয়েবল: এজেন্সি, ব্যাচ, ব্রাঞ্চ, স্কুল fetch ──
     // School: student-এর school_id → fallback template-এর school_id

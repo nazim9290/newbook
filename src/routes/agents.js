@@ -4,6 +4,7 @@ const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const { checkPermission } = require("../middleware/checkPermission");
 const { logActivity } = require("../lib/activityLog");
+const { encryptSensitiveFields, decryptSensitiveFields, decryptMany } = require("../lib/crypto");
 const router = express.Router();
 router.use(auth);
 
@@ -29,14 +30,14 @@ router.get("/", asyncHandler(async (req, res) => {
     } catch { data.forEach(a => { a.students = []; }); }
   }
 
-  res.json(data);
+  res.json(decryptMany(data));
 }));
 
 router.post("/", checkPermission("agents", "write"), asyncHandler(async (req, res) => {
-  const { data, error } = await supabase.from("agents").insert({ ...req.body, agency_id: req.user.agency_id }).select().single();
+  const { data, error } = await supabase.from("agents").insert(encryptSensitiveFields({ ...req.body, agency_id: req.user.agency_id })).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "agents", recordId: data.id, description: `এজেন্ট তৈরি: ${data.name}`, ip: req.ip }).catch(() => {});
-  res.status(201).json(data);
+  res.status(201).json(decryptSensitiveFields(data));
 }));
 
 router.patch("/:id", checkPermission("agents", "write"), asyncHandler(async (req, res) => {
@@ -57,10 +58,10 @@ router.patch("/:id", checkPermission("agents", "write"), asyncHandler(async (req
   // প্রতিটি save-এ updated_at নতুন করে সেট — পরবর্তী conflict check-এর জন্য
   const updates = { ...req.body, updated_at: new Date().toISOString() };
 
-  const { data, error } = await supabase.from("agents").update(updates).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
+  const { data, error } = await supabase.from("agents").update(encryptSensitiveFields(updates)).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "agents", recordId: req.params.id, description: `এজেন্ট আপডেট: ${data.name}`, ip: req.ip }).catch(() => {});
-  res.json(data);
+  res.json(decryptSensitiveFields(data));
 }));
 
 router.delete("/:id", checkPermission("agents", "delete"), asyncHandler(async (req, res) => {
