@@ -291,6 +291,7 @@ app.use("/api/data-export", require("./routes/data-export"));     // GDPR-style 
 app.use("/api/webhooks", require("./routes/webhooks"));           // inbound webhook hub (lead capture)
 app.use("/api/school-match", require("./routes/school-match"));   // smart school matching per student
 app.use("/api/audit-search", require("./routes/audit-search"));   // activity_log search + CSV export
+app.use("/api/help-bot", require("./routes/help-bot"));           // per-agency knowledge-base chatbot
 
 // ── 404 Handler — route না পেলে error (path leak করবে না) ──
 app.use((req, res) => {
