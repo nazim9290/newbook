@@ -230,6 +230,89 @@ async function transitionStatuses() {
   return result;
 }
 
+// ── Job 3: past-due reminders (daily) ──
+// Section 4.5 grace period — daily reminder পাঠাও যাদের invoice past due
+async function sendPastDueReminders() {
+  const result = { reminded: 0, errors: 0, skipped: 0 };
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Eligible invoices:
+  //   - status sent বা overdue
+  //   - due_date past
+  //   - এই reminder cycle-এ পাঠানো হয়নি (last_reminder_sent_at < today শুরু)
+  //   - reminder_count < 7 (cap)
+  //   - balance > 0
+  const todayStart = new Date(today + "T00:00:00Z").toISOString();
+  const { rows: invs } = await pool.query(`
+    SELECT i.*,
+           a.name AS agency_name, a.email AS agency_email, a.billing_email, a.subdomain,
+           CURRENT_DATE - i.due_date AS days_overdue
+    FROM invoices i
+    JOIN agencies a ON a.id = i.agency_id
+    WHERE i.status IN ('sent', 'overdue')
+      AND i.due_date < CURRENT_DATE
+      AND (i.last_reminder_sent_at IS NULL OR i.last_reminder_sent_at < $1)
+      AND COALESCE(i.reminder_count, 0) < 7
+      AND (i.total_amount - COALESCE(i.paid_amount, 0)) > 0
+    ORDER BY i.due_date ASC
+    LIMIT 100
+  `, [todayStart]);
+
+  if (invs.length === 0) return result;
+
+  const { sendEmail } = require("./email");
+  const { buildPastDueEmail } = require("./emailTemplates/pastDueEmail");
+  const { generateInvoicePdf } = require("./invoicePdf");
+
+  for (const inv of invs) {
+    const recipient = inv.billing_email || inv.agency_email;
+    if (!recipient) { result.skipped++; continue; }
+
+    const agency = {
+      name: inv.agency_name, subdomain: inv.subdomain,
+      email: inv.agency_email, billing_email: inv.billing_email,
+    };
+    const daysOverdue = Number(inv.days_overdue || 0);
+
+    try {
+      // Build email + PDF (PDF reused — agency wants the original details too)
+      const { subject, html, text } = buildPastDueEmail({ invoice: inv, agency, daysOverdue });
+      let pdfBytes;
+      try { pdfBytes = await generateInvoicePdf({ invoice: inv, agency }); } catch { /* skip attachment if PDF fails */ }
+
+      const sendResult = await sendEmail({
+        to: recipient,
+        subject,
+        html, text,
+        attachments: pdfBytes ? [{
+          filename: `${inv.invoice_number}.pdf`,
+          content: Buffer.from(pdfBytes),
+          contentType: "application/pdf",
+        }] : [],
+      });
+
+      if (sendResult.success) {
+        // Update reminder count + timestamp; bump status to overdue if not already
+        await pool.query(`
+          UPDATE invoices
+          SET last_reminder_sent_at = now(),
+              reminder_count = COALESCE(reminder_count, 0) + 1,
+              status = CASE WHEN status = 'sent' THEN 'overdue' ELSE status END,
+              updated_at = now()
+          WHERE id = $1
+        `, [inv.id]);
+        result.reminded++;
+      } else {
+        result.errors++;
+      }
+    } catch (e) {
+      console.error(`[PastDueReminder] ${inv.invoice_number}:`, e.message);
+      result.errors++;
+    }
+  }
+  return result;
+}
+
 // ── Run all jobs (with PG advisory lock for cluster safety) ──
 async function runAllJobs(forceManual = false) {
   const startedAt = new Date().toISOString();
@@ -243,15 +326,16 @@ async function runAllJobs(forceManual = false) {
   try {
     const invoices = await generateUpcomingInvoices();
     const transitions = await transitionStatuses();
+    const reminders = await sendPastDueReminders();
 
     // Save last-run marker — daily-once gate
     await pool.query(`
       INSERT INTO platform_settings (key, value, updated_at)
       VALUES ('billing_cron_last_run', $1::jsonb, now())
       ON CONFLICT (key) DO UPDATE SET value = $1::jsonb, updated_at = now()
-    `, [JSON.stringify({ at: startedAt, invoices, transitions, manual: forceManual })]);
+    `, [JSON.stringify({ at: startedAt, invoices, transitions, reminders, manual: forceManual })]);
 
-    return { startedAt, invoices, transitions, manual: forceManual };
+    return { startedAt, invoices, transitions, reminders, manual: forceManual };
   } finally {
     if (!forceManual) {
       await pool.query(`SELECT pg_advisory_unlock($1)`, [ADVISORY_LOCK_KEY]);
@@ -294,4 +378,4 @@ function stopScheduler() {
   if (intervalHandle) { clearInterval(intervalHandle); intervalHandle = null; }
 }
 
-module.exports = { runAllJobs, generateUpcomingInvoices, transitionStatuses, startScheduler, stopScheduler };
+module.exports = { runAllJobs, generateUpcomingInvoices, transitionStatuses, sendPastDueReminders, startScheduler, stopScheduler };
