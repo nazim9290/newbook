@@ -113,18 +113,24 @@ router.post('/ask', asyncHandler(async (req, res) => {
   const hasPermission = userHasPermissionFn(req.user);
 
   // ── 1. KB lookup (top N candidates, role-gated, agency-scoped) ──
-  // Trigram similarity OR keyword overlap OR ILIKE phrase match.
-  // We pull TOP_N+2 then filter by min_role + permission_required in JS,
-  // so role-gated entries don't shrink the result set silently.
+  // Three signals, take the strongest:
+  //   a) trigram similarity on question text (handles typos/phrasing)
+  //   b) keyword overlap, but ONLY for keywords ≥ 4 chars AND with word
+  //      boundaries — prevents "what"/"add"/"কী" from false-firing on
+  //      every question that happens to contain those substrings
+  //   c) full-question phrase ILIKE (only fires if user typed the exact
+  //      question wording, basically)
+  // Pull TOP_N+4, then filter by min_role + permission in JS.
   const sql = `
     SELECT id, question, answer, category, keywords, min_role, query_type, permission_required,
            GREATEST(
              similarity(question, $1),
              CASE WHEN EXISTS (
                SELECT 1 FROM unnest(keywords) k
-               WHERE $1 ILIKE '%' || k || '%' OR k ILIKE '%' || $1 || '%'
+                WHERE char_length(k) >= 4
+                  AND ($1 ~* ('(^|[^[:alnum:]])' || k || '($|[^[:alnum:]])'))
              ) THEN 0.9 ELSE 0 END,
-             CASE WHEN question ILIKE '%' || $1 || '%' THEN 0.85 ELSE 0 END
+             CASE WHEN char_length($1) >= 8 AND question ILIKE '%' || $1 || '%' THEN 0.85 ELSE 0 END
            ) AS score
       FROM bot_knowledge
      WHERE agency_id = $2 AND is_active = TRUE
