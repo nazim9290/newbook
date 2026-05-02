@@ -292,6 +292,7 @@ app.use("/api/webhooks", require("./routes/webhooks"));           // inbound web
 app.use("/api/school-match", require("./routes/school-match"));   // smart school matching per student
 app.use("/api/audit-search", require("./routes/audit-search"));   // activity_log search + CSV export
 app.use("/api/help-bot", require("./routes/help-bot"));           // per-agency knowledge-base chatbot
+app.use("/api/notifications", require("./routes/notifications")); // per-user in-app inbox feed
 
 // ── 404 Handler — route না পেলে error (path leak করবে না) ──
 app.use((req, res) => {
