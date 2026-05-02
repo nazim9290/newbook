@@ -226,6 +226,13 @@ app.get("/api/default-templates", agencyAuth, agencyAsync(async (req, res) => {
 // ═══════════════════════════════════════════════════════
 // API Routes — প্রতিটি module আলাদা route file-এ
 // ═══════════════════════════════════════════════════════
+// Per-agency nav guard — runs before each /api/* route to 403 calls to
+// modules the agency owner has disabled in Settings → Sidebar Configuration.
+// Decodes JWT directly (auth runs per-route below). Anonymous + essential
+// pages pass through.
+const { agencyNavGuard } = require("./middleware/agencyNavGuard");
+app.use(agencyNavGuard());
+
 app.use("/api/public", require("./routes/public"));              // Unauthenticated visitor form (kiosk URL)
 app.use("/api/dashboard", require("./routes/dashboard"));       // Dashboard stats
 app.use("/api/super-admin", require("./routes/super-admin"));   // Super Admin — agency management

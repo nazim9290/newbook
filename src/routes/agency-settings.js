@@ -44,6 +44,7 @@ const PUBLIC_PATCH_COLS = new Set([
   "backup_target", "backup_drive_folder_id", "backup_retention_days", "backup_schedule_cron",
   "sms_provider", "whatsapp_phone_number_id",
   "bot_llm_enabled",
+  "disabled_nav_items",
 ]);
 
 // ── Encrypted credential columns ──
@@ -112,6 +113,16 @@ router.patch("/", asyncHandler(async (req, res) => {
     console.error("[agency-settings PATCH]", error.message);
     return res.status(500).json({ error: "সংরক্ষণ ব্যর্থ" });
   }
+
+  // Invalidate per-agency caches that may have read settings.
+  // navGuard caches disabled_nav_items for 60s; force-refresh on save.
+  if (Object.prototype.hasOwnProperty.call(updates, "disabled_nav_items")) {
+    try {
+      const { invalidateAgencyNav } = require("../middleware/agencyNavGuard");
+      invalidateAgencyNav(req.user.agency_id);
+    } catch { /* non-fatal */ }
+  }
+
   res.json(sanitizeForResponse(data));
 }));
 
