@@ -388,23 +388,229 @@ router.delete('/:id', requireAdmin, asyncHandler(async (req, res) => {
 
 // ════════════════════════════════════════════════════════════════════════
 // GET /conversations — admin
+//   ?unmatched=1            only ones that didn't match
+//   ?low_score=1            matched but score < 0.6 (improvable)
+//   ?range=7d|30d|all       time window (default 30d)
+//   ?source=kb|kb+query|llm|no_match|refused
+//   ?search=                ILIKE on question text
+//   ?page=1&pageSize=50     pagination (default 50, max 200)
+// Returns { items, total, page, pageSize }
 // ════════════════════════════════════════════════════════════════════════
+function rangeToInterval(range) {
+  if (range === 'all') return null;
+  if (range === '7d') return '7 days';
+  if (range === '24h') return '1 day';
+  return '30 days';
+}
+
 router.get('/conversations', requireAdmin, asyncHandler(async (req, res) => {
-  const onlyUnmatched = req.query.unmatched === '1';
-  const sql = `
+  const filters = ['c.agency_id = $1'];
+  const params = [req.user.agency_id];
+  let pi = 2;
+
+  if (req.query.unmatched === '1') filters.push('c.matched_id IS NULL');
+  if (req.query.low_score === '1') filters.push('c.matched_id IS NOT NULL AND c.matched_score < 0.6');
+
+  const interval = rangeToInterval(req.query.range);
+  if (interval) {
+    filters.push(`c.created_at >= now() - interval '${interval}'`);
+  }
+  if (req.query.source) {
+    filters.push(`c.source = $${pi++}`);
+    params.push(req.query.source);
+  }
+  if (req.query.search && req.query.search.trim()) {
+    filters.push(`c.question ILIKE $${pi++}`);
+    params.push('%' + req.query.search.trim() + '%');
+  }
+
+  const where = 'WHERE ' + filters.join(' AND ');
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const pageSize = Math.min(200, Math.max(10, parseInt(req.query.pageSize, 10) || 50));
+  const offset = (page - 1) * pageSize;
+
+  const totalRes = await supabase.pool.query(
+    `SELECT count(*)::int AS n FROM bot_conversations c ${where}`,
+    params
+  );
+  const total = totalRes.rows[0]?.n ?? 0;
+
+  const itemsRes = await supabase.pool.query(`
     SELECT c.id, c.question, c.matched_id, c.matched_score, c.page_context,
            c.source, c.tokens_in, c.tokens_out, c.created_at,
            u.name AS user_name, k.question AS matched_question
       FROM bot_conversations c
       LEFT JOIN users u ON u.id = c.user_id
       LEFT JOIN bot_knowledge k ON k.id = c.matched_id
-     WHERE c.agency_id = $1
-       ${onlyUnmatched ? 'AND c.matched_id IS NULL' : ''}
+      ${where}
      ORDER BY c.created_at DESC
+     LIMIT ${pageSize} OFFSET ${offset}
+  `, params);
+
+  res.json({ items: itemsRes.rows, total, page, pageSize });
+}));
+
+// ════════════════════════════════════════════════════════════════════════
+// GET /conversations/clusters — group by normalized question text
+// Same filters as /conversations but aggregates instead of paginates.
+// Returns top 100 clusters sorted by frequency.
+// ════════════════════════════════════════════════════════════════════════
+router.get('/conversations/clusters', requireAdmin, asyncHandler(async (req, res) => {
+  const filters = ['c.agency_id = $1'];
+  const params = [req.user.agency_id];
+  let pi = 2;
+
+  if (req.query.unmatched === '1') filters.push('c.matched_id IS NULL');
+  if (req.query.low_score === '1') filters.push('c.matched_id IS NOT NULL AND c.matched_score < 0.6');
+
+  const interval = rangeToInterval(req.query.range);
+  if (interval) filters.push(`c.created_at >= now() - interval '${interval}'`);
+
+  if (req.query.search && req.query.search.trim()) {
+    filters.push(`c.question ILIKE $${pi++}`);
+    params.push('%' + req.query.search.trim() + '%');
+  }
+
+  const where = 'WHERE ' + filters.join(' AND ');
+
+  const sql = `
+    SELECT trim(lower(c.question)) AS qkey,
+           min(c.question)         AS sample_question,
+           count(*)::int            AS freq,
+           max(c.created_at)        AS last_asked,
+           bool_or(c.matched_id IS NULL)         AS ever_unmatched,
+           avg(c.matched_score) FILTER (WHERE c.matched_score IS NOT NULL) AS avg_score,
+           array_agg(DISTINCT c.source) FILTER (WHERE c.source IS NOT NULL) AS sources
+      FROM bot_conversations c
+      ${where}
+     GROUP BY trim(lower(c.question))
+     ORDER BY freq DESC, last_asked DESC
      LIMIT 100
   `;
-  const r = await supabase.pool.query(sql, [req.user.agency_id]);
+  const r = await supabase.pool.query(sql, params);
   res.json(r.rows);
+}));
+
+// ════════════════════════════════════════════════════════════════════════
+// GET /stats — admin dashboard KPIs
+// ?range=7d|30d|all (default 7d)
+// ════════════════════════════════════════════════════════════════════════
+router.get('/stats', requireAdmin, asyncHandler(async (req, res) => {
+  const interval = rangeToInterval(req.query.range || '7d') || '30 days';
+  const params = [req.user.agency_id];
+
+  const totalRes = await supabase.pool.query(`
+    SELECT
+      count(*)::int AS total,
+      count(*) FILTER (WHERE matched_id IS NOT NULL)::int AS answered,
+      count(*) FILTER (WHERE matched_id IS NULL)::int    AS unanswered,
+      count(*) FILTER (WHERE source = 'kb')::int         AS kb_count,
+      count(*) FILTER (WHERE source = 'kb+query')::int   AS query_count,
+      count(*) FILTER (WHERE source = 'llm')::int        AS llm_count,
+      count(*) FILTER (WHERE source = 'refused')::int    AS refused_count,
+      sum(tokens_in)::int AS tokens_in,
+      sum(tokens_out)::int AS tokens_out,
+      avg(matched_score) FILTER (WHERE matched_score IS NOT NULL)::float AS avg_score
+    FROM bot_conversations
+    WHERE agency_id = $1 AND created_at >= now() - interval '${interval}'
+  `, params);
+
+  const dailyRes = await supabase.pool.query(`
+    SELECT date_trunc('day', created_at)::date AS day,
+           count(*)::int AS total,
+           count(*) FILTER (WHERE matched_id IS NULL)::int AS unanswered
+      FROM bot_conversations
+     WHERE agency_id = $1 AND created_at >= now() - interval '${interval}'
+     GROUP BY 1 ORDER BY 1
+  `, params);
+
+  const topRes = await supabase.pool.query(`
+    SELECT trim(lower(question)) AS qkey,
+           min(question) AS sample_question,
+           count(*)::int AS freq,
+           bool_or(matched_id IS NULL) AS ever_unmatched
+      FROM bot_conversations
+     WHERE agency_id = $1 AND created_at >= now() - interval '${interval}'
+     GROUP BY 1
+     ORDER BY freq DESC
+     LIMIT 10
+  `, params);
+
+  res.json({
+    range: req.query.range || '7d',
+    totals: totalRes.rows[0],
+    daily: dailyRes.rows,
+    top_questions: topRes.rows,
+  });
+}));
+
+// ════════════════════════════════════════════════════════════════════════
+// GET /closest-match?question=... — admin: nearest existing KB entry
+// Used by the "teach from log" form to prefill the answer field as a draft.
+// ════════════════════════════════════════════════════════════════════════
+router.get('/closest-match', requireAdmin, asyncHandler(async (req, res) => {
+  const q = String(req.query.question || '').trim().slice(0, 500);
+  if (!q) return res.json(null);
+
+  const r = await supabase.pool.query(`
+    SELECT id, question, answer, category, similarity(question, $1) AS score
+      FROM bot_knowledge
+     WHERE agency_id = $2 AND is_active = TRUE
+     ORDER BY score DESC
+     LIMIT 1
+  `, [q, req.user.agency_id]);
+
+  const row = r.rows[0];
+  if (!row || row.score < 0.15) return res.json(null);
+  res.json({
+    id: row.id,
+    question: row.question,
+    answer: row.answer,
+    category: row.category,
+    score: Number(row.score.toFixed(2)),
+  });
+}));
+
+// ════════════════════════════════════════════════════════════════════════
+// POST /suggest-answer — admin: Claude drafts an answer for the admin to
+// edit/approve. Uses BYOK Anthropic key. Independent of bot_llm_enabled —
+// this is an admin authoring tool, not user-facing inference.
+// ════════════════════════════════════════════════════════════════════════
+router.post('/suggest-answer', requireAdmin, asyncHandler(async (req, res) => {
+  const { question } = req.body || {};
+  if (!question || !question.trim()) {
+    return res.status(400).json({ error: 'প্রশ্ন দিন' });
+  }
+  const ctx = await loadAgencyContext(req.user.agency_id);
+
+  // Pull a few related KB entries to give Claude domain context
+  const kbRes = await supabase.pool.query(`
+    SELECT question, answer
+      FROM bot_knowledge
+     WHERE agency_id = $1 AND is_active = TRUE
+     ORDER BY similarity(question, $2) DESC
+     LIMIT 5
+  `, [req.user.agency_id, question.trim()]);
+
+  const { suggestAnswer } = require('../lib/botLlm');
+  const result = await suggestAnswer({
+    question: question.trim().slice(0, 500),
+    agencyId: req.user.agency_id,
+    agencyName: ctx.agencyName,
+    relatedKb: kbRes.rows,
+  });
+
+  if (!result.ok) {
+    const code = result.error === 'no_credential' ? 400 : 502;
+    return res.status(code).json({
+      error: result.error === 'no_credential'
+        ? 'Anthropic API key configure করা নেই — Settings → Integrations-এ যোগ করুন'
+        : 'AI suggest ব্যর্থ — পরে আবার চেষ্টা করুন',
+      code: result.error,
+    });
+  }
+
+  res.json({ suggested_answer: result.text, tokens_in: result.tokensIn, tokens_out: result.tokensOut });
 }));
 
 module.exports = router;
