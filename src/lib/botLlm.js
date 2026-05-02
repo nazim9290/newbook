@@ -20,7 +20,112 @@
 const integrations = require("./integrations");
 
 const MODEL = process.env.BOT_LLM_MODEL || "claude-haiku-4-5-20251001";
+const OPENAI_MODEL = process.env.BOT_LLM_OPENAI_MODEL || "gpt-4o-mini";
 const MAX_TOKENS = parseInt(process.env.BOT_LLM_MAX_TOKENS || "400", 10);
+
+// ── Provider call: Anthropic ─────────────────────────────────────────
+async function callAnthropic({ apiKey, systemPrompt, userMessage, maxTokens }) {
+  let res, body;
+  try {
+    res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: maxTokens,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userMessage }],
+      }),
+    });
+    body = await res.json();
+  } catch (err) {
+    return { ok: false, error: "api_error", detail: err.message, provider: "anthropic" };
+  }
+  if (!res.ok) {
+    return { ok: false, error: "api_error", status: res.status, detail: JSON.stringify(body).slice(0, 200), provider: "anthropic" };
+  }
+  const text = body.content?.[0]?.text?.trim();
+  if (!text) return { ok: false, error: "empty_response", provider: "anthropic" };
+  return {
+    ok: true, text, provider: "anthropic",
+    tokensIn: body.usage?.input_tokens || 0,
+    tokensOut: body.usage?.output_tokens || 0,
+  };
+}
+
+// ── Provider call: OpenAI (fallback) ─────────────────────────────────
+async function callOpenAi({ apiKey, systemPrompt, userMessage, maxTokens }) {
+  let res, body;
+  try {
+    res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        max_tokens: maxTokens,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+      }),
+    });
+    body = await res.json();
+  } catch (err) {
+    return { ok: false, error: "api_error", detail: err.message, provider: "openai" };
+  }
+  if (!res.ok) {
+    return { ok: false, error: "api_error", status: res.status, detail: JSON.stringify(body).slice(0, 200), provider: "openai" };
+  }
+  const text = body.choices?.[0]?.message?.content?.trim();
+  if (!text) return { ok: false, error: "empty_response", provider: "openai" };
+  return {
+    ok: true, text, provider: "openai",
+    tokensIn: body.usage?.prompt_tokens || 0,
+    tokensOut: body.usage?.completion_tokens || 0,
+  };
+}
+
+// ── Try Anthropic first; fall back to OpenAI on hard failure ─────────
+async function callWithFallback({ agencyId, systemPrompt, userMessage, maxTokens }) {
+  // Anthropic primary
+  let anthropicCred = null;
+  try { anthropicCred = await integrations.getCredential(agencyId, "anthropic"); }
+  catch { /* no anthropic key — try openai */ }
+
+  if (anthropicCred) {
+    const anthropicKey = anthropicCred.api_key || anthropicCred.apiKey;
+    if (anthropicKey) {
+      const r = await callAnthropic({ apiKey: anthropicKey, systemPrompt, userMessage, maxTokens });
+      if (r.ok) return r;
+      console.warn(`[botLlm] Anthropic failed (${r.error} ${r.status || ""}), trying OpenAI fallback`);
+    }
+  }
+
+  // OpenAI fallback
+  let openaiCred = null;
+  try { openaiCred = await integrations.getCredential(agencyId, "openai"); }
+  catch (err) {
+    return { ok: false, error: anthropicCred ? "all_providers_failed" : "no_credential", detail: err.message };
+  }
+  const openaiKey = openaiCred?.api_key || openaiCred?.apiKey;
+  if (!openaiKey) {
+    return { ok: false, error: anthropicCred ? "all_providers_failed" : "no_credential" };
+  }
+
+  const r = await callOpenAi({ apiKey: openaiKey, systemPrompt, userMessage, maxTokens });
+  if (!r.ok) {
+    console.error("[botLlm] OpenAI fallback also failed:", r.error, r.status);
+    return { ok: false, error: "all_providers_failed", detail: r.detail };
+  }
+  return r;
+}
 
 function buildSystemPrompt({ agencyName, user, pageContext, kbMatches, dataSummary }) {
   const userRole = user.role || "staff";
@@ -79,56 +184,10 @@ ${dataBlock}
  */
 async function askLlm({ question, agencyId, agencyName, user, pageContext, kbMatches, dataSummary, llmEnabled }) {
   if (!llmEnabled) return { ok: false, error: "llm_disabled" };
-
-  // Pull credential — non-fatal: if missing, fall through gracefully.
-  let cred;
-  try {
-    cred = await integrations.getCredential(agencyId, "anthropic");
-  } catch (err) {
-    return { ok: false, error: "no_credential", detail: err.message };
-  }
-
-  const apiKey = cred?.api_key || cred?.apiKey;
-  if (!apiKey) return { ok: false, error: "no_credential" };
-
   const systemPrompt = buildSystemPrompt({ agencyName, user, pageContext, kbMatches, dataSummary });
-
-  let res, body;
-  try {
-    res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: MAX_TOKENS,
-        system: systemPrompt,
-        messages: [{ role: "user", content: question }],
-      }),
-    });
-    body = await res.json();
-  } catch (err) {
-    console.error("[botLlm] fetch failed:", err.message);
-    return { ok: false, error: "api_error", detail: err.message };
-  }
-
-  if (!res.ok) {
-    console.error("[botLlm] Anthropic", res.status, JSON.stringify(body).slice(0, 300));
-    return { ok: false, error: "api_error", status: res.status };
-  }
-
-  const text = body.content?.[0]?.text?.trim();
-  if (!text) return { ok: false, error: "empty_response" };
-
-  return {
-    ok: true,
-    text,
-    tokensIn: body.usage?.input_tokens || 0,
-    tokensOut: body.usage?.output_tokens || 0,
-  };
+  return await callWithFallback({
+    agencyId, systemPrompt, userMessage: question, maxTokens: MAX_TOKENS,
+  });
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -169,53 +228,10 @@ ${kbBlock}`;
 }
 
 async function suggestAnswer({ question, agencyId, agencyName, relatedKb }) {
-  let cred;
-  try {
-    cred = await integrations.getCredential(agencyId, "anthropic");
-  } catch (err) {
-    return { ok: false, error: "no_credential", detail: err.message };
-  }
-  const apiKey = cred?.api_key || cred?.apiKey;
-  if (!apiKey) return { ok: false, error: "no_credential" };
-
   const systemPrompt = buildSuggestPrompt({ agencyName, relatedKb });
-
-  let res, body;
-  try {
-    res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 500,
-        system: systemPrompt,
-        messages: [{ role: "user", content: question }],
-      }),
-    });
-    body = await res.json();
-  } catch (err) {
-    console.error("[botLlm.suggest] fetch failed:", err.message);
-    return { ok: false, error: "api_error", detail: err.message };
-  }
-
-  if (!res.ok) {
-    console.error("[botLlm.suggest] Anthropic", res.status, JSON.stringify(body).slice(0, 300));
-    return { ok: false, error: "api_error", status: res.status };
-  }
-
-  const text = body.content?.[0]?.text?.trim();
-  if (!text) return { ok: false, error: "empty_response" };
-
-  return {
-    ok: true,
-    text,
-    tokensIn: body.usage?.input_tokens || 0,
-    tokensOut: body.usage?.output_tokens || 0,
-  };
+  return await callWithFallback({
+    agencyId, systemPrompt, userMessage: question, maxTokens: 500,
+  });
 }
 
 module.exports = { askLlm, suggestAnswer, buildSystemPrompt, buildSuggestPrompt, MODEL };

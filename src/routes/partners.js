@@ -11,6 +11,7 @@ const auth = require("../middleware/auth");
 const asyncHandler = require("../lib/asyncHandler");
 const supabase = require("../lib/db");
 const { logActivity } = require("../lib/activityLog");
+const { encryptSensitiveFields, decryptMany, decryptSensitiveFields } = require("../lib/crypto");
 
 // ── GET /api/partners — সব partner এজেন্সি + student count + revenue ──
 router.get("/", auth, asyncHandler(async (req, res) => {
@@ -46,7 +47,8 @@ router.get("/", auth, asyncHandler(async (req, res) => {
   const statsMap = {};
   statsRes.rows.forEach(r => { statsMap[r.partner_id] = r; });
 
-  const enriched = (data || []).map(p => {
+  const decrypted = decryptMany(data || []);
+  const enriched = decrypted.map(p => {
     const stats = statsMap[p.id] || { student_count: 0, total_fee: 0, total_paid: 0 };
     return {
       ...p,
@@ -66,7 +68,7 @@ router.post("/", auth, asyncHandler(async (req, res) => {
 
   if (!name || !name.trim()) return res.status(400).json({ error: "নাম দিন" });
 
-  const { data, error } = await supabase.from("partner_agencies").insert({
+  const { data, error } = await supabase.from("partner_agencies").insert(encryptSensitiveFields({
     agency_id: agencyId,
     name: name.trim(),
     contact_person: contact_person || "",
@@ -77,11 +79,11 @@ router.post("/", auth, asyncHandler(async (req, res) => {
     commission_rate: commission_rate || 0,
     notes: notes || "",
     status: "active",
-  }).select().single();
+  })).select().single();
 
   if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "create", module: "partners", recordId: data.id, description: `পার্টনার তৈরি: ${data.name}`, ip: req.ip }).catch(() => {});
-  res.status(201).json(data);
+  res.status(201).json(decryptSensitiveFields(data));
 }));
 
 // ── PATCH /api/partners/:id — partner আপডেট ──
@@ -95,7 +97,7 @@ router.patch("/:id", auth, asyncHandler(async (req, res) => {
     }
   }
 
-  const updates = { ...req.body, updated_at: new Date().toISOString() };
+  const updates = encryptSensitiveFields({ ...req.body, updated_at: new Date().toISOString() });
   const { data, error } = await supabase.from("partner_agencies")
     .update(updates)
     .eq("id", req.params.id)
@@ -104,7 +106,7 @@ router.patch("/:id", auth, asyncHandler(async (req, res) => {
 
   if (error) { console.error("[DB]", error.message); return res.status(500).json({ error: "সার্ভার ত্রুটি — পরে আবার চেষ্টা করুন" }); }
   logActivity({ agencyId: req.user.agency_id, userId: req.user.id, action: "update", module: "partners", recordId: req.params.id, description: `পার্টনার আপডেট: ${data.name}`, ip: req.ip }).catch(() => {});
-  res.json(data);
+  res.json(decryptSensitiveFields(data));
 }));
 
 // ── DELETE /api/partners/:id — partner মুছে ফেলো ──

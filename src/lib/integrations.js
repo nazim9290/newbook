@@ -47,6 +47,12 @@ const SERVICES = {
     tier_required: "professional",
     label: "Anthropic (Claude AI)",
   },
+  openai: {
+    fields: ["api_key"],
+    secret_fields: ["api_key"],
+    tier_required: "professional",
+    label: "OpenAI (GPT) — fallback for Claude",
+  },
   r2: {
     fields: ["account_id", "access_key_id", "secret_access_key", "bucket"],
     secret_fields: ["access_key_id", "secret_access_key"],

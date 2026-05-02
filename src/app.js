@@ -415,6 +415,22 @@ if (require.main === module) {
       dailyOnce: false,
     });
 
+    // Help-bot conversation log retention — daily 03:30 Asia/Dhaka.
+    // Keep 90 days; bot_conversations grows unbounded otherwise.
+    scheduler.register({
+      name: "bot_conversations_cleanup",
+      runAt: (now) => now.getUTCHours() === 21 && now.getUTCMinutes() === 30, // 03:30 BD = 21:30 UTC
+      handler: async () => {
+        const db = require("./lib/db");
+        const r = await db.pool.query(
+          "DELETE FROM bot_conversations WHERE created_at < now() - interval '90 days'"
+        );
+        return { deleted: r.rowCount };
+      },
+      lockKey: 9876500009,
+      dailyOnce: true,
+    });
+
     scheduler.startAll();
   } catch (e) {
     console.error("[OwnerPack Cron Init]", e.message);

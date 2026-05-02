@@ -24,6 +24,7 @@ const tenancy = require('../middleware/tenancy');
 const asyncHandler = require('../lib/asyncHandler');
 const { logActivity } = require('../lib/activityLog');
 const { DEFAULT_PERMISSIONS, normalizeRole } = require('../middleware/checkPermission');
+const { tenantHeavyLimiter } = require('../middleware/tenantRateLimit');
 const { runQuery } = require('../lib/botQueryRegistry');
 const { askLlm } = require('../lib/botLlm');
 
@@ -104,7 +105,7 @@ async function loadAgencyContext(agencyId) {
 // ════════════════════════════════════════════════════════════════════════
 // POST /ask — any logged-in user
 // ════════════════════════════════════════════════════════════════════════
-router.post('/ask', asyncHandler(async (req, res) => {
+router.post('/ask', tenantHeavyLimiter, asyncHandler(async (req, res) => {
   const { question, page_context } = req.body || {};
   if (!question || !question.trim()) {
     return res.status(400).json({ error: 'প্রশ্ন লিখুন' });
@@ -326,7 +327,31 @@ router.post('/', requireAdmin, asyncHandler(async (req, res) => {
 const PATCHABLE = ['question', 'answer', 'keywords', 'category', 'is_active',
                    'min_role', 'query_type', 'permission_required'];
 
+async function snapshotHistory(client, row, changeType, changedBy) {
+  if (!row) return;
+  try {
+    await client.query(
+      `INSERT INTO bot_knowledge_history
+         (knowledge_id, agency_id, question, answer, keywords, category, min_role,
+          query_type, permission_required, is_active, change_type, changed_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [row.id, row.agency_id, row.question, row.answer, row.keywords || [],
+       row.category, row.min_role, row.query_type, row.permission_required,
+       row.is_active, changeType, changedBy || null]
+    );
+  } catch (err) {
+    console.warn("[bot-history] snapshot skipped:", err.message);
+  }
+}
+
 router.patch('/:id', requireAdmin, asyncHandler(async (req, res) => {
+  // Snapshot current state before applying changes (version history)
+  const { data: existing } = await supabase.from('bot_knowledge')
+    .select('*').eq('id', req.params.id).eq('agency_id', req.user.agency_id).single();
+  if (existing) {
+    await snapshotHistory(supabase.pool, existing, 'update', req.user.id);
+  }
+
   const updates = {};
   for (const k of PATCHABLE) {
     if (req.body[k] === undefined) continue;
@@ -368,10 +393,13 @@ router.patch('/:id', requireAdmin, asyncHandler(async (req, res) => {
 
 router.delete('/:id', requireAdmin, asyncHandler(async (req, res) => {
   const { data: existing } = await supabase.from('bot_knowledge')
-    .select('id, question, agency_id').eq('id', req.params.id).single();
+    .select('*').eq('id', req.params.id).single();
   if (!existing || existing.agency_id !== req.user.agency_id) {
     return res.status(404).json({ error: 'এন্ট্রি পাওয়া যায়নি' });
   }
+
+  // Snapshot before deletion so the entry can be reconstructed if needed
+  await snapshotHistory(supabase.pool, existing, 'delete', req.user.id);
 
   const { error } = await supabase.from('bot_knowledge')
     .delete().eq('id', req.params.id).eq('agency_id', req.user.agency_id);
@@ -536,11 +564,25 @@ router.get('/stats', requireAdmin, asyncHandler(async (req, res) => {
      LIMIT 10
   `, params);
 
+  // Which app pages generate the most bot questions?  Tells admins where the
+  // UI is unclear or features are undiscoverable.
+  const topPagesRes = await supabase.pool.query(`
+    SELECT COALESCE(NULLIF(page_context, ''), '(unknown)') AS page,
+           count(*)::int AS freq,
+           count(*) FILTER (WHERE matched_id IS NULL)::int AS unanswered
+      FROM bot_conversations
+     WHERE agency_id = $1 AND created_at >= now() - interval '${interval}'
+     GROUP BY 1
+     ORDER BY freq DESC
+     LIMIT 10
+  `, params);
+
   res.json({
     range: req.query.range || '7d',
     totals: totalRes.rows[0],
     daily: dailyRes.rows,
     top_questions: topRes.rows,
+    top_pages: topPagesRes.rows,
   });
 }));
 
@@ -576,7 +618,7 @@ router.get('/closest-match', requireAdmin, asyncHandler(async (req, res) => {
 // edit/approve. Uses BYOK Anthropic key. Independent of bot_llm_enabled —
 // this is an admin authoring tool, not user-facing inference.
 // ════════════════════════════════════════════════════════════════════════
-router.post('/suggest-answer', requireAdmin, asyncHandler(async (req, res) => {
+router.post('/suggest-answer', requireAdmin, tenantHeavyLimiter, asyncHandler(async (req, res) => {
   const { question } = req.body || {};
   if (!question || !question.trim()) {
     return res.status(400).json({ error: 'প্রশ্ন দিন' });
@@ -611,6 +653,180 @@ router.post('/suggest-answer', requireAdmin, asyncHandler(async (req, res) => {
   }
 
   res.json({ suggested_answer: result.text, tokens_in: result.tokensIn, tokens_out: result.tokensOut });
+}));
+
+// ════════════════════════════════════════════════════════════════════════
+// GET /:id/history — admin: previous versions of a Q&A entry
+// (most recent change first; includes 'delete' snapshots for tombstones)
+// ════════════════════════════════════════════════════════════════════════
+router.get('/:id/history', requireAdmin, asyncHandler(async (req, res) => {
+  const r = await supabase.pool.query(`
+    SELECT h.id, h.knowledge_id, h.question, h.answer, h.keywords, h.category,
+           h.min_role, h.query_type, h.permission_required, h.is_active,
+           h.change_type, h.changed_at, u.name AS changed_by_name
+      FROM bot_knowledge_history h
+      LEFT JOIN users u ON u.id = h.changed_by
+     WHERE h.agency_id = $1 AND h.knowledge_id = $2
+     ORDER BY h.changed_at DESC
+     LIMIT 50
+  `, [req.user.agency_id, req.params.id]);
+  res.json(r.rows);
+}));
+
+// ════════════════════════════════════════════════════════════════════════
+// GET /export — admin: dump all this agency's bot_knowledge as JSON
+// ════════════════════════════════════════════════════════════════════════
+router.get('/export', requireAdmin, asyncHandler(async (req, res) => {
+  const { data } = await supabase.from('bot_knowledge')
+    .select('question, answer, keywords, category, min_role, query_type, permission_required, is_active, is_seed, hits, created_at, updated_at')
+    .eq('agency_id', req.user.agency_id)
+    .order('created_at', { ascending: false });
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition',
+    `attachment; filename="bot_knowledge_${new Date().toISOString().slice(0, 10)}.json"`);
+  res.json({
+    exported_at: new Date().toISOString(),
+    agency_id: req.user.agency_id,
+    count: (data || []).length,
+    entries: data || [],
+  });
+}));
+
+// ════════════════════════════════════════════════════════════════════════
+// POST /import — admin: bulk add/update Q&A from CSV or JSON.
+// Body: { format: 'csv'|'json', content: string, mode: 'append'|'replace' }
+//   - csv columns (header required): question,answer,keywords,category,min_role,query_type,permission_required,is_active
+//     keywords: pipe-separated ("visitor|ভিজিটর|নতুন")
+//   - json: array of {question, answer, ...} objects (same shape as /export entries)
+//   - mode='append'  → only add (skip if same question already exists)
+//   - mode='replace' → delete all NON-seed entries first, then insert (seeds preserved)
+// Returns { added, skipped, errors:[...] }
+// ════════════════════════════════════════════════════════════════════════
+function parseCsv(text) {
+  // Minimal RFC4180-ish CSV parser. Handles quoted fields with commas/quotes.
+  const rows = [];
+  let i = 0, field = "", row = [], inQuotes = false;
+  while (i < text.length) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"' && text[i + 1] === '"') { field += '"'; i += 2; continue; }
+      if (ch === '"') { inQuotes = false; i++; continue; }
+      field += ch; i++; continue;
+    }
+    if (ch === '"') { inQuotes = true; i++; continue; }
+    if (ch === ",") { row.push(field); field = ""; i++; continue; }
+    if (ch === "\r") { i++; continue; }
+    if (ch === "\n") { row.push(field); rows.push(row); row = []; field = ""; i++; continue; }
+    field += ch; i++;
+  }
+  if (field || row.length) { row.push(field); rows.push(row); }
+  if (!rows.length) return [];
+
+  const header = rows[0].map(h => h.trim().toLowerCase());
+  const out = [];
+  for (let r = 1; r < rows.length; r++) {
+    if (rows[r].length === 1 && rows[r][0] === "") continue; // blank line
+    const obj = {};
+    header.forEach((h, j) => { obj[h] = rows[r][j] !== undefined ? String(rows[r][j]).trim() : ""; });
+    out.push(obj);
+  }
+  return out;
+}
+
+router.post('/import', requireAdmin, asyncHandler(async (req, res) => {
+  const { format = "json", content = "", mode = "append" } = req.body || {};
+  if (!content) return res.status(400).json({ error: 'কোনো ডাটা নেই' });
+  if (!["json", "csv"].includes(format)) return res.status(400).json({ error: 'format must be json|csv' });
+  if (!["append", "replace"].includes(mode)) return res.status(400).json({ error: 'mode must be append|replace' });
+
+  // Parse
+  let entries;
+  try {
+    if (format === "json") {
+      const parsed = typeof content === "string" ? JSON.parse(content) : content;
+      entries = Array.isArray(parsed) ? parsed : (parsed.entries || []);
+    } else {
+      const rows = parseCsv(String(content));
+      entries = rows.map(r => ({
+        ...r,
+        keywords: r.keywords ? String(r.keywords).split("|").map(s => s.trim()).filter(Boolean) : [],
+        is_active: r.is_active === "false" || r.is_active === "0" ? false : true,
+      }));
+    }
+  } catch (err) {
+    return res.status(400).json({ error: 'Parse ব্যর্থ: ' + err.message });
+  }
+
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return res.status(400).json({ error: 'কোনো valid entry নেই' });
+  }
+  if (entries.length > 1000) {
+    return res.status(400).json({ error: 'একসাথে সর্বোচ্চ ১০০০ entry import করা যাবে' });
+  }
+
+  const errors = [];
+  let added = 0, skipped = 0;
+
+  // Replace mode: wipe non-seed entries first
+  if (mode === "replace") {
+    await supabase.pool.query(
+      "DELETE FROM bot_knowledge WHERE agency_id = $1 AND is_seed = FALSE",
+      [req.user.agency_id]
+    );
+  }
+
+  // Build a set of existing questions to dedupe in append mode
+  let existingQuestions = new Set();
+  if (mode === "append") {
+    const r = await supabase.pool.query(
+      "SELECT question FROM bot_knowledge WHERE agency_id = $1",
+      [req.user.agency_id]
+    );
+    existingQuestions = new Set(r.rows.map(x => x.question.trim().toLowerCase()));
+  }
+
+  for (const e of entries) {
+    const question = String(e.question || "").trim();
+    const answer = String(e.answer || "").trim();
+    if (!question || !answer) {
+      errors.push({ question: question || "(empty)", reason: "প্রশ্ন বা উত্তর নেই" });
+      continue;
+    }
+    if (mode === "append" && existingQuestions.has(question.toLowerCase())) {
+      skipped++;
+      continue;
+    }
+    try {
+      await supabase.from('bot_knowledge').insert({
+        agency_id: req.user.agency_id,
+        question: question.slice(0, 500),
+        answer: answer.slice(0, 5000),
+        keywords: Array.isArray(e.keywords)
+          ? e.keywords.map(s => String(s).trim()).filter(Boolean).slice(0, 30)
+          : [],
+        category: e.category ? String(e.category).trim().slice(0, 50) : null,
+        min_role: e.min_role || null,
+        query_type: e.query_type || null,
+        permission_required: e.permission_required || null,
+        is_active: e.is_active !== false,
+        is_seed: false,
+        created_by: req.user.id,
+      });
+      added++;
+      existingQuestions.add(question.toLowerCase());
+    } catch (err) {
+      errors.push({ question: question.slice(0, 60), reason: err.message });
+    }
+  }
+
+  logActivity({
+    agencyId: req.user.agency_id, userId: req.user.id, action: 'create',
+    module: 'help-bot', recordId: null,
+    description: `Bot KB bulk import (${mode}): ${added} added, ${skipped} skipped, ${errors.length} errors`,
+    ip: req.ip,
+  }).catch(() => {});
+
+  res.json({ added, skipped, errors: errors.slice(0, 50), total_processed: entries.length });
 }));
 
 module.exports = router;

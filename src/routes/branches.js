@@ -15,6 +15,7 @@ const asyncHandler = require("../lib/asyncHandler");
 const { checkPermission } = require("../middleware/checkPermission");
 const { enforceLimit } = require("../middleware/subscriptionGuard");
 const { logActivity } = require("../lib/activityLog");
+const { encryptSensitiveFields, decryptMany, decryptSensitiveFields } = require("../lib/crypto");
 const cache = require("../lib/cache");
 const router = express.Router();
 router.use(auth);
@@ -26,7 +27,7 @@ router.get("/", asyncHandler(async (req, res) => {
     .eq("agency_id", req.user.agency_id)
     .order("is_hq", { ascending: false }); // HQ আগে
   if (error) return res.status(500).json({ error: "সার্ভার ত্রুটি" });
-  res.json(data || []);
+  res.json(decryptMany(data || []));
 }));
 
 // GET /api/branches/:id
@@ -34,7 +35,7 @@ router.get("/:id", asyncHandler(async (req, res) => {
   const { data, error } = await supabase.from("branches")
     .select("*").eq("id", req.params.id).eq("agency_id", req.user.agency_id).single();
   if (error) return res.status(404).json({ error: "Branch পাওয়া যায়নি" });
-  res.json(data);
+  res.json(decryptSensitiveFields(data));
 }));
 
 // POST /api/branches — নতুন branch (subscription tier max_branches enforce)
@@ -42,11 +43,11 @@ router.post("/", checkPermission("settings", "write"), enforceLimit("branches"),
   const { name, name_bn, city, address, address_bn, phone, email, manager, is_hq } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: "Branch নাম দিন" });
 
-  const { data, error } = await supabase.from("branches").insert({
+  const { data, error } = await supabase.from("branches").insert(encryptSensitiveFields({
     agency_id: req.user.agency_id,
     name: name.trim(), name_bn, city, address, address_bn,
     phone, email, manager, is_hq: !!is_hq,
-  }).select().single();
+  })).select().single();
 
   if (error) { console.error("[DB]", error.message); return res.status(400).json({ error: error.message?.includes("unique") ? "এই নামে branch আছে" : "সার্ভার ত্রুটি" }); }
 
@@ -68,7 +69,7 @@ router.patch("/:id", checkPermission("settings", "write"), asyncHandler(async (r
     }
   }
 
-  const updates = { ...req.body, updated_at: new Date().toISOString() };
+  const updates = encryptSensitiveFields({ ...req.body, updated_at: new Date().toISOString() });
   const { data, error } = await supabase.from("branches")
     .update(updates).eq("id", req.params.id).eq("agency_id", req.user.agency_id).select().single();
   if (error) return res.status(400).json({ error: "সার্ভার ত্রুটি" });
@@ -101,7 +102,7 @@ router.delete("/:id", checkPermission("settings", "delete"), asyncHandler(async 
 router.get("/by-name/:name", asyncHandler(async (req, res) => {
   const { data } = await supabase.from("branches")
     .select("*").eq("agency_id", req.user.agency_id).eq("name", req.params.name).single();
-  res.json(data || null);
+  res.json(data ? decryptSensitiveFields(data) : null);
 }));
 
 module.exports = router;
