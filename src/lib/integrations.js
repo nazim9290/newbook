@@ -136,15 +136,34 @@ async function getAgencyTier(agencyId) {
   return rows[0]?.plan || "starter";
 }
 
+// Per-service quota key in subscription_plans.features.platform_quota.
+// Different services use different units (monthly call count vs storage GB
+// vs no quota concept), so they map to different keys — or to null when
+// platform-quota enforcement doesn't apply (R2 storage is Cloudflare-billed
+// by GB; Stripe has no quota concept; tier_required is enough gating).
+const QUOTA_KEY = {
+  anthropic: "anthropic",        // monthly Claude API calls
+  smtp:      "smtp_per_day",     // daily emails (×30 for monthly comparison below)
+  r2:        null,                // GB-based; Cloudflare bills platform directly
+  stripe:    null,                // no quota concept; tier_required gates BYOK
+};
+
 async function getPlatformQuota(tier, service) {
+  const key = QUOTA_KEY[service];
+  if (key === null) return -1; // -1 = unlimited (no quota enforcement)
+  if (key === undefined) return 0; // Unknown service — block
+
   const { rows } = await supabase.pool.query(
     `SELECT features->'platform_quota'->>$1 AS quota FROM subscription_plans WHERE code = $2`,
-    [service, tier]
+    [key, tier]
   );
   const raw = rows[0]?.quota;
   if (raw === null || raw === undefined) return 0;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : 0;
+  let n = Number(raw);
+  if (!Number.isFinite(n)) return 0;
+  // smtp quota is per-day; resolver compares against monthly usage → ×30
+  if (service === "smtp" && n > 0) n = n * 30;
+  return n;
 }
 
 async function getMonthlyUsage(agencyId, service) {
