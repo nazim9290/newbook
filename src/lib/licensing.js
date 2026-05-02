@@ -56,7 +56,7 @@ async function fetchLicense() {
       .eq('instance_id', INSTANCE_ID)
       .order('issued_at', { ascending: false })
       .limit(1)
-      .maybeSingle();
+      .single();
 
     if (error) {
       // Table not yet migrated — fall back silently
