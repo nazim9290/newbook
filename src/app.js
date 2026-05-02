@@ -262,7 +262,10 @@ app.use("/api/ocr", heavyLimiter, require("./routes/ocr"));                     
 app.use("/api/analytics", require("./routes/analytics"));         // ফিচার ব্যবহার ট্র্যাকিং
 app.use("/api/subscriptions", require("./routes/subscriptions")); // সাবস্ক্রিপশন — plans, current, usage (Phase 1: read-only)
 app.use("/api/billing", require("./routes/billing"));             // বিলিং — invoices, payments, summary
-app.use("/api/system", require("./routes/system"));               // System info — license, deployment mode (Phase 0)
+app.use("/api/system", require("./routes/system"));               // System info — license, deployment mode (Phase 0/2)
+app.use("/api/ops", require("./routes/ops"));                     // Operator console — heartbeat ingress + dashboard (Phase 3)
+app.use("/api/onboarding", require("./routes/onboarding"));       // Excel/CSV import wizard (Phase 4)
+app.use("/api/exit", require("./routes/exit"));                   // Customer data export (Phase 5)
 // ── Owner Power-Up Pack (Phase 1) ──
 app.use("/api/agency-settings", require("./routes/agency-settings")); // owner-tunable thresholds + provider creds
 app.use("/api/backup", require("./routes/backup"));               // offsite backup admin (super_admin)
@@ -275,6 +278,13 @@ app.use("/api/push", require("./routes/push"));                   // web push su
 app.use("/api/feedback", require("./routes/feedback"));           // NPS / reviews (public + auth)
 app.use("/api/broadcasts", require("./routes/broadcasts"));       // bulk WhatsApp/SMS (disabled until configured)
 app.use("/api/notification-subscriptions", require("./routes/notification-subscriptions")); // user opt-in/out
+// ── Phase 4 + 5 + 6 ──
+app.use("/api/ai-assistant", require("./routes/ai-assistant"));   // AI counselor chat (BYOK Anthropic)
+app.use("/api/lead-scoring", require("./routes/lead-scoring"));   // visitor conversion probability
+app.use("/api/data-export", require("./routes/data-export"));     // GDPR-style per-student/agency dump
+app.use("/api/webhooks", require("./routes/webhooks"));           // inbound webhook hub (lead capture)
+app.use("/api/school-match", require("./routes/school-match"));   // smart school matching per student
+app.use("/api/audit-search", require("./routes/audit-search"));   // activity_log search + CSV export
 
 // ── 404 Handler — route না পেলে error (path leak করবে না) ──
 app.use((req, res) => {
@@ -384,6 +394,16 @@ app.listen(PORT, async () => {
       dailyOnce: false,
     });
 
+    // Broadcast queue worker — every 2 minutes
+    const broadcastWorker = require("./lib/broadcastWorker");
+    scheduler.register({
+      name: "broadcast_worker",
+      runAt: (now) => now.getUTCMinutes() % 2 === 0,
+      handler: () => broadcastWorker.runWorker(),
+      lockKey: 9876500008,
+      dailyOnce: false,
+    });
+
     scheduler.startAll();
   } catch (e) {
     console.error("[OwnerPack Cron Init]", e.message);
@@ -396,4 +416,9 @@ app.listen(PORT, async () => {
     const strict = process.env.LICENSE_STRICT === "true";
     await bootIntegrityCheck({ strict });
   } catch (e) { console.error("[License Boot]", e.message); }
+  // Phase 3: heartbeat sender — Tier A/B/C instances phone home every 15 min.
+  // No-op when DEPLOYMENT_MODE=shared-saas (central calls itself = pointless).
+  try {
+    require("./lib/heartbeatSender").start();
+  } catch (e) { console.error("[Heartbeat Init]", e.message); }
 });

@@ -1,0 +1,29 @@
+{
+  "_comment": "Phase 2 update manifest — host this as static JSON at https://updates.agencybook.net/v1/manifest.json. Update on every release.",
+  "channels": {
+    "stable": {
+      "version": "1.0.0",
+      "released_at": "2026-05-02T00:00:00Z",
+      "is_critical": false,
+      "release_notes_url": "https://docs.agencybook.net/changelog#1-0-0",
+      "minimum_version_to_update_from": "0.9.0",
+      "estimated_downtime_seconds": 5
+    },
+    "beta": {
+      "version": "1.1.0-beta.1",
+      "released_at": "2026-05-15T00:00:00Z",
+      "is_critical": false,
+      "release_notes_url": "https://docs.agencybook.net/changelog#1-1-0-beta-1",
+      "minimum_version_to_update_from": "1.0.0",
+      "estimated_downtime_seconds": 5
+    },
+    "lts": {
+      "version": "0.9.5",
+      "released_at": "2026-04-15T00:00:00Z",
+      "is_critical": false,
+      "release_notes_url": "https://docs.agencybook.net/changelog#0-9-5-lts",
+      "minimum_version_to_update_from": "0.9.0",
+      "estimated_downtime_seconds": 5
+    }
+  }
+}
