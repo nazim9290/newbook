@@ -65,12 +65,13 @@ async function autoNpsInvite() {
           await dispatchToTopic({
             agencyId: agency.id,
             topic: "feedback_invite",
-            template: "anomaly_alert",  // reuse template format
+            template: "feedback_invite",
             data: {
-              ruleType: "feedback_invite",
-              actorName: stu.name_en || stu.name_bn,
-              details: { token, link: `https://demo.agencybook.net/feedback/${token}`, school: stu.school_name },
-              agencyName: agency.name,
+              studentName: stu.name_en || stu.name_bn,
+              schoolName: stu.school_name,
+              link: `https://demo.agencybook.net/feedback/${token}`,
+              // Public feedback URL (admin can view in feedback page → student row)
+              url: `/reviews`,
             },
           });
         }
@@ -122,13 +123,11 @@ async function visaGrantedPush() {
     try {
       await dispatchToTopic({
         agencyId: stu.agency_id,
-        topic: "all",
-        template: "anomaly_alert",
+        topic: "visa_granted",
+        template: "visa_granted",
         data: {
-          ruleType: "🎉 Visa Granted",
-          actorName: stu.name_en || stu.name_bn,
-          details: { school: stu.school_name, message: "Student visa পেয়েছে — congratulate করুন!" },
-          agencyName: "",
+          studentName: stu.name_en || stu.name_bn,
+          schoolName: stu.school_name,
           url: `/students/${stu.id}`,
         },
       });
@@ -178,12 +177,12 @@ async function largePaymentPush() {
         await dispatchToTopic({
           agencyId: agency.id,
           topic: "payment",
-          template: "anomaly_alert",
+          template: "large_payment",
           data: {
-            ruleType: "💰 Large Payment Received",
-            actorName: p.name_en || p.name_bn || "—",
-            details: { amount: `৳${Number(p.amount).toLocaleString("en-IN")}`, method: p.method, date: p.date },
-            agencyName: agency.name,
+            studentName: p.name_en || p.name_bn || "—",
+            amount: `৳${Number(p.amount).toLocaleString("en-IN")}`,
+            method: p.method,
+            date: p.date,
             // Deep-link to the student so user can verify the payment in context
             url: p.student_id ? `/students/${p.student_id}` : "/accounts",
           },
@@ -228,12 +227,16 @@ async function dailySummary() {
       await dispatchToTopic({
         agencyId: agency.id,
         topic: "daily_summary",
-        template: "anomaly_alert",
+        template: "daily_summary",
         data: {
-          ruleType: "📊 Daily Summary",
-          actorName: agency.name,
-          details: { yesterday: summary, ...k },
-          agencyName: agency.name,
+          summary,
+          dateLabel: yesterdayStart.toISOString().slice(0, 10),
+          visitors: k.visitors,
+          new_students: k.new_students,
+          visas: k.visas,
+          revenue: Number(k.revenue),
+          // Deep-link to dashboard for full breakdown
+          url: "/dashboard",
         },
       });
       summarized++;

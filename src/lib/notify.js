@@ -89,6 +89,57 @@ const TEMPLATES = {
     html: `<p>Daily backup completed: <code>${filename}</code> (${size}). Retained for ${retentionDays} days.</p>`,
     text: `Backup OK: ${filename} (${size})`,
   }),
+
+  // ── Business event templates (new — replaces anomaly_alert misuse) ──
+  visa_granted: ({ studentName, schoolName }) => ({
+    subject: `🎉 ${studentName} visa পেয়েছে`,
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+        <h2 style="color:#10b981">🎉 Visa Granted</h2>
+        <p><b>${studentName}</b> visa পেয়েছে${schoolName ? ` — ${schoolName}` : ""}!</p>
+        <p style="color:#666">Pre-departure শুরু করুন।</p>
+      </div>`,
+    text: `🎉 ${studentName} visa পেয়েছে${schoolName ? ` (${schoolName})` : ""}। Pre-departure শুরু করুন।`,
+  }),
+
+  large_payment: ({ studentName, amount, method, date }) => ({
+    subject: `💰 Large payment received — ${amount}`,
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+        <h2 style="color:#0891b2">💰 Large Payment</h2>
+        <p><b>${studentName || "Unknown"}</b></p>
+        <p>Amount: <b>${amount}</b> · Method: ${method || "—"} · Date: ${date || "—"}</p>
+        <p style="color:#666">Receipt issue করতে ভুলবেন না।</p>
+      </div>`,
+    text: `💰 Large payment ${amount} from ${studentName || "Unknown"} (${method || "—"})`,
+  }),
+
+  daily_summary: ({ summary, visitors, new_students, visas, revenue, dateLabel }) => ({
+    subject: `📊 Daily summary — ${dateLabel || "Yesterday"}`,
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+        <h2 style="color:#7c3aed">📊 Daily Summary</h2>
+        <p>${summary}</p>
+        <ul>
+          <li>Visitors: <b>${visitors ?? 0}</b></li>
+          <li>নতুন student: <b>${new_students ?? 0}</b></li>
+          <li>Visa: <b>${visas ?? 0}</b></li>
+          <li>Collection: <b>৳${Number(revenue || 0).toLocaleString("en-IN")}</b></li>
+        </ul>
+      </div>`,
+    text: summary || "Daily summary",
+  }),
+
+  feedback_invite: ({ studentName, schoolName, link }) => ({
+    subject: `📝 ${studentName} — feedback invitation`,
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+        <h2 style="color:#0891b2">📝 Feedback Invitation</h2>
+        <p>${studentName}${schoolName ? ` (${schoolName})` : ""} জাপান পৌঁছেছে। তাকে feedback survey পাঠানো হয়েছে।</p>
+        <p><a href="${link}">${link}</a></p>
+      </div>`,
+    text: `${studentName} এর feedback invite — ${link}`,
+  }),
 };
 
 // ────────────────────────────────────────────────────────────
@@ -366,6 +417,8 @@ function _topicFromTemplate(template) {
   if (template === "backup_failed" || template === "backup_success") return "backup_failed";
   if (template === "feedback_invite") return "feedback_invite";
   if (template === "daily_summary") return "daily_summary";
+  if (template === "visa_granted") return "visa_granted";
+  if (template === "large_payment") return "payment";
   return "all";
 }
 
