@@ -19,7 +19,7 @@ const router = express.Router();
 router.use(auth);
 
 const VALID_CHANNELS = new Set(["email", "telegram", "push", "sms", "whatsapp"]);
-const VALID_TOPICS = new Set(["all", "doc_expiry", "anomaly", "backup_failed", "payment", "feedback_invite", "daily_summary"]);
+const VALID_TOPICS = new Set(["all", "doc_expiry", "anomaly", "backup_failed", "visa_granted", "payment", "feedback_invite", "daily_summary"]);
 
 // GET / — current user's subs
 router.get("/", asyncHandler(async (req, res) => {
